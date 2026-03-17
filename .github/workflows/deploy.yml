@@ -1,0 +1,48 @@
+name: Deploy Portal
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write production env
+        shell: bash
+        run: |
+          cat > infra/.env.production <<EOF
+          APP_DOMAIN=${{ secrets.APP_DOMAIN }}
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          EOF
+
+      - name: Copy repo to droplet
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "."
+          target: "/opt/ai-engineer-portal"
+          rm: true
+          strip_components: 0
+
+      - name: Deploy on droplet
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/ai-engineer-portal
+            chmod +x scripts/deploy-on-server.sh
+            docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml down || true
+            ./scripts/deploy-on-server.sh
