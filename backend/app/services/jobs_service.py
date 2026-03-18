@@ -219,9 +219,10 @@ def refresh_jobs(db: Session) -> list[JobPosting]:
 
     db.flush()
 
-    if len(fetched) >= MIN_LIVE_JOB_KEEP_COUNT:
+    if fetched:
         for seeded_job in db.scalars(select(JobPosting).where(JobPosting.is_seeded.is_(True))).all():
-            db.delete(seeded_job)
+            if len(fetched) >= MIN_LIVE_JOB_KEEP_COUNT:
+                db.delete(seeded_job)
         for live_job in db.scalars(select(JobPosting).where(JobPosting.is_seeded.is_(False), JobPosting.is_saved.is_(False))).all():
             if _normalize_url(live_job.source_url) not in fetched_urls:
                 db.delete(live_job)
