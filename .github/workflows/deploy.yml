@@ -4,11 +4,16 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: true
 
     steps:
       - name: Checkout
@@ -42,7 +47,8 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
+            set -e
             cd /opt/ai-engineer-portal
             chmod +x scripts/deploy-on-server.sh
-            docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml down || true
             ./scripts/deploy-on-server.sh
+            docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml ps
