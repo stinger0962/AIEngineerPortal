@@ -33,10 +33,14 @@ def apply_runtime_schema_patches(engine: Engine) -> None:
             if table_name not in existing_tables:
                 continue
             existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+            has_last_synced_at = "last_synced_at" in existing_columns
             for column_name, ddl in patches:
                 if column_name not in existing_columns:
                     connection.execute(text(ddl))
-            if "last_synced_at" in {column["name"] for column in inspect(engine).get_columns(table_name)}:
+                    existing_columns.add(column_name)
+                if column_name == "last_synced_at":
+                    has_last_synced_at = True
+            if has_last_synced_at:
                 connection.execute(
                     text(f"UPDATE {table_name} SET last_synced_at = CURRENT_TIMESTAMP WHERE last_synced_at IS NULL")
                 )
