@@ -64,6 +64,11 @@ ROLE_FILTER_TERMS = [
 ]
 
 
+def _contains_phrase(haystack: str, phrase: str) -> bool:
+    pattern = r"\b" + re.escape(phrase).replace(r"\ ", r"[\s/-]+") + r"\b"
+    return re.search(pattern, haystack) is not None
+
+
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "job"
@@ -255,7 +260,7 @@ def analyze_fit_for_text(user: User | None, headline: str, details: str) -> tupl
         "api": "API ownership",
     }
     for keyword, label in desired_matches.items():
-        if keyword in target_text:
+        if _contains_phrase(target_text, keyword):
             score += 6
             strengths.append(label)
 
@@ -268,14 +273,14 @@ def analyze_fit_for_text(user: User | None, headline: str, details: str) -> tupl
         "distributed": "Distributed systems depth",
     }
     for keyword, label in likely_gaps.items():
-        if keyword in target_text:
+        if _contains_phrase(target_text, keyword):
             gaps.append(label)
 
     if user:
-        if user.target_role.lower() in target_text:
+        if _contains_phrase(target_text, user.target_role.lower()):
             score += 10
         for area in user.preferences_json.get("preferred_topics", []):
-            if area.replace("-", " ") in target_text or area in target_text:
+            if _contains_phrase(target_text, area.replace("-", " ")) or _contains_phrase(target_text, area):
                 score += 5
 
     if not strengths:
@@ -355,7 +360,7 @@ def _normalize_tags(raw_tags: object, title: str, description: str) -> list[str]
 
     haystack = f"{title} {description}".lower()
     for keyword in JOB_RELEVANCE_WEIGHTS:
-        if keyword in haystack:
+        if _contains_phrase(haystack, keyword):
             tags.add(keyword.replace(" ", "-"))
     return sorted(tags)[:8]
 
@@ -380,19 +385,25 @@ def _strip_html(value: str | None) -> str:
 
 def _looks_like_relevant_role(title: str, description: str) -> bool:
     haystack = f"{title} {description}".lower()
-    return any(term in haystack for term in ROLE_FILTER_TERMS)
+    title_text = title.lower()
+    return any(_contains_phrase(title_text, term) for term in ROLE_FILTER_TERMS) or (
+        any(_contains_phrase(haystack, term) for term in ["rag", "retrieval", "agent", "evaluation", "llm"])
+        and any(_contains_phrase(haystack, term) for term in ["engineer", "developer", "architect"])
+    )
 
 
 def _score_job_relevance(title: str, description: str, tags: object, source_priority: float) -> int:
     haystack = f"{title} {description} {tags}".lower()
     score = 34 + int(source_priority * 14)
     for keyword, weight in JOB_RELEVANCE_WEIGHTS.items():
-        if keyword in haystack:
+        if _contains_phrase(haystack, keyword):
             score += weight
-    if "senior" in haystack or "staff" in haystack or "lead" in haystack:
+    if any(_contains_phrase(haystack, term) for term in ["senior", "staff", "lead"]):
         score += 5
-    if "remote" in haystack:
+    if _contains_phrase(haystack, "remote"):
         score += 3
+    if not _looks_like_relevant_role(title, description):
+        score -= 18
     return min(score, 99)
 
 

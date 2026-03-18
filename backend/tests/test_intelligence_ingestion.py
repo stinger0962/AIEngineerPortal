@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.services.jobs_service import _dedupe_and_rank_jobs
+from app.services.jobs_service import _dedupe_and_rank_jobs, _looks_like_relevant_role, _score_job_relevance
 from app.services.news_service import _dedupe_and_rank_news, _normalize_url
 
 
@@ -79,3 +79,11 @@ def test_job_dedupe_prefers_highest_relevance_for_same_role():
 
     assert len(deduped) == 1
     assert deduped[0]["relevance_score"] == 92
+
+
+def test_generic_fullstack_role_is_not_treated_as_ai_role():
+    title = "Senior Full-stack React Developer"
+    description = "Build product features with React, Python, and cloud tooling for startup clients."
+
+    assert _looks_like_relevant_role(title, description) is False
+    assert _score_job_relevance(title, description, ["react", "python"], 1.0) < 55
