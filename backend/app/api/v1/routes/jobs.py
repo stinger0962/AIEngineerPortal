@@ -7,7 +7,15 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas import FeedRefreshMetaOut, JobFitAnalysisOut, JobPostingOut
-from app.services.jobs_service import analyze_job_fit, get_job, get_jobs_refresh_meta, list_jobs, refresh_jobs, set_job_saved
+from app.services.jobs_service import (
+    analyze_job_fit,
+    get_job,
+    get_jobs_refresh_meta,
+    list_jobs,
+    refresh_jobs,
+    refresh_jobs_if_stale,
+    set_job_saved,
+)
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -19,7 +27,11 @@ def get_jobs(
     min_fit_score: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
 ) -> List[JobPostingOut]:
-    return [JobPostingOut.model_validate(job) for job in list_jobs(db, search, saved_only, min_fit_score)]
+    if not search and not saved_only and min_fit_score is None:
+        jobs = refresh_jobs_if_stale(db)
+    else:
+        jobs = list_jobs(db, search, saved_only, min_fit_score)
+    return [JobPostingOut.model_validate(job) for job in jobs]
 
 
 @router.post("/refresh", response_model=List[JobPostingOut])
@@ -29,6 +41,7 @@ def refresh_jobs_feed(db: Session = Depends(get_db)) -> List[JobPostingOut]:
 
 @router.get("/meta", response_model=FeedRefreshMetaOut)
 def get_jobs_meta(db: Session = Depends(get_db)) -> FeedRefreshMetaOut:
+    refresh_jobs_if_stale(db)
     return FeedRefreshMetaOut(**get_jobs_refresh_meta(db))
 
 

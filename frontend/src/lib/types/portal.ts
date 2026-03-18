@@ -177,4 +177,7 @@ export type FeedRefreshMeta = {
   live_item_count: number;
   seeded_item_count: number;
   refreshed_at: string;
+  is_stale: boolean;
+  refresh_window_hours: number;
+  auto_refresh_enabled: boolean;
 };

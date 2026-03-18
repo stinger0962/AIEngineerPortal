@@ -227,6 +227,9 @@ class FeedRefreshMetaOut(BaseModel):
     live_item_count: int
     seeded_item_count: int
     refreshed_at: datetime
+    is_stale: bool
+    refresh_window_hours: int
+    auto_refresh_enabled: bool
 
 
 class ProgressSnapshotOut(PortalBase):

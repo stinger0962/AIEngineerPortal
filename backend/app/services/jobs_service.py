@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from sqlalchemy import desc, or_, select
@@ -14,6 +14,7 @@ JOB_SOURCES = [
     {"source_name": "Remotive", "url": "https://remotive.com/api/remote-jobs?search=ai%20engineer"},
     {"source_name": "Arbeitnow", "url": "https://www.arbeitnow.com/api/job-board-api"},
 ]
+JOBS_AUTO_REFRESH_HOURS = 12
 
 
 def _slugify(value: str) -> str:
@@ -54,6 +55,9 @@ def get_jobs_refresh_meta(db: Session) -> dict:
         "live_item_count": live_count,
         "seeded_item_count": seeded_count,
         "refreshed_at": latest_sync,
+        "is_stale": _is_refresh_stale(latest_sync, JOBS_AUTO_REFRESH_HOURS),
+        "refresh_window_hours": JOBS_AUTO_REFRESH_HOURS,
+        "auto_refresh_enabled": True,
     }
 
 
@@ -119,6 +123,14 @@ def refresh_jobs(db: Session) -> list[JobPosting]:
         job.fit_score = fit_score
     db.commit()
     return list_jobs(db)
+
+
+def refresh_jobs_if_stale(db: Session) -> list[JobPosting]:
+    current_jobs = list_jobs(db)
+    latest_sync = max((job.last_synced_at for job in current_jobs), default=None)
+    if latest_sync and not _is_refresh_stale(latest_sync, JOBS_AUTO_REFRESH_HOURS):
+        return current_jobs
+    return refresh_jobs(db)
 
 
 def analyze_job_fit(db: Session, job_id: int) -> dict | None:
@@ -266,3 +278,9 @@ def _parse_job_datetime(value: object) -> datetime:
         except ValueError:
             pass
     return datetime.utcnow()
+
+
+def _is_refresh_stale(refreshed_at: datetime | None, refresh_window_hours: int) -> bool:
+    if refreshed_at is None:
+        return True
+    return refreshed_at <= datetime.utcnow() - timedelta(hours=refresh_window_hours)

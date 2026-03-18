@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas import FeedRefreshMetaOut, NewsItemOut
-from app.services.news_service import get_news_item, get_news_refresh_meta, list_news, refresh_news, set_news_saved
+from app.services.news_service import (
+    get_news_item,
+    get_news_refresh_meta,
+    list_news,
+    refresh_news,
+    refresh_news_if_stale,
+    set_news_saved,
+)
 
 router = APIRouter(prefix="/news", tags=["news"])
 
@@ -19,7 +26,11 @@ def get_news(
     saved_only: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> List[NewsItemOut]:
-    return [NewsItemOut.model_validate(item) for item in list_news(db, category, search, saved_only)]
+    if not category and not search and not saved_only:
+        items = refresh_news_if_stale(db)
+    else:
+        items = list_news(db, category, search, saved_only)
+    return [NewsItemOut.model_validate(item) for item in items]
 
 
 @router.post("/refresh", response_model=List[NewsItemOut])
@@ -29,6 +40,7 @@ def refresh_news_feed(db: Session = Depends(get_db)) -> List[NewsItemOut]:
 
 @router.get("/meta", response_model=FeedRefreshMetaOut)
 def get_news_meta(db: Session = Depends(get_db)) -> FeedRefreshMetaOut:
+    refresh_news_if_stale(db)
     return FeedRefreshMetaOut(**get_news_refresh_meta(db))
 
 

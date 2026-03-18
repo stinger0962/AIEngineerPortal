@@ -54,7 +54,9 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
             </div>
             <div className="rounded-2xl bg-cream p-4">
               <p className="text-xs uppercase tracking-[0.24em] text-ink/50">High-signal updates</p>
-              <p className="mt-2 text-3xl font-semibold text-ink">{items.filter((item) => item.signal_score >= 85).length}</p>
+              <p className="mt-2 text-3xl font-semibold text-ink">
+                {items.filter((item) => item.signal_score >= 85).length}
+              </p>
             </div>
             <div className="rounded-2xl bg-cream p-4">
               <p className="text-xs uppercase tracking-[0.24em] text-ink/50">Saved for later</p>
@@ -72,9 +74,15 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
         </div>
         <div className="rounded-2xl bg-white p-4 text-sm text-ink/70">
           <p>
-            Feed source: <span className="font-semibold text-ink">{meta.source}</span> · Live items {meta.live_item_count} · Seeded items {meta.seeded_item_count}
+            Feed source: <span className="font-semibold text-ink">{meta.source}</span> · Live items{" "}
+            {meta.live_item_count} · Seeded items {meta.seeded_item_count}
           </p>
           <p className="mt-2">Last sync: {new Date(meta.refreshed_at).toLocaleString()}</p>
+          <p className="mt-2">
+            Auto-refresh {meta.auto_refresh_enabled ? "enabled" : "disabled"} · Window{" "}
+            {meta.refresh_window_hours}h · Status{" "}
+            <span className="font-semibold text-ink">{meta.is_stale ? "stale" : "fresh"}</span>
+          </p>
         </div>
       </Panel>
 
@@ -91,7 +99,9 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
                 <h3 className="font-display text-2xl text-ink">{item.title}</h3>
                 <p className="mt-2 text-sm text-ink/70">{item.summary}</p>
               </div>
-              {item.is_saved ? <span className="rounded-full bg-mint px-3 py-1 text-xs font-semibold text-ink">Saved</span> : null}
+              {item.is_saved ? (
+                <span className="rounded-full bg-mint px-3 py-1 text-xs font-semibold text-ink">Saved</span>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               {item.tags_json.map((tag) => (
@@ -109,7 +119,11 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
               >
                 {item.is_saved ? "Saved" : activeSaveId === item.id ? "Saving..." : "Save for later"}
               </button>
-              <Link href={item.source_url} className="inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold" target="_blank">
+              <Link
+                href={item.source_url}
+                className="inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold"
+                target="_blank"
+              >
                 Open source
               </Link>
             </div>

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree
 
@@ -13,6 +13,7 @@ from app.models import NewsItem
 from app.seed.data import NEWS_ITEMS
 
 RSS_NAMESPACES = {"atom": "http://www.w3.org/2005/Atom"}
+NEWS_AUTO_REFRESH_HOURS = 6
 NEWS_FEEDS = [
     {"source_name": "Hugging Face", "url": "https://huggingface.co/blog/feed.xml", "category": "open-source"},
     {"source_name": "OpenAI", "url": "https://openai.com/news/rss.xml", "category": "model-release"},
@@ -73,6 +74,9 @@ def get_news_refresh_meta(db: Session) -> dict:
         "live_item_count": live_count,
         "seeded_item_count": seeded_count,
         "refreshed_at": latest_sync,
+        "is_stale": _is_refresh_stale(latest_sync, NEWS_AUTO_REFRESH_HOURS),
+        "refresh_window_hours": NEWS_AUTO_REFRESH_HOURS,
+        "auto_refresh_enabled": True,
     }
 
 
@@ -132,6 +136,14 @@ def refresh_news(db: Session) -> list[NewsItem]:
     return list_news(db)
 
 
+def refresh_news_if_stale(db: Session) -> list[NewsItem]:
+    current_items = list_news(db)
+    latest_sync = max((item.last_synced_at for item in current_items), default=None)
+    if latest_sync and not _is_refresh_stale(latest_sync, NEWS_AUTO_REFRESH_HOURS):
+        return current_items
+    return refresh_news(db)
+
+
 def _fetch_remote_news() -> list[dict]:
     items: list[dict] = []
     with httpx.Client(timeout=10.0, follow_redirects=True, headers={"User-Agent": "AIEngineerPortal/1.0"}) as client:
@@ -144,6 +156,12 @@ def _fetch_remote_news() -> list[dict]:
             items.extend(_parse_feed(feed["source_name"], feed["category"], response.text))
     items.sort(key=lambda item: item["published_at"], reverse=True)
     return items[:18]
+
+
+def _is_refresh_stale(refreshed_at: datetime | None, refresh_window_hours: int) -> bool:
+    if refreshed_at is None:
+        return True
+    return refreshed_at <= datetime.utcnow() - timedelta(hours=refresh_window_hours)
 
 
 def _parse_feed(source_name: str, category: str, xml_text: str) -> list[dict]:
