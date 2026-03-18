@@ -52,6 +52,20 @@ def seed_database(db: Session) -> None:
 
 
 def sync_learning_content(db: Session) -> None:
+    expected_path_slugs = {slug for _, slug, _, _, _ in PATHS}
+    expected_lesson_slugs = {payload["slug"] for payload in build_lessons()}
+
+    for completion in db.scalars(
+        select(LessonCompletion).join(Lesson, LessonCompletion.lesson_id == Lesson.id).where(Lesson.slug.not_in(expected_lesson_slugs))
+    ).all():
+        db.delete(completion)
+
+    for lesson in db.scalars(select(Lesson).where(Lesson.slug.not_in(expected_lesson_slugs))).all():
+        db.delete(lesson)
+
+    for path in db.scalars(select(LearningPath).where(LearningPath.slug.not_in(expected_path_slugs))).all():
+        db.delete(path)
+
     existing_paths = {path.slug: path for path in db.scalars(select(LearningPath)).all()}
     path_map: dict[str, LearningPath] = {}
     for order_index, (title, slug, description, level, estimated_hours) in enumerate(PATHS, start=1):
@@ -86,6 +100,10 @@ def sync_learning_content(db: Session) -> None:
 
 
 def sync_courses(db: Session) -> None:
+    expected_course_slugs = {payload["slug"] for payload in build_courses()}
+    for course in db.scalars(select(Course).where(Course.slug.not_in(expected_course_slugs))).all():
+        db.delete(course)
+
     existing_courses = {course.slug: course for course in db.scalars(select(Course)).all()}
     for payload in build_courses():
         course = existing_courses.get(payload["slug"])
@@ -102,6 +120,18 @@ def sync_courses(db: Session) -> None:
 
 
 def sync_exercises(db: Session) -> None:
+    expected_exercise_slugs = {payload["slug"] for payload in build_exercises()}
+
+    for attempt in db.scalars(
+        select(UserExerciseAttempt)
+        .join(Exercise, UserExerciseAttempt.exercise_id == Exercise.id)
+        .where(Exercise.slug.not_in(expected_exercise_slugs))
+    ).all():
+        db.delete(attempt)
+
+    for exercise in db.scalars(select(Exercise).where(Exercise.slug.not_in(expected_exercise_slugs))).all():
+        db.delete(exercise)
+
     existing_exercises = {exercise.slug: exercise for exercise in db.scalars(select(Exercise)).all()}
     for payload in build_exercises():
         exercise = existing_exercises.get(payload["slug"])
@@ -119,6 +149,10 @@ def sync_exercises(db: Session) -> None:
 
 
 def sync_knowledge_articles(db: Session) -> None:
+    expected_article_slugs = {payload["slug"] for payload in build_articles()}
+    for article in db.scalars(select(KnowledgeArticle).where(KnowledgeArticle.slug.not_in(expected_article_slugs))).all():
+        db.delete(article)
+
     existing_articles = {article.slug: article for article in db.scalars(select(KnowledgeArticle)).all()}
     for payload in build_articles():
         article = existing_articles.get(payload["slug"])
@@ -134,6 +168,10 @@ def sync_knowledge_articles(db: Session) -> None:
 
 
 def sync_interview_questions(db: Session) -> None:
+    expected_question_texts = {payload["question_text"] for payload in build_interview_questions()}
+    for question in db.scalars(select(InterviewQuestion).where(InterviewQuestion.question_text.not_in(expected_question_texts))).all():
+        db.delete(question)
+
     existing_questions = {
         question.question_text: question for question in db.scalars(select(InterviewQuestion)).all()
     }
