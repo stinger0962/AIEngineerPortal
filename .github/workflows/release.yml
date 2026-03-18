@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -12,8 +15,36 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build release notes
+        id: notes
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          previous_tag="$(git tag --sort=-creatordate | grep -vx "$tag" | head -n 1 || true)"
+          {
+            echo "# ${tag}"
+            echo
+            echo "## Summary"
+            echo
+            if [ -n "$previous_tag" ]; then
+              git log --pretty=format:"- %s" "${previous_tag}..${tag}"
+            else
+              git log --pretty=format:"- %s"
+            fi
+            echo
+            echo
+            echo "## Deployment"
+            echo
+            echo "- Target: https://portal.leipan.cc"
+            echo "- Trigger: Git tag \`${tag}\`"
+            echo "- Delivery: GitHub Actions deploy workflow"
+          } > release-notes.md
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
