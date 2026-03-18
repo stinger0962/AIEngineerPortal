@@ -29,7 +29,7 @@ jobs:
           script: |
             set -e
             mkdir -p /opt/ai-engineer-portal/infra
-            cat > /opt/ai-engineer-portal/infra/.env.production <<EOF
+            cat > /opt/ai-engineer-portal/infra/.env.production <<'EOF'
             APP_DOMAIN=${{ secrets.APP_DOMAIN }}
             POSTGRES_DB=${{ secrets.POSTGRES_DB }}
             POSTGRES_USER=${{ secrets.POSTGRES_USER }}
@@ -41,7 +41,7 @@ jobs:
               rm -rf /opt/ai-engineer-portal
               git clone "${REPO_URL}" /opt/ai-engineer-portal
               mkdir -p /opt/ai-engineer-portal/infra
-              cat > /opt/ai-engineer-portal/infra/.env.production <<EOF
+              cat > /opt/ai-engineer-portal/infra/.env.production <<'EOF'
               APP_DOMAIN=${{ secrets.APP_DOMAIN }}
               POSTGRES_DB=${{ secrets.POSTGRES_DB }}
               POSTGRES_USER=${{ secrets.POSTGRES_USER }}
