@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 from sqlalchemy import desc, or_, select
@@ -10,16 +11,77 @@ from sqlalchemy.orm import Session
 from app.models import JobPosting, User
 from app.seed.data import JOB_POSTINGS
 
-JOB_SOURCES = [
-    {"source_name": "Remotive", "url": "https://remotive.com/api/remote-jobs?search=ai%20engineer"},
-    {"source_name": "Arbeitnow", "url": "https://www.arbeitnow.com/api/job-board-api"},
-]
 JOBS_AUTO_REFRESH_HOURS = 12
+MAX_JOB_ITEMS = 18
+MIN_LIVE_JOB_KEEP_COUNT = 5
+
+JOB_SOURCES = [
+    {
+        "source_name": "Remotive",
+        "url": "https://remotive.com/api/remote-jobs",
+        "params": [{"search": value} for value in ["ai engineer", "applied ai", "llm engineer", "rag engineer"]],
+        "priority": 1.0,
+    },
+    {
+        "source_name": "Arbeitnow",
+        "url": "https://www.arbeitnow.com/api/job-board-api",
+        "params": [{}],
+        "priority": 0.8,
+    },
+]
+
+JOB_RELEVANCE_WEIGHTS = {
+    "ai engineer": 18,
+    "applied ai": 16,
+    "llm engineer": 16,
+    "machine learning engineer": 10,
+    "rag": 14,
+    "retrieval": 12,
+    "agent": 12,
+    "agents": 12,
+    "evaluation": 10,
+    "python": 8,
+    "fastapi": 7,
+    "next.js": 6,
+    "nextjs": 6,
+    "api": 5,
+    "deployment": 8,
+    "observability": 8,
+    "platform": 6,
+    "inference": 8,
+    "prompt": 5,
+    "tooling": 5,
+}
+
+ROLE_FILTER_TERMS = [
+    "ai engineer",
+    "applied ai",
+    "llm engineer",
+    "machine learning engineer",
+    "ml engineer",
+    "platform engineer",
+    "software engineer, ai",
+]
 
 
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "job"
+
+
+def _normalize_url(value: str) -> str:
+    parsed = urlparse(value.strip())
+    filtered_query = [
+        (key, item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=False)
+        if not key.lower().startswith("utm_")
+    ]
+    normalized_path = parsed.path.rstrip("/") or "/"
+    return urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), normalized_path, "", urlencode(filtered_query), ""))
+
+
+def _job_identity_key(company: str, title: str) -> str:
+    return _slugify(f"{company}-{title}")[:180]
 
 
 def list_jobs(
@@ -49,8 +111,14 @@ def get_jobs_refresh_meta(db: Session) -> dict:
     latest_sync = max((item.last_synced_at for item in items), default=datetime.utcnow())
     live_count = sum(1 for item in items if not item.is_seeded)
     seeded_count = sum(1 for item in items if item.is_seeded)
+    if live_count and seeded_count:
+        source = "mixed"
+    elif live_count:
+        source = "live"
+    else:
+        source = "seeded"
     return {
-        "source": "live" if live_count else "seeded",
+        "source": source,
         "item_count": len(items),
         "live_item_count": live_count,
         "seeded_item_count": seeded_count,
@@ -100,9 +168,15 @@ def refresh_jobs(db: Session) -> list[JobPosting]:
 
     user = db.scalar(select(User).limit(1))
     sync_time = datetime.utcnow()
-    existing = {item.source_url: item for item in db.scalars(select(JobPosting)).all()}
+    existing_items = db.scalars(select(JobPosting)).all()
+    existing_by_url = {_normalize_url(item.source_url): item for item in existing_items}
+    existing_by_identity = {_job_identity_key(item.company_name, item.title): item for item in existing_items}
+
     for payload in fetched:
-        job = existing.get(payload["source_url"])
+        normalized_url = _normalize_url(payload["source_url"])
+        job = existing_by_url.get(normalized_url) or existing_by_identity.get(
+            _job_identity_key(payload["company_name"], payload["title"])
+        )
         if not job:
             job = JobPosting(source_url=payload["source_url"], slug=payload["slug"])
             db.add(job)
@@ -113,6 +187,7 @@ def refresh_jobs(db: Session) -> list[JobPosting]:
         job.location = payload["location"]
         job.employment_type = payload["employment_type"]
         job.summary = payload["summary"]
+        job.source_url = normalized_url
         job.description_md = payload["description_md"]
         job.published_at = payload["published_at"]
         job.tags_json = payload["tags_json"]
@@ -120,7 +195,14 @@ def refresh_jobs(db: Session) -> list[JobPosting]:
         job.last_synced_at = sync_time
         _, gaps, _, fit_score = analyze_fit_for_text(user, f"{job.title} {job.summary}", job.description_md)
         job.skill_gaps_json = gaps
-        job.fit_score = fit_score
+        job.fit_score = max(payload["relevance_score"], fit_score)
+
+    db.flush()
+
+    if len(fetched) >= MIN_LIVE_JOB_KEEP_COUNT:
+        for seeded_job in db.scalars(select(JobPosting).where(JobPosting.is_seeded.is_(True))).all():
+            db.delete(seeded_job)
+
     db.commit()
     return list_jobs(db)
 
@@ -169,6 +251,8 @@ def analyze_fit_for_text(user: User | None, headline: str, details: str) -> tupl
         "deployment": "Deployment",
         "fastapi": "FastAPI / backend APIs",
         "nextjs": "Next.js / frontend systems",
+        "platform": "Platform thinking",
+        "api": "API ownership",
     }
     for keyword, label in desired_matches.items():
         if keyword in target_text:
@@ -181,6 +265,7 @@ def analyze_fit_for_text(user: User | None, headline: str, details: str) -> tupl
         "deep learning": "Deep learning breadth",
         "pytorch": "PyTorch practice",
         "airflow": "Workflow orchestration",
+        "distributed": "Distributed systems depth",
     }
     for keyword, label in likely_gaps.items():
         if keyword in target_text:
@@ -206,20 +291,18 @@ def _fetch_remote_jobs() -> list[dict]:
     results: list[dict] = []
     with httpx.Client(timeout=12.0, follow_redirects=True, headers={"User-Agent": "AIEngineerPortal/1.0"}) as client:
         for source in JOB_SOURCES:
-            try:
-                response = client.get(source["url"])
-                response.raise_for_status()
-                payload = response.json()
-            except Exception:
-                continue
-            results.extend(_parse_jobs_payload(source["source_name"], payload))
-    deduped: dict[str, dict] = {}
-    for item in results:
-        deduped[item["source_url"]] = item
-    return list(deduped.values())[:18]
+            for params in source["params"]:
+                try:
+                    response = client.get(source["url"], params=params)
+                    response.raise_for_status()
+                    payload = response.json()
+                except Exception:
+                    continue
+                results.extend(_parse_jobs_payload(source, payload))
+    return _dedupe_and_rank_jobs(results)
 
 
-def _parse_jobs_payload(source_name: str, payload: dict | list) -> list[dict]:
+def _parse_jobs_payload(source: dict, payload: dict | list) -> list[dict]:
     jobs: list[dict] = []
     raw_jobs = payload.get("jobs", payload) if isinstance(payload, dict) else payload
     if not isinstance(raw_jobs, list):
@@ -238,30 +321,54 @@ def _parse_jobs_payload(source_name: str, payload: dict | list) -> list[dict]:
         published_raw = raw.get("publication_date") or raw.get("created_at") or raw.get("date")
         if not title or not company or not url:
             continue
+
+        description_text = _strip_html(description)
+        relevance_score = _score_job_relevance(title, description_text, tags, source["priority"])
+        if relevance_score < 55 or not _looks_like_relevant_role(title, description_text):
+            continue
+
         jobs.append(
             {
-                "source_name": source_name,
+                "source_name": source["source_name"],
                 "title": title,
-                "slug": _slugify(f"{source_name}-{company}-{title}"),
+                "slug": _slugify(f"{source['source_name']}-{company}-{title}"),
                 "company_name": company,
                 "location": str(location),
-                "employment_type": str(employment_type),
-                "summary": _strip_html(description)[:280],
-                "source_url": url,
-                "description_md": _strip_html(description)[:2000],
+                "employment_type": _normalize_employment_type(str(employment_type)),
+                "summary": description_text[:280],
+                "source_url": _normalize_url(url),
+                "description_md": description_text[:2500],
                 "published_at": _parse_job_datetime(published_raw),
-                "tags_json": _normalize_tags(tags),
+                "tags_json": _normalize_tags(tags, title, description_text),
+                "relevance_score": relevance_score,
             }
         )
     return jobs
 
 
-def _normalize_tags(raw_tags: object) -> list[str]:
+def _normalize_tags(raw_tags: object, title: str, description: str) -> list[str]:
+    tags: set[str] = set()
     if isinstance(raw_tags, list):
-        return [str(tag).lower() for tag in raw_tags][:8]
-    if isinstance(raw_tags, str):
-        return [part.strip().lower() for part in raw_tags.split(",") if part.strip()][:8]
-    return []
+        tags.update(str(tag).lower() for tag in raw_tags[:8])
+    elif isinstance(raw_tags, str):
+        tags.update(part.strip().lower() for part in raw_tags.split(",") if part.strip())
+
+    haystack = f"{title} {description}".lower()
+    for keyword in JOB_RELEVANCE_WEIGHTS:
+        if keyword in haystack:
+            tags.add(keyword.replace(" ", "-"))
+    return sorted(tags)[:8]
+
+
+def _normalize_employment_type(raw_value: str) -> str:
+    value = raw_value.lower()
+    if "full" in value:
+        return "full-time"
+    if "part" in value:
+        return "part-time"
+    if "contract" in value:
+        return "contract"
+    return value or "unknown"
 
 
 def _strip_html(value: str | None) -> str:
@@ -269,6 +376,45 @@ def _strip_html(value: str | None) -> str:
         return ""
     text = re.sub(r"<[^>]+>", " ", value)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _looks_like_relevant_role(title: str, description: str) -> bool:
+    haystack = f"{title} {description}".lower()
+    return any(term in haystack for term in ROLE_FILTER_TERMS)
+
+
+def _score_job_relevance(title: str, description: str, tags: object, source_priority: float) -> int:
+    haystack = f"{title} {description} {tags}".lower()
+    score = 34 + int(source_priority * 14)
+    for keyword, weight in JOB_RELEVANCE_WEIGHTS.items():
+        if keyword in haystack:
+            score += weight
+    if "senior" in haystack or "staff" in haystack or "lead" in haystack:
+        score += 5
+    if "remote" in haystack:
+        score += 3
+    return min(score, 99)
+
+
+def _dedupe_and_rank_jobs(items: list[dict]) -> list[dict]:
+    deduped: dict[str, dict] = {}
+    identities_seen: set[str] = set()
+
+    ranked = sorted(items, key=_job_sort_key, reverse=True)
+    for item in ranked:
+        url_key = item["source_url"]
+        identity_key = _job_identity_key(item["company_name"], item["title"])
+        if url_key in deduped or identity_key in identities_seen:
+            continue
+        deduped[url_key] = item
+        identities_seen.add(identity_key)
+        if len(deduped) >= MAX_JOB_ITEMS:
+            break
+    return list(deduped.values())
+
+
+def _job_sort_key(item: dict) -> tuple[int, datetime]:
+    return item["relevance_score"], item["published_at"]
 
 
 def _parse_job_datetime(value: object) -> datetime:
