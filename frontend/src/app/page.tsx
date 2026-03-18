@@ -6,11 +6,16 @@ import { SectionHeading } from "@/components/ui/section-heading";
 import { portalApi } from "@/lib/api/portal";
 
 export default async function DashboardPage() {
-  const [summary, today, recommendations] = await Promise.all([
+  const [summary, today, recommendations, newsItems, jobs] = await Promise.all([
     portalApi.getDashboardSummary(),
     portalApi.getDashboardToday(),
     portalApi.getRecommendations(),
+    portalApi.getNewsItems(),
+    portalApi.getJobs(),
   ]);
+
+  const topNews = newsItems[0];
+  const topJob = jobs[0];
 
   return (
     <div className="space-y-8">
@@ -53,7 +58,7 @@ export default async function DashboardPage() {
         </Panel>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-4">
         <Panel className="space-y-4">
           <SectionHeading eyebrow="Practice" title={summary.recommended_exercise?.title ?? "Recommended practice"} description="Keep the fundamentals active while you build." />
           <p className="text-sm text-ink/70">
@@ -75,13 +80,36 @@ export default async function DashboardPage() {
           ))}
         </Panel>
         <Panel className="space-y-4">
-          <SectionHeading eyebrow="Recommendations" title="Rule-based guidance" description="Phase 1 personalization is deterministic and execution-focused." />
+          <SectionHeading eyebrow="Recommendations" title="Rule-based guidance" description="Phase 2 now includes external signals alongside learning and project work." />
           {recommendations.map((recommendation) => (
             <div key={recommendation.title} className="rounded-2xl bg-cream p-4">
               <p className="font-semibold text-ink">{recommendation.title}</p>
               <p className="mt-2 text-sm text-ink/70">{recommendation.reason}</p>
             </div>
           ))}
+        </Panel>
+        <Panel className="space-y-4">
+          <SectionHeading eyebrow="Signals" title={topNews?.title ?? "Top external signal"} description="Keep market and tooling movement close to the daily workflow." />
+          {topNews ? (
+            <>
+              <p className="text-sm text-ink/70">{topNews.summary}</p>
+              <p className="text-sm text-ink/70">Source: {topNews.source_name} · Signal {topNews.signal_score}</p>
+              <Link href="/news" className="inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold">
+                Open news feed
+              </Link>
+            </>
+          ) : null}
+          {topJob ? (
+            <div className="rounded-2xl bg-cream p-4">
+              <p className="font-semibold text-ink">{topJob.title}</p>
+              <p className="mt-2 text-sm text-ink/70">
+                {topJob.company_name} · Fit {topJob.fit_score}
+              </p>
+              <Link href="/jobs" className="mt-3 inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold">
+                Open jobs
+              </Link>
+            </div>
+          ) : null}
         </Panel>
       </div>
     </div>
