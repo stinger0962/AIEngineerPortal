@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models import Exercise, InterviewQuestion, KnowledgeArticle, LearningPath, Lesson, User
+from app.models import Exercise, InterviewQuestion, JobPosting, KnowledgeArticle, LearningPath, Lesson, NewsItem, User
 from app.services.seed_service import seed_database
 
 TEST_DB_DIR = Path(mkdtemp(prefix="ai-engineer-portal-tests-"))
@@ -128,5 +128,23 @@ def test_seed_sync_is_idempotent_and_keeps_reference_content_populated():
         assert db.query(Exercise).count() >= 40
         assert db.query(KnowledgeArticle).count() >= 30
         assert db.query(InterviewQuestion).count() >= 24
+        assert db.query(NewsItem).count() >= 4
+        assert db.query(JobPosting).count() >= 3
     finally:
         db.close()
+
+
+def test_news_and_jobs_phase_two_routes():
+    news_response = client.get("/api/v1/news")
+    assert news_response.status_code == 200
+    assert len(news_response.json()) >= 1
+
+    jobs_response = client.get("/api/v1/jobs")
+    assert jobs_response.status_code == 200
+    jobs = jobs_response.json()
+    assert len(jobs) >= 1
+
+    job_id = jobs[0]["id"]
+    fit_response = client.post(f"/api/v1/jobs/{job_id}/analyze-fit")
+    assert fit_response.status_code == 200
+    assert fit_response.json()["fit_score"] >= 45

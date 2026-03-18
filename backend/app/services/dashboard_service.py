@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Exercise, Lesson, LessonCompletion, ProgressSnapshot, Project, User
+from app.models import Exercise, JobPosting, Lesson, LessonCompletion, NewsItem, ProgressSnapshot, Project, User
 from app.services.progress_service import refresh_progress_snapshot
 
 
@@ -73,16 +73,18 @@ def build_dashboard_summary(db: Session) -> dict:
 
 def build_today_view(db: Session) -> dict:
     snapshot = db.scalar(select(ProgressSnapshot).order_by(ProgressSnapshot.date.desc(), ProgressSnapshot.id.desc()))
+    news_count = len(db.scalars(select(NewsItem.id)).all())
+    job_count = len(db.scalars(select(JobPosting.id)).all())
     return {
         "focus": [
             "Complete one lesson tied to a current portfolio project.",
             "Finish a Python or evaluation exercise and note what felt slow.",
-            "Update one project note with architecture tradeoffs.",
+            "Review one external signal or job posting and translate it into a next action.",
         ],
         "highlights": [
             f"Learning completion is at {snapshot.learning_completion_pct}%.",
             f"Interview readiness currently scores {snapshot.interview_readiness_score}/100.",
-            "Your strongest leverage remains product-minded AI application work.",
+            f"You are tracking {news_count} news items and {job_count} opportunity signals.",
         ],
         "blockers": [
             "Python depth needs continued reps under time pressure.",

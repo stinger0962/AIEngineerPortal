@@ -563,3 +563,87 @@ for category, role_type, difficulty, question_text, outline in INTERVIEW_PROMPTS
 
 def build_interview_questions():
     return INTERVIEW_QUESTIONS
+
+
+NEWS_ITEMS = [
+    {
+        "source_name": "OpenAI",
+        "title": "Model releases and platform updates to review this week",
+        "slug": "openai-model-releases-platform-updates",
+        "summary": "Track changes in model capability, pricing, and API ergonomics that could change how you build or evaluate AI features.",
+        "source_url": "https://platform.openai.com/docs/overview",
+        "category": "model-release",
+        "signal_score": 92,
+        "tags_json": ["models", "platforms", "llm-apps"],
+    },
+    {
+        "source_name": "Anthropic",
+        "title": "Agent and tool-use patterns worth monitoring",
+        "slug": "anthropic-agent-tool-use-patterns",
+        "summary": "Watch for patterns that shift how production teams think about tool invocation, guardrails, and long-running workflows.",
+        "source_url": "https://www.anthropic.com/news",
+        "category": "agents",
+        "signal_score": 88,
+        "tags_json": ["agents", "tools", "production"],
+    },
+    {
+        "source_name": "Hugging Face",
+        "title": "Open-source stack momentum for applied AI engineers",
+        "slug": "hugging-face-open-source-stack-momentum",
+        "summary": "Follow the frameworks and model-serving tools gaining traction so your project choices stay grounded in ecosystem reality.",
+        "source_url": "https://huggingface.co/blog",
+        "category": "open-source",
+        "signal_score": 84,
+        "tags_json": ["open-source", "serving", "tooling"],
+    },
+    {
+        "source_name": "MLOps Community",
+        "title": "Evaluation and observability themes showing up across teams",
+        "slug": "mlops-community-evaluation-observability-themes",
+        "summary": "Collect the recurring patterns around eval datasets, traces, and review workflows that strong AI teams keep returning to.",
+        "source_url": "https://home.mlops.community/",
+        "category": "evaluation",
+        "signal_score": 79,
+        "tags_json": ["evaluation", "observability", "mlops"],
+    },
+]
+
+
+JOB_POSTINGS = [
+    {
+        "source_name": "Seeded Watchlist",
+        "title": "AI Engineer",
+        "slug": "seeded-watchlist-ai-engineer",
+        "company_name": "Frontier Systems Co.",
+        "location": "Remote",
+        "employment_type": "full-time",
+        "summary": "Own LLM-backed product features, API integrations, and evaluation loops across a customer-facing platform.",
+        "source_url": "https://example.com/jobs/ai-engineer",
+        "description_md": "Build retrieval-backed features, provider integrations, dashboards, and deployment workflows with strong product ownership.",
+        "tags_json": ["ai-engineer", "rag", "evaluation", "fastapi", "nextjs"],
+    },
+    {
+        "source_name": "Seeded Watchlist",
+        "title": "Applied AI Engineer",
+        "slug": "seeded-watchlist-applied-ai-engineer",
+        "company_name": "Workflow Intelligence Labs",
+        "location": "US Remote",
+        "employment_type": "full-time",
+        "summary": "Ship agent-shaped product workflows, build prompt and tool abstractions, and harden them with observability.",
+        "source_url": "https://example.com/jobs/applied-ai-engineer",
+        "description_md": "Looking for engineers with backend ownership, product sense, Python fluency, and experience turning prototypes into production systems.",
+        "tags_json": ["applied-ai", "agents", "python", "product-engineering"],
+    },
+    {
+        "source_name": "Seeded Watchlist",
+        "title": "LLM Platform Engineer",
+        "slug": "seeded-watchlist-llm-platform-engineer",
+        "company_name": "Inference Platform Group",
+        "location": "Hybrid",
+        "employment_type": "full-time",
+        "summary": "Design the platform layer around model providers, evaluation runs, trace collection, and deployment safety.",
+        "source_url": "https://example.com/jobs/llm-platform-engineer",
+        "description_md": "Best fit for engineers who enjoy abstractions, reliability, observability, and multi-service deployment architecture.",
+        "tags_json": ["platform", "providers", "observability", "deployment"],
+    },
+]

@@ -128,6 +128,20 @@ class KnowledgeArticleOut(PortalBase):
     last_reviewed_at: datetime
 
 
+class NewsItemOut(PortalBase):
+    id: int
+    source_name: str
+    title: str
+    slug: str
+    summary: str
+    source_url: str
+    category: str
+    published_at: datetime
+    signal_score: int
+    tags_json: List[str]
+    is_saved: bool
+
+
 class ProjectOut(PortalBase):
     id: int
     title: str
@@ -141,6 +155,24 @@ class ProjectOut(PortalBase):
     demo_url: Optional[str]
     lessons_learned_md: str
     portfolio_score: int
+
+
+class JobPostingOut(PortalBase):
+    id: int
+    source_name: str
+    title: str
+    slug: str
+    company_name: str
+    location: str
+    employment_type: str
+    summary: str
+    source_url: str
+    description_md: str
+    published_at: datetime
+    tags_json: List[str]
+    skill_gaps_json: List[str]
+    fit_score: int
+    is_saved: bool
 
 
 class ProjectIn(BaseModel):
@@ -175,6 +207,14 @@ class RecommendationOut(BaseModel):
     title: str
     reason: str
     action_path: str
+
+
+class JobFitAnalysisOut(BaseModel):
+    job_id: int
+    fit_score: int
+    strengths: List[str]
+    gaps: List[str]
+    rationale: str
 
 
 class ProgressSnapshotOut(PortalBase):

@@ -20,8 +20,11 @@ import type {
   ExerciseDetail,
   InterviewQuestion,
   InterviewRoadmap,
+  JobFitAnalysis,
+  JobPosting,
   KnowledgeArticle,
   LearningPath,
+  NewsItem,
   Project,
   Recommendation,
 } from "@/lib/types/portal";
@@ -98,6 +101,14 @@ export const portalApi = {
     const articles = await portalApi.getKnowledgeArticles();
     return articles.find((article) => article.slug === slug) ?? null;
   },
+  getNewsItems: () => fetchJson<NewsItem[]>("/news"),
+  refreshNews: () => fetchJson<NewsItem[]>("/news/refresh", { method: "POST" }),
+  saveNewsItem: (newsId: number) => fetchJson<NewsItem>(`/news/${newsId}/save`, { method: "POST" }),
+  getJobs: () => fetchJson<JobPosting[]>("/jobs"),
+  getJob: (jobId: number) => fetchJson<JobPosting>(`/jobs/${jobId}`),
+  refreshJobs: () => fetchJson<JobPosting[]>("/jobs/refresh", { method: "POST" }),
+  saveJob: (jobId: number) => fetchJson<JobPosting>(`/jobs/${jobId}/save`, { method: "POST" }),
+  analyzeJobFit: (jobId: number) => fetchJson<JobFitAnalysis>(`/jobs/${jobId}/analyze-fit`, { method: "POST" }),
   getProjects: () => fetchJson<Project[]>("/projects", undefined, mockProjects),
   getProject: async (slug: string) => {
     const projects = await portalApi.getProjects();

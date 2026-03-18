@@ -120,6 +120,22 @@ class KnowledgeArticle(Base):
     last_reviewed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class NewsItem(Base):
+    __tablename__ = "news_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_name: Mapped[str] = mapped_column(String(120))
+    title: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(255), unique=True)
+    summary: Mapped[str] = mapped_column(Text)
+    source_url: Mapped[str] = mapped_column(String(500), unique=True)
+    category: Mapped[str] = mapped_column(String(120), default="ai-news")
+    published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    signal_score: Mapped[int] = mapped_column(Integer, default=50)
+    tags_json: Mapped[List] = mapped_column(JSON, default=list)
+    is_saved: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -135,6 +151,26 @@ class Project(Base):
     demo_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     lessons_learned_md: Mapped[str] = mapped_column(Text, default="")
     portfolio_score: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class JobPosting(Base):
+    __tablename__ = "job_postings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_name: Mapped[str] = mapped_column(String(120))
+    title: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(255), unique=True)
+    company_name: Mapped[str] = mapped_column(String(200))
+    location: Mapped[str] = mapped_column(String(200), default="Remote")
+    employment_type: Mapped[str] = mapped_column(String(120), default="unknown")
+    summary: Mapped[str] = mapped_column(Text)
+    source_url: Mapped[str] = mapped_column(String(500), unique=True)
+    description_md: Mapped[str] = mapped_column(Text, default="")
+    published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    tags_json: Mapped[List] = mapped_column(JSON, default=list)
+    skill_gaps_json: Mapped[List] = mapped_column(JSON, default=list)
+    fit_score: Mapped[int] = mapped_column(Integer, default=0)
+    is_saved: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class InterviewQuestion(Base):

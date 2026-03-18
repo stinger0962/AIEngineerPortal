@@ -95,6 +95,20 @@ export type KnowledgeArticle = {
   last_reviewed_at: string;
 };
 
+export type NewsItem = {
+  id: number;
+  source_name: string;
+  title: string;
+  slug: string;
+  summary: string;
+  source_url: string;
+  category: string;
+  published_at: string;
+  signal_score: number;
+  tags_json: string[];
+  is_saved: boolean;
+};
+
 export type Project = {
   id: number;
   title: string;
@@ -108,6 +122,24 @@ export type Project = {
   demo_url: string | null;
   lessons_learned_md: string;
   portfolio_score: number;
+};
+
+export type JobPosting = {
+  id: number;
+  source_name: string;
+  title: string;
+  slug: string;
+  company_name: string;
+  location: string;
+  employment_type: string;
+  summary: string;
+  source_url: string;
+  description_md: string;
+  published_at: string;
+  tags_json: string[];
+  skill_gaps_json: string[];
+  fit_score: number;
+  is_saved: boolean;
 };
 
 export type InterviewQuestion = {
@@ -129,4 +161,12 @@ export type Recommendation = {
   title: string;
   reason: string;
   action_path: string;
+};
+
+export type JobFitAnalysis = {
+  job_id: number;
+  fit_score: number;
+  strengths: string[];
+  gaps: string[];
+  rationale: string;
 };
