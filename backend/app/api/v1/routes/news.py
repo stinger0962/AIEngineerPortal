@@ -8,11 +8,14 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas import FeedRefreshMetaOut, NewsItemOut
 from app.services.news_service import (
+    build_news_suggested_action,
+    build_news_why_it_matters,
     get_news_item,
     get_news_refresh_meta,
     list_news,
     refresh_news,
     refresh_news_if_stale,
+    serialize_news_item,
     set_news_saved,
 )
 
@@ -30,12 +33,12 @@ def get_news(
         items = refresh_news_if_stale(db)
     else:
         items = list_news(db, category, search, saved_only)
-    return [NewsItemOut.model_validate(item) for item in items]
+    return [NewsItemOut.model_validate(serialize_news_item(item)) for item in items]
 
 
 @router.post("/refresh", response_model=List[NewsItemOut])
 def refresh_news_feed(db: Session = Depends(get_db)) -> List[NewsItemOut]:
-    return [NewsItemOut.model_validate(item) for item in refresh_news(db)]
+    return [NewsItemOut.model_validate(serialize_news_item(item)) for item in refresh_news(db)]
 
 
 @router.get("/meta", response_model=FeedRefreshMetaOut)
@@ -49,7 +52,7 @@ def save_news_item(news_id: int, db: Session = Depends(get_db)) -> NewsItemOut:
     item = set_news_saved(db, news_id, True)
     if not item:
         raise HTTPException(status_code=404, detail="News item not found")
-    return NewsItemOut.model_validate(item)
+    return NewsItemOut.model_validate(serialize_news_item(item))
 
 
 @router.get("/{news_id}", response_model=NewsItemOut)
@@ -57,4 +60,4 @@ def get_news_by_id(news_id: int, db: Session = Depends(get_db)) -> NewsItemOut:
     item = get_news_item(db, news_id)
     if not item:
         raise HTTPException(status_code=404, detail="News item not found")
-    return NewsItemOut.model_validate(item)
+    return NewsItemOut.model_validate(serialize_news_item(item))

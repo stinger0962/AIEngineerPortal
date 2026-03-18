@@ -161,6 +161,30 @@ def set_job_saved(db: Session, job_id: int, saved: bool = True) -> JobPosting | 
     return job
 
 
+def serialize_job_posting(job: JobPosting) -> dict:
+    return {
+        "id": job.id,
+        "source_name": job.source_name,
+        "title": job.title,
+        "slug": job.slug,
+        "company_name": job.company_name,
+        "location": job.location,
+        "employment_type": job.employment_type,
+        "summary": job.summary,
+        "source_url": job.source_url,
+        "description_md": job.description_md,
+        "published_at": job.published_at,
+        "tags_json": job.tags_json,
+        "skill_gaps_json": job.skill_gaps_json,
+        "fit_score": job.fit_score,
+        "is_saved": job.is_saved,
+        "is_seeded": job.is_seeded,
+        "last_synced_at": job.last_synced_at,
+        "fit_summary": build_job_fit_summary(job),
+        "suggested_action": build_job_suggested_action(job),
+    }
+
+
 def ensure_seed_jobs(db: Session) -> None:
     if db.scalar(select(JobPosting.id).limit(1)):
         return
@@ -461,3 +485,19 @@ def _is_refresh_stale(refreshed_at: datetime | None, refresh_window_hours: int) 
     if refreshed_at is None:
         return True
     return refreshed_at <= datetime.utcnow() - timedelta(hours=refresh_window_hours)
+
+
+def build_job_fit_summary(job: JobPosting) -> str:
+    if job.fit_score >= 85:
+        return "Strong overlap with your current transition focus: product-minded AI delivery, backend APIs, and practical LLM systems."
+    if job.fit_score >= 70:
+        return "Good alignment, but this role likely needs one or two stronger proof points in projects or system design depth."
+    return "Relevant signal, but you would benefit from sharpening the gaps before treating this as a high-priority target."
+
+
+def build_job_suggested_action(job: JobPosting) -> str:
+    if job.fit_score >= 85:
+        return "Keep this role on the shortlist and make sure one active project clearly demonstrates the same system shape."
+    if job.skill_gaps_json:
+        return f"Turn the top gap into a concrete learning or project task: {job.skill_gaps_json[0]}."
+    return "Use this role to refine what portfolio evidence and interview depth you still need."

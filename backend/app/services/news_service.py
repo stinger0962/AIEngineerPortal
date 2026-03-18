@@ -150,6 +150,26 @@ def set_news_saved(db: Session, news_id: int, saved: bool = True) -> NewsItem | 
     return item
 
 
+def serialize_news_item(item: NewsItem) -> dict:
+    return {
+        "id": item.id,
+        "source_name": item.source_name,
+        "title": item.title,
+        "slug": item.slug,
+        "summary": item.summary,
+        "source_url": item.source_url,
+        "category": item.category,
+        "published_at": item.published_at,
+        "signal_score": item.signal_score,
+        "tags_json": item.tags_json,
+        "is_saved": item.is_saved,
+        "is_seeded": item.is_seeded,
+        "last_synced_at": item.last_synced_at,
+        "why_it_matters": build_news_why_it_matters(item),
+        "suggested_action": build_news_suggested_action(item),
+    }
+
+
 def ensure_seed_news(db: Session) -> None:
     if db.scalar(select(NewsItem.id).limit(1)):
         return
@@ -369,3 +389,27 @@ def _is_refresh_stale(refreshed_at: datetime | None, refresh_window_hours: int) 
     if refreshed_at is None:
         return True
     return refreshed_at <= datetime.utcnow() - timedelta(hours=refresh_window_hours)
+
+
+def build_news_why_it_matters(item: NewsItem) -> str:
+    if item.category == "model-release":
+        return "This can change which models, APIs, or agent capabilities are worth learning and integrating next."
+    if item.category == "agents":
+        return "Agent workflow patterns are directly relevant to the kinds of portfolio projects and interview stories you need."
+    if item.category == "retrieval":
+        return "Retrieval and evaluation changes often translate into better RAG architecture and benchmarking choices."
+    if item.category == "open-source":
+        return "Open-source momentum is a strong signal for what tooling employers will expect you to recognize and use."
+    return "This is a useful external signal to translate into project, learning, or interview preparation decisions."
+
+
+def build_news_suggested_action(item: NewsItem) -> str:
+    if item.category == "model-release":
+        return "Review the release, compare it to your current stack, and note one concrete experiment for the portal or a side project."
+    if item.category == "agents":
+        return "Map this workflow pattern to one project idea or interview explanation you can strengthen this week."
+    if item.category == "retrieval":
+        return "Update one retrieval or evaluation note in the portal and connect it to a RAG practice task."
+    if item.category == "open-source":
+        return "Decide whether this tool belongs on your project shortlist and capture the decision in a knowledge note."
+    return "Turn this signal into one next action in learning, project work, or interview prep."

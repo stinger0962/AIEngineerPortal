@@ -182,5 +182,6 @@ export const mockRecommendations: Recommendation[] = [
     title: "Advance the next learning milestone",
     reason: "Keep lesson completion moving while project work is active.",
     action_path: "/learn/lesson/python-for-ai-engineers-2",
+    source_kind: "learning",
   },
 ];

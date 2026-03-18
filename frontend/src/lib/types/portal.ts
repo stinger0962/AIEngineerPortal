@@ -107,6 +107,8 @@ export type NewsItem = {
   signal_score: number;
   tags_json: string[];
   is_saved: boolean;
+  why_it_matters: string;
+  suggested_action: string;
 };
 
 export type Project = {
@@ -140,6 +142,8 @@ export type JobPosting = {
   skill_gaps_json: string[];
   fit_score: number;
   is_saved: boolean;
+  fit_summary: string;
+  suggested_action: string;
 };
 
 export type InterviewQuestion = {
@@ -161,6 +165,7 @@ export type Recommendation = {
   title: string;
   reason: string;
   action_path: string;
+  source_kind: string;
 };
 
 export type JobFitAnalysis = {

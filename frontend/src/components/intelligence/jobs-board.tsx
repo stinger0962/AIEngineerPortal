@@ -179,6 +179,11 @@ export function JobsBoard({ initialJobs, initialMeta }: JobsBoardProps) {
                 </span>
               ))}
             </div>
+            <div className="rounded-2xl bg-cream p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-ink/50">Fit read</p>
+              <p className="mt-2 text-sm text-ink/70">{job.fit_summary}</p>
+              <p className="mt-3 text-sm font-medium text-ink">{job.suggested_action}</p>
+            </div>
             {job.skill_gaps_json.length ? (
               <div className="rounded-2xl bg-white p-4">
                 <p className="text-xs uppercase tracking-[0.24em] text-ink/50">Likely gaps</p>

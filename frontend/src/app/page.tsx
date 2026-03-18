@@ -35,7 +35,10 @@ export default async function DashboardPage() {
           <p className="text-xs uppercase tracking-[0.28em] text-cream/60">Next best step</p>
           <h3 className="mt-3 font-display text-3xl">{summary.next_lesson?.title}</h3>
           <p className="mt-3 text-sm text-cream/80">{summary.next_lesson?.summary}</p>
-          <Link href={`/learn/lesson/${summary.next_lesson?.slug}`} className="mt-6 inline-flex rounded-full bg-ember px-5 py-3 text-sm font-semibold text-white">
+          <Link
+            href={`/learn/lesson/${summary.next_lesson?.slug}`}
+            className="mt-6 inline-flex rounded-full bg-ember px-5 py-3 text-sm font-semibold text-white"
+          >
             Open lesson
           </Link>
         </div>
@@ -43,11 +46,19 @@ export default async function DashboardPage() {
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <Panel>
-          <SectionHeading eyebrow="Progress" title="Momentum over the last month" description="Track learning depth and practice volume together." />
+          <SectionHeading
+            eyebrow="Progress"
+            title="Momentum over the last month"
+            description="Track learning depth and practice volume together."
+          />
           <ProgressChart />
         </Panel>
         <Panel className="space-y-4">
-          <SectionHeading eyebrow="Daily plan" title="What to focus on next" description="Use one concrete action per stream to keep the transition manageable." />
+          <SectionHeading
+            eyebrow="Daily plan"
+            title="What to focus on next"
+            description="Use one concrete action per stream to keep the transition manageable."
+          />
           <div className="space-y-3">
             {today.focus.map((item) => (
               <div key={item} className="rounded-2xl bg-mint p-4 text-sm text-ink">
@@ -60,16 +71,26 @@ export default async function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-4">
         <Panel className="space-y-4">
-          <SectionHeading eyebrow="Practice" title={summary.recommended_exercise?.title ?? "Recommended practice"} description="Keep the fundamentals active while you build." />
+          <SectionHeading
+            eyebrow="Practice"
+            title={summary.recommended_exercise?.title ?? "Recommended practice"}
+            description="Keep the fundamentals active while you build."
+          />
           <p className="text-sm text-ink/70">
-            Category: {summary.recommended_exercise?.category} · Difficulty: {summary.recommended_exercise?.difficulty}
+            Category: {summary.recommended_exercise?.category} · Difficulty:{" "}
+            {summary.recommended_exercise?.difficulty}
           </p>
           <Link href="/practice/python" className="inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold">
             Open practice hub
           </Link>
         </Panel>
+
         <Panel className="space-y-4">
-          <SectionHeading eyebrow="Projects" title="Active portfolio work" description="Keep one or two projects in motion and let them drive learning." />
+          <SectionHeading
+            eyebrow="Projects"
+            title="Active portfolio work"
+            description="Keep one or two projects in motion and let them drive learning."
+          />
           {summary.active_projects.map((project) => (
             <div key={project.id} className="rounded-2xl bg-white p-4">
               <p className="font-semibold text-ink">{project.title}</p>
@@ -79,21 +100,33 @@ export default async function DashboardPage() {
             </div>
           ))}
         </Panel>
+
         <Panel className="space-y-4">
-          <SectionHeading eyebrow="Recommendations" title="Rule-based guidance" description="Phase 2 now includes external signals alongside learning and project work." />
+          <SectionHeading
+            eyebrow="Recommendations"
+            title="Actionable guidance"
+            description="Phase 2 now blends internal priorities with external signals."
+          />
           {recommendations.map((recommendation) => (
             <div key={recommendation.title} className="rounded-2xl bg-cream p-4">
               <p className="font-semibold text-ink">{recommendation.title}</p>
+              <p className="mt-1 text-xs uppercase tracking-[0.24em] text-ink/50">{recommendation.source_kind}</p>
               <p className="mt-2 text-sm text-ink/70">{recommendation.reason}</p>
             </div>
           ))}
         </Panel>
+
         <Panel className="space-y-4">
-          <SectionHeading eyebrow="Signals" title={topNews?.title ?? "Top external signal"} description="Keep market and tooling movement close to the daily workflow." />
+          <SectionHeading
+            eyebrow="Signals"
+            title={topNews?.title ?? "Top external signal"}
+            description="Keep market and tooling movement close to the daily workflow."
+          />
           {topNews ? (
             <>
               <p className="text-sm text-ink/70">{topNews.summary}</p>
               <p className="text-sm text-ink/70">Source: {topNews.source_name} · Signal {topNews.signal_score}</p>
+              <p className="text-sm text-ink/70">{topNews.why_it_matters}</p>
               <Link href="/news" className="inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold">
                 Open news feed
               </Link>
@@ -105,6 +138,7 @@ export default async function DashboardPage() {
               <p className="mt-2 text-sm text-ink/70">
                 {topJob.company_name} · Fit {topJob.fit_score}
               </p>
+              <p className="mt-2 text-sm text-ink/70">{topJob.fit_summary}</p>
               <Link href="/jobs" className="mt-3 inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold">
                 Open jobs
               </Link>

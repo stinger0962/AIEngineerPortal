@@ -142,6 +142,8 @@ class NewsItemOut(PortalBase):
     is_saved: bool
     is_seeded: bool
     last_synced_at: datetime
+    why_it_matters: str
+    suggested_action: str
 
 
 class ProjectOut(PortalBase):
@@ -177,6 +179,8 @@ class JobPostingOut(PortalBase):
     is_saved: bool
     is_seeded: bool
     last_synced_at: datetime
+    fit_summary: str
+    suggested_action: str
 
 
 class ProjectIn(BaseModel):
@@ -211,6 +215,7 @@ class RecommendationOut(BaseModel):
     title: str
     reason: str
     action_path: str
+    source_kind: str = "internal"
 
 
 class JobFitAnalysisOut(BaseModel):

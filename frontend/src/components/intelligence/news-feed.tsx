@@ -161,6 +161,11 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
                 </span>
               ))}
             </div>
+            <div className="rounded-2xl bg-cream p-4">
+              <p className="text-xs uppercase tracking-[0.24em] text-ink/50">Why this matters</p>
+              <p className="mt-2 text-sm text-ink/70">{item.why_it_matters}</p>
+              <p className="mt-3 text-sm font-medium text-ink">{item.suggested_action}</p>
+            </div>
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"

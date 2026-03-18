@@ -14,6 +14,7 @@ from app.services.jobs_service import (
     list_jobs,
     refresh_jobs,
     refresh_jobs_if_stale,
+    serialize_job_posting,
     set_job_saved,
 )
 
@@ -31,12 +32,12 @@ def get_jobs(
         jobs = refresh_jobs_if_stale(db)
     else:
         jobs = list_jobs(db, search, saved_only, min_fit_score)
-    return [JobPostingOut.model_validate(job) for job in jobs]
+    return [JobPostingOut.model_validate(serialize_job_posting(job)) for job in jobs]
 
 
 @router.post("/refresh", response_model=List[JobPostingOut])
 def refresh_jobs_feed(db: Session = Depends(get_db)) -> List[JobPostingOut]:
-    return [JobPostingOut.model_validate(job) for job in refresh_jobs(db)]
+    return [JobPostingOut.model_validate(serialize_job_posting(job)) for job in refresh_jobs(db)]
 
 
 @router.get("/meta", response_model=FeedRefreshMetaOut)
@@ -50,7 +51,7 @@ def get_job_by_id(job_id: int, db: Session = Depends(get_db)) -> JobPostingOut:
     job = get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return JobPostingOut.model_validate(job)
+    return JobPostingOut.model_validate(serialize_job_posting(job))
 
 
 @router.post("/{job_id}/save", response_model=JobPostingOut)
@@ -58,7 +59,7 @@ def save_job(job_id: int, db: Session = Depends(get_db)) -> JobPostingOut:
     job = set_job_saved(db, job_id, True)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return JobPostingOut.model_validate(job)
+    return JobPostingOut.model_validate(serialize_job_posting(job))
 
 
 @router.post("/{job_id}/analyze-fit", response_model=JobFitAnalysisOut)
