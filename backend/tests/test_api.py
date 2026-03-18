@@ -1,4 +1,6 @@
 from pathlib import Path
+from tempfile import mkdtemp
+from shutil import rmtree
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -7,9 +9,11 @@ from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from app.models import Exercise, InterviewQuestion, KnowledgeArticle, LearningPath, Lesson, User
 from app.services.seed_service import seed_database
 
-TEST_DB_PATH = Path(__file__).resolve().parent.parent / "test.db"
+TEST_DB_DIR = Path(mkdtemp(prefix="ai-engineer-portal-tests-"))
+TEST_DB_PATH = TEST_DB_DIR / "test.db"
 TEST_DATABASE_URL = f"sqlite:///{TEST_DB_PATH.as_posix()}"
 
 engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
@@ -25,8 +29,6 @@ def override_get_db():
 
 
 def setup_module():
-    if TEST_DB_PATH.exists():
-        TEST_DB_PATH.unlink()
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
     try:
@@ -36,6 +38,13 @@ def setup_module():
     app.dependency_overrides[get_db] = override_get_db
 
 
+def teardown_module():
+    app.dependency_overrides.clear()
+    engine.dispose()
+    if TEST_DB_DIR.exists():
+        rmtree(TEST_DB_DIR, ignore_errors=True)
+
+
 client = TestClient(app)
 
 
@@ -43,6 +52,7 @@ def test_dashboard_summary():
     response = client.get("/api/v1/dashboard/summary")
     assert response.status_code == 200
     assert response.json()["user_name"] == "Alex Builder"
+    assert response.json()["stats"][0]["value"] == "0.0%"
 
 
 def test_complete_lesson_updates_progress():
@@ -106,3 +116,17 @@ def test_project_create_and_update():
     )
     assert update_response.status_code == 200
     assert update_response.json()["status"] == "complete"
+
+
+def test_seed_sync_is_idempotent_and_keeps_reference_content_populated():
+    db = TestingSessionLocal()
+    try:
+        seed_database(db)
+        assert db.query(User).count() == 1
+        assert db.query(LearningPath).count() == 7
+        assert db.query(Lesson).count() == 35
+        assert db.query(Exercise).count() >= 40
+        assert db.query(KnowledgeArticle).count() >= 30
+        assert db.query(InterviewQuestion).count() >= 24
+    finally:
+        db.close()

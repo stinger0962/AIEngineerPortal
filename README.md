@@ -56,9 +56,11 @@ py -3.8 -m uvicorn app.main:app --reload --app-dir backend
 ## Phase 1 notes
 
 - The product is single-user and private for now.
-- Seed data is loaded automatically on backend startup if the database is empty.
+- Reference content is synced automatically on backend startup so deployed environments can pick up learning, exercise, article, and interview content improvements without wiping user activity.
 - News and jobs are scaffolded in the navigation but intentionally deferred from dynamic ingestion in Phase 1.
 - Deployment assets are included under [`infra/`](D:\AIEngineerPortal\infra) for local/VPS parity.
+
+The current Phase 1 delivery checkpoint is documented in [`docs/phase-1-checkpoint.md`](D:\AIEngineerPortal\docs\phase-1-checkpoint.md).
 
 ## Production deployment
 
@@ -94,3 +96,14 @@ docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml
 ```
 
 The public entrypoint is handled by Caddy with HTTPS.
+
+## Release convention
+
+This project follows a standard release procedure documented in [`docs/release-process.md`](D:\AIEngineerPortal\docs\release-process.md).
+
+By default, each completed version should be:
+
+- committed to `main`
+- pushed to GitHub
+- tagged with a version
+- deployed to the VPS

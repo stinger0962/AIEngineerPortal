@@ -27,6 +27,7 @@ import type {
 } from "@/lib/types/portal";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+const allowMockFallback = process.env.NODE_ENV !== "production";
 
 async function fetchJson<T>(path: string, init?: RequestInit, fallback?: T): Promise<T> {
   try {
@@ -43,7 +44,7 @@ async function fetchJson<T>(path: string, init?: RequestInit, fallback?: T): Pro
     }
     return (await response.json()) as T;
   } catch (error) {
-    if (fallback !== undefined) {
+    if (allowMockFallback && fallback !== undefined) {
       return fallback;
     }
     throw error;
