@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.api import api_router
 from app.core.config import get_settings
 from app.db.base import Base
+from app.db.bootstrap import apply_runtime_schema_patches
 from app.db.session import SessionLocal, engine
 from app.services.seed_service import seed_database
 
@@ -18,6 +19,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    apply_runtime_schema_patches(engine)
     db = SessionLocal()
     try:
         seed_database(db)
