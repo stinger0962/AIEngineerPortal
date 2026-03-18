@@ -37,7 +37,7 @@ jobs:
             EOF
             export REPO_URL="https://github.com/${{ github.repository }}.git"
             export DEPLOY_REF="${{ github.sha }}"
-            if [ ! -f /opt/ai-engineer-portal/scripts/deploy-on-server.sh ]; then
+            if [ ! -d /opt/ai-engineer-portal/.git ] || [ ! -f /opt/ai-engineer-portal/scripts/deploy-on-server.sh ]; then
               rm -rf /opt/ai-engineer-portal
               git clone "${REPO_URL}" /opt/ai-engineer-portal
               mkdir -p /opt/ai-engineer-portal/infra
