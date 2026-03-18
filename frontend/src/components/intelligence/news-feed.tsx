@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useState } from "react";
+import { startTransition, useDeferredValue, useState } from "react";
 
 import { Panel } from "@/components/ui/panel";
 import { portalApi } from "@/lib/api/portal";
@@ -17,6 +17,10 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
   const [meta, setMeta] = useState(initialMeta);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeSaveId, setActiveSaveId] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("all");
+  const [savedOnly, setSavedOnly] = useState(false);
+  const deferredSearch = useDeferredValue(search);
 
   async function handleRefresh() {
     setIsRefreshing(true);
@@ -42,6 +46,19 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
       setActiveSaveId(null);
     }
   }
+
+  const categories = ["all", ...new Set(items.map((item) => item.category))];
+  const normalizedSearch = deferredSearch.trim().toLowerCase();
+  const visibleItems = items.filter((item) => {
+    const matchesCategory = category === "all" || item.category === category;
+    const matchesSaved = !savedOnly || item.is_saved;
+    const matchesSearch =
+      !normalizedSearch ||
+      item.title.toLowerCase().includes(normalizedSearch) ||
+      item.summary.toLowerCase().includes(normalizedSearch) ||
+      item.tags_json.some((tag) => tag.toLowerCase().includes(normalizedSearch));
+    return matchesCategory && matchesSaved && matchesSearch;
+  });
 
   return (
     <div className="space-y-6">
@@ -84,10 +101,44 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
             <span className="font-semibold text-ink">{meta.is_stale ? "stale" : "fresh"}</span>
           </p>
         </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
+          <label className="grid gap-2 text-sm text-ink/70">
+            <span className="text-xs uppercase tracking-[0.24em] text-ink/50">Search</span>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search releases, RAG, evaluation..."
+              className="rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-ink/30"
+            />
+          </label>
+          <label className="grid gap-2 text-sm text-ink/70">
+            <span className="text-xs uppercase tracking-[0.24em] text-ink/50">Category</span>
+            <select
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+              className="rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-ink/30"
+            >
+              {categories.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-end gap-3 rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm text-ink/70">
+            <input
+              type="checkbox"
+              checked={savedOnly}
+              onChange={(event) => setSavedOnly(event.target.checked)}
+              className="h-4 w-4 rounded border-ink/20"
+            />
+            <span>Saved only</span>
+          </label>
+        </div>
       </Panel>
 
       <div className="grid gap-4">
-        {items.map((item) => (
+        {visibleItems.map((item) => (
           <Panel key={item.id} className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.24em] text-ink/50">
               <span>{item.source_name}</span>
@@ -129,6 +180,11 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
             </div>
           </Panel>
         ))}
+        {!visibleItems.length ? (
+          <Panel className="text-sm text-ink/70">
+            No items match the current filters yet. Try broadening the search or refreshing the feed.
+          </Panel>
+        ) : null}
       </div>
     </div>
   );

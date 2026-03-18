@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useState } from "react";
+import { startTransition, useDeferredValue, useState } from "react";
 
 import { Panel } from "@/components/ui/panel";
 import { portalApi } from "@/lib/api/portal";
@@ -17,6 +17,10 @@ export function JobsBoard({ initialJobs, initialMeta }: JobsBoardProps) {
   const [meta, setMeta] = useState(initialMeta);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [savedOnly, setSavedOnly] = useState(false);
+  const [minimumFit, setMinimumFit] = useState(0);
+  const deferredSearch = useDeferredValue(search);
 
   async function handleRefresh() {
     setIsRefreshing(true);
@@ -61,6 +65,19 @@ export function JobsBoard({ initialJobs, initialMeta }: JobsBoardProps) {
     }
   }
 
+  const normalizedSearch = deferredSearch.trim().toLowerCase();
+  const visibleJobs = jobs.filter((job) => {
+    const matchesSaved = !savedOnly || job.is_saved;
+    const matchesFit = job.fit_score >= minimumFit;
+    const matchesSearch =
+      !normalizedSearch ||
+      job.title.toLowerCase().includes(normalizedSearch) ||
+      job.company_name.toLowerCase().includes(normalizedSearch) ||
+      job.summary.toLowerCase().includes(normalizedSearch) ||
+      job.tags_json.some((tag) => tag.toLowerCase().includes(normalizedSearch));
+    return matchesSaved && matchesFit && matchesSearch;
+  });
+
   return (
     <div className="space-y-6">
       <Panel className="space-y-4">
@@ -102,10 +119,43 @@ export function JobsBoard({ initialJobs, initialMeta }: JobsBoardProps) {
             <span className="font-semibold text-ink">{meta.is_stale ? "stale" : "fresh"}</span>
           </p>
         </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto]">
+          <label className="grid gap-2 text-sm text-ink/70">
+            <span className="text-xs uppercase tracking-[0.24em] text-ink/50">Search</span>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search companies, agents, eval..."
+              className="rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-ink/30"
+            />
+          </label>
+          <label className="grid gap-2 text-sm text-ink/70">
+            <span className="text-xs uppercase tracking-[0.24em] text-ink/50">Minimum fit</span>
+            <select
+              value={String(minimumFit)}
+              onChange={(event) => setMinimumFit(Number(event.target.value))}
+              className="rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm text-ink outline-none transition focus:border-ink/30"
+            >
+              <option value="0">All roles</option>
+              <option value="60">60+</option>
+              <option value="70">70+</option>
+              <option value="80">80+</option>
+            </select>
+          </label>
+          <label className="flex items-end gap-3 rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm text-ink/70">
+            <input
+              type="checkbox"
+              checked={savedOnly}
+              onChange={(event) => setSavedOnly(event.target.checked)}
+              className="h-4 w-4 rounded border-ink/20"
+            />
+            <span>Saved only</span>
+          </label>
+        </div>
       </Panel>
 
       <div className="grid gap-4">
-        {jobs.map((job) => (
+        {visibleJobs.map((job) => (
           <Panel key={job.id} className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.24em] text-ink/50">
               <span>{job.company_name}</span>
@@ -162,6 +212,11 @@ export function JobsBoard({ initialJobs, initialMeta }: JobsBoardProps) {
             </div>
           </Panel>
         ))}
+        {!visibleJobs.length ? (
+          <Panel className="text-sm text-ink/70">
+            No jobs match the current filters yet. Lower the fit threshold or broaden the search.
+          </Panel>
+        ) : null}
       </div>
     </div>
   );
