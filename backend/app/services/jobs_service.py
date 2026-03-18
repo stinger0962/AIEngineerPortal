@@ -63,6 +63,19 @@ ROLE_FILTER_TERMS = [
     "software engineer, ai",
 ]
 
+TITLE_AI_TERMS = [
+    "ai engineer",
+    "applied ai",
+    "llm engineer",
+    "ml engineer",
+    "machine learning engineer",
+    "ai architect",
+    "llm architect",
+    "platform engineer",
+]
+
+CONTENT_AI_TERMS = ["rag", "retrieval", "agent", "evaluation", "llm", "machine learning", "ml infra", "fine-tuning"]
+
 
 def _contains_phrase(haystack: str, phrase: str) -> bool:
     pattern = r"\b" + re.escape(phrase).replace(r"\ ", r"[\s/-]+") + r"\b"
@@ -391,9 +404,10 @@ def _strip_html(value: str | None) -> str:
 def _looks_like_relevant_role(title: str, description: str) -> bool:
     haystack = f"{title} {description}".lower()
     title_text = title.lower()
-    return any(_contains_phrase(title_text, term) for term in ROLE_FILTER_TERMS) or (
-        any(_contains_phrase(haystack, term) for term in ["rag", "retrieval", "agent", "evaluation", "llm"])
-        and any(_contains_phrase(haystack, term) for term in ["engineer", "developer", "architect"])
+    if any(_contains_phrase(title_text, term) for term in TITLE_AI_TERMS):
+        return True
+    return any(_contains_phrase(haystack, term) for term in CONTENT_AI_TERMS) and any(
+        _contains_phrase(title_text, term) for term in ["engineer", "architect"]
     )
 
 

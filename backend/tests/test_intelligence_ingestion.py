@@ -87,3 +87,10 @@ def test_generic_fullstack_role_is_not_treated_as_ai_role():
 
     assert _looks_like_relevant_role(title, description) is False
     assert _score_job_relevance(title, description, ["react", "python"], 1.0) < 55
+
+
+def test_platform_engineer_title_can_still_count_as_relevant_when_ai_signal_is_in_description():
+    title = "LLM Platform Engineer"
+    description = "Own evaluation runs, retrieval systems, deployment safety, and provider integrations."
+
+    assert _looks_like_relevant_role(title, description) is True
