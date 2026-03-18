@@ -10,7 +10,7 @@ This repository uses a deployment-first workflow.
 4. Create a Git tag for the version.
 5. Push both the branch and the tag to GitHub.
 6. Let GitHub create a Release entry with release notes for that tag.
-7. Trigger deployment to the VPS.
+7. Let GitHub Actions SSH into the VPS, fetch the exact tagged commit, rebuild the containers, and verify the public health endpoint.
 8. Verify the live site at `https://portal.leipan.cc`.
 
 ## Default expectation
@@ -42,3 +42,13 @@ Each release should include:
 - any known issues or follow-up work
 
 By default, the GitHub release workflow generates release notes from the commit range included in the version tag.
+
+## Deployment behavior
+
+Production deployment is tag-driven.
+
+- A pushed `v*` tag triggers the deploy workflow.
+- The workflow writes production secrets onto the VPS.
+- The VPS checks out the exact `GITHUB_SHA` tied to that workflow run.
+- Docker Compose rebuilds with `--force-recreate --remove-orphans`.
+- GitHub Actions performs a public health check after deployment.

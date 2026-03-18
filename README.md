@@ -88,8 +88,8 @@ curl -fsSL https://raw.githubusercontent.com/stinger0962/AIEngineerPortal/main/s
 
 1. Point your DNS `A` record to the Droplet IP.
 2. Add the GitHub secrets above.
-3. Push to `main`.
-4. GitHub Actions copies the repo to `/opt/ai-engineer-portal` and runs:
+3. Push a version tag such as `v0.2.2`.
+4. GitHub Actions SSHes into the Droplet, checks out the exact tagged commit in `/opt/ai-engineer-portal`, and runs:
 
 ```bash
 docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml up -d --build
