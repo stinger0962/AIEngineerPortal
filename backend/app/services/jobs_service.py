@@ -43,6 +43,20 @@ def list_jobs(
     return list(db.scalars(query.order_by(desc(JobPosting.fit_score), desc(JobPosting.published_at))).all())
 
 
+def get_jobs_refresh_meta(db: Session) -> dict:
+    items = list_jobs(db)
+    latest_sync = max((item.last_synced_at for item in items), default=datetime.utcnow())
+    live_count = sum(1 for item in items if not item.is_seeded)
+    seeded_count = sum(1 for item in items if item.is_seeded)
+    return {
+        "source": "live" if live_count else "seeded",
+        "item_count": len(items),
+        "live_item_count": live_count,
+        "seeded_item_count": seeded_count,
+        "refreshed_at": latest_sync,
+    }
+
+
 def get_job(db: Session, job_id: int) -> JobPosting | None:
     return db.scalar(select(JobPosting).where(JobPosting.id == job_id))
 
@@ -63,7 +77,7 @@ def ensure_seed_jobs(db: Session) -> None:
     user = db.scalar(select(User).limit(1))
     now = datetime.utcnow()
     for payload in JOB_POSTINGS:
-        job = JobPosting(published_at=now, **payload)
+        job = JobPosting(published_at=now, is_seeded=True, last_synced_at=now, **payload)
         strengths, gaps, rationale, fit_score = analyze_fit_for_text(
             user,
             f"{job.title} {job.summary}",
@@ -81,6 +95,7 @@ def refresh_jobs(db: Session) -> list[JobPosting]:
         return list_jobs(db)
 
     user = db.scalar(select(User).limit(1))
+    sync_time = datetime.utcnow()
     existing = {item.source_url: item for item in db.scalars(select(JobPosting)).all()}
     for payload in fetched:
         job = existing.get(payload["source_url"])
@@ -97,6 +112,8 @@ def refresh_jobs(db: Session) -> list[JobPosting]:
         job.description_md = payload["description_md"]
         job.published_at = payload["published_at"]
         job.tags_json = payload["tags_json"]
+        job.is_seeded = False
+        job.last_synced_at = sync_time
         _, gaps, _, fit_score = analyze_fit_for_text(user, f"{job.title} {job.summary}", job.description_md)
         job.skill_gaps_json = gaps
         job.fit_score = fit_score

@@ -170,3 +170,11 @@ export type JobFitAnalysis = {
   gaps: string[];
   rationale: string;
 };
+
+export type FeedRefreshMeta = {
+  source: string;
+  item_count: number;
+  live_item_count: number;
+  seeded_item_count: number;
+  refreshed_at: string;
+};

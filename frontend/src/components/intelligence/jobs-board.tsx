@@ -5,22 +5,27 @@ import { startTransition, useState } from "react";
 
 import { Panel } from "@/components/ui/panel";
 import { portalApi } from "@/lib/api/portal";
-import type { JobPosting } from "@/lib/types/portal";
+import type { FeedRefreshMeta, JobPosting } from "@/lib/types/portal";
 
 type JobsBoardProps = {
   initialJobs: JobPosting[];
+  initialMeta: FeedRefreshMeta;
 };
 
-export function JobsBoard({ initialJobs }: JobsBoardProps) {
+export function JobsBoard({ initialJobs, initialMeta }: JobsBoardProps) {
   const [jobs, setJobs] = useState(initialJobs);
+  const [meta, setMeta] = useState(initialMeta);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeJobId, setActiveJobId] = useState<number | null>(null);
 
   async function handleRefresh() {
     setIsRefreshing(true);
     try {
-      const refreshed = await portalApi.refreshJobs();
-      startTransition(() => setJobs(refreshed));
+      const [refreshed, refreshedMeta] = await Promise.all([portalApi.refreshJobs(), portalApi.getJobsMeta()]);
+      startTransition(() => {
+        setJobs(refreshed);
+        setMeta(refreshedMeta);
+      });
     } finally {
       setIsRefreshing(false);
     }
@@ -82,6 +87,12 @@ export function JobsBoard({ initialJobs }: JobsBoardProps) {
           >
             {isRefreshing ? "Refreshing..." : "Refresh jobs"}
           </button>
+        </div>
+        <div className="rounded-2xl bg-white p-4 text-sm text-ink/70">
+          <p>
+            Feed source: <span className="font-semibold text-ink">{meta.source}</span> · Live items {meta.live_item_count} · Seeded items {meta.seeded_item_count}
+          </p>
+          <p className="mt-2">Last sync: {new Date(meta.refreshed_at).toLocaleString()}</p>
         </div>
       </Panel>
 

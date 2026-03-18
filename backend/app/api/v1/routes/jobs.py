@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas import JobFitAnalysisOut, JobPostingOut
-from app.services.jobs_service import analyze_job_fit, get_job, list_jobs, refresh_jobs, set_job_saved
+from app.schemas import FeedRefreshMetaOut, JobFitAnalysisOut, JobPostingOut
+from app.services.jobs_service import analyze_job_fit, get_job, get_jobs_refresh_meta, list_jobs, refresh_jobs, set_job_saved
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -25,6 +25,11 @@ def get_jobs(
 @router.post("/refresh", response_model=List[JobPostingOut])
 def refresh_jobs_feed(db: Session = Depends(get_db)) -> List[JobPostingOut]:
     return [JobPostingOut.model_validate(job) for job in refresh_jobs(db)]
+
+
+@router.get("/meta", response_model=FeedRefreshMetaOut)
+def get_jobs_meta(db: Session = Depends(get_db)) -> FeedRefreshMetaOut:
+    return FeedRefreshMetaOut(**get_jobs_refresh_meta(db))
 
 
 @router.get("/{job_id}", response_model=JobPostingOut)

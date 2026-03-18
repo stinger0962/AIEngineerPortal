@@ -7,6 +7,7 @@ from app.schemas.portal import (
     ExerciseAttemptOut,
     ExerciseDetail,
     ExerciseOut,
+    FeedRefreshMetaOut,
     InterviewQuestionOut,
     InterviewRoadmap,
     JobFitAnalysisOut,

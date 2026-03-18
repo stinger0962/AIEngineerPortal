@@ -138,11 +138,21 @@ def test_news_and_jobs_phase_two_routes():
     news_response = client.get("/api/v1/news")
     assert news_response.status_code == 200
     assert len(news_response.json()) >= 1
+    assert "is_seeded" in news_response.json()[0]
+
+    news_meta = client.get("/api/v1/news/meta")
+    assert news_meta.status_code == 200
+    assert news_meta.json()["item_count"] >= 1
 
     jobs_response = client.get("/api/v1/jobs")
     assert jobs_response.status_code == 200
     jobs = jobs_response.json()
     assert len(jobs) >= 1
+    assert "is_seeded" in jobs[0]
+
+    jobs_meta = client.get("/api/v1/jobs/meta")
+    assert jobs_meta.status_code == 200
+    assert jobs_meta.json()["item_count"] >= 1
 
     job_id = jobs[0]["id"]
     fit_response = client.post(f"/api/v1/jobs/{job_id}/analyze-fit")

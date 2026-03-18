@@ -134,6 +134,8 @@ class NewsItem(Base):
     signal_score: Mapped[int] = mapped_column(Integer, default=50)
     tags_json: Mapped[List] = mapped_column(JSON, default=list)
     is_saved: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_seeded: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class Project(Base):
@@ -171,6 +173,8 @@ class JobPosting(Base):
     skill_gaps_json: Mapped[List] = mapped_column(JSON, default=list)
     fit_score: Mapped[int] = mapped_column(Integer, default=0)
     is_saved: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_seeded: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class InterviewQuestion(Base):

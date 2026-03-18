@@ -5,22 +5,27 @@ import { startTransition, useState } from "react";
 
 import { Panel } from "@/components/ui/panel";
 import { portalApi } from "@/lib/api/portal";
-import type { NewsItem } from "@/lib/types/portal";
+import type { FeedRefreshMeta, NewsItem } from "@/lib/types/portal";
 
 type NewsFeedProps = {
   initialItems: NewsItem[];
+  initialMeta: FeedRefreshMeta;
 };
 
-export function NewsFeed({ initialItems }: NewsFeedProps) {
+export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
   const [items, setItems] = useState(initialItems);
+  const [meta, setMeta] = useState(initialMeta);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeSaveId, setActiveSaveId] = useState<number | null>(null);
 
   async function handleRefresh() {
     setIsRefreshing(true);
     try {
-      const refreshed = await portalApi.refreshNews();
-      startTransition(() => setItems(refreshed));
+      const [refreshed, refreshedMeta] = await Promise.all([portalApi.refreshNews(), portalApi.getNewsMeta()]);
+      startTransition(() => {
+        setItems(refreshed);
+        setMeta(refreshedMeta);
+      });
     } finally {
       setIsRefreshing(false);
     }
@@ -64,6 +69,12 @@ export function NewsFeed({ initialItems }: NewsFeedProps) {
           >
             {isRefreshing ? "Refreshing..." : "Refresh feed"}
           </button>
+        </div>
+        <div className="rounded-2xl bg-white p-4 text-sm text-ink/70">
+          <p>
+            Feed source: <span className="font-semibold text-ink">{meta.source}</span> · Live items {meta.live_item_count} · Seeded items {meta.seeded_item_count}
+          </p>
+          <p className="mt-2">Last sync: {new Date(meta.refreshed_at).toLocaleString()}</p>
         </div>
       </Panel>
 

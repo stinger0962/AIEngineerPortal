@@ -140,6 +140,8 @@ class NewsItemOut(PortalBase):
     signal_score: int
     tags_json: List[str]
     is_saved: bool
+    is_seeded: bool
+    last_synced_at: datetime
 
 
 class ProjectOut(PortalBase):
@@ -173,6 +175,8 @@ class JobPostingOut(PortalBase):
     skill_gaps_json: List[str]
     fit_score: int
     is_saved: bool
+    is_seeded: bool
+    last_synced_at: datetime
 
 
 class ProjectIn(BaseModel):
@@ -215,6 +219,14 @@ class JobFitAnalysisOut(BaseModel):
     strengths: List[str]
     gaps: List[str]
     rationale: str
+
+
+class FeedRefreshMetaOut(BaseModel):
+    source: str
+    item_count: int
+    live_item_count: int
+    seeded_item_count: int
+    refreshed_at: datetime
 
 
 class ProgressSnapshotOut(PortalBase):

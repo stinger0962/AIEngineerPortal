@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas import NewsItemOut
-from app.services.news_service import get_news_item, list_news, refresh_news, set_news_saved
+from app.schemas import FeedRefreshMetaOut, NewsItemOut
+from app.services.news_service import get_news_item, get_news_refresh_meta, list_news, refresh_news, set_news_saved
 
 router = APIRouter(prefix="/news", tags=["news"])
 
@@ -25,6 +25,11 @@ def get_news(
 @router.post("/refresh", response_model=List[NewsItemOut])
 def refresh_news_feed(db: Session = Depends(get_db)) -> List[NewsItemOut]:
     return [NewsItemOut.model_validate(item) for item in refresh_news(db)]
+
+
+@router.get("/meta", response_model=FeedRefreshMetaOut)
+def get_news_meta(db: Session = Depends(get_db)) -> FeedRefreshMetaOut:
+    return FeedRefreshMetaOut(**get_news_refresh_meta(db))
 
 
 @router.post("/{news_id}/save", response_model=NewsItemOut)

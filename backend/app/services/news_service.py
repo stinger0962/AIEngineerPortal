@@ -62,6 +62,20 @@ def list_news(
     return list(db.scalars(query.order_by(desc(NewsItem.published_at), desc(NewsItem.signal_score))).all())
 
 
+def get_news_refresh_meta(db: Session) -> dict:
+    items = list_news(db)
+    latest_sync = max((item.last_synced_at for item in items), default=datetime.utcnow())
+    live_count = sum(1 for item in items if not item.is_seeded)
+    seeded_count = sum(1 for item in items if item.is_seeded)
+    return {
+        "source": "live" if live_count else "seeded",
+        "item_count": len(items),
+        "live_item_count": live_count,
+        "seeded_item_count": seeded_count,
+        "refreshed_at": latest_sync,
+    }
+
+
 def get_news_item(db: Session, news_id: int) -> NewsItem | None:
     return db.scalar(select(NewsItem).where(NewsItem.id == news_id))
 
@@ -80,10 +94,12 @@ def ensure_seed_news(db: Session) -> None:
     if db.scalar(select(NewsItem.id).limit(1)):
         return
     now = datetime.utcnow()
-    for offset, payload in enumerate(NEWS_ITEMS):
+    for payload in NEWS_ITEMS:
         db.add(
             NewsItem(
                 published_at=now,
+                is_seeded=True,
+                last_synced_at=now,
                 **payload,
             )
         )
@@ -95,6 +111,7 @@ def refresh_news(db: Session) -> list[NewsItem]:
     if not fetched:
         return list_news(db)
 
+    sync_time = datetime.utcnow()
     existing = {item.source_url: item for item in db.scalars(select(NewsItem)).all()}
     for payload in fetched:
         item = existing.get(payload["source_url"])
@@ -109,6 +126,8 @@ def refresh_news(db: Session) -> list[NewsItem]:
         item.published_at = payload["published_at"]
         item.signal_score = payload["signal_score"]
         item.tags_json = payload["tags_json"]
+        item.is_seeded = False
+        item.last_synced_at = sync_time
     db.commit()
     return list_news(db)
 
