@@ -133,7 +133,7 @@ def _job_action_target(job, paths: list[dict], is_saved: bool = False) -> tuple[
         return (
             "Turn your saved target role into portfolio proof" if is_saved else "Use a strong-fit role to sharpen portfolio proof",
             "/projects",
-            f"{build_job_fit_summary(job)} {'You saved this role, so ' if is_saved else ''}update one active project so it clearly mirrors the system shape {job.company_name} is hiring for.",
+            f"{build_job_fit_summary(job)} {'You saved this role, so ' if is_saved else ''}Update one active project so it clearly mirrors the system shape {job.company_name} is hiring for.",
         )
     if job.skill_gaps_json:
         top_gap = job.skill_gaps_json[0]
@@ -141,12 +141,12 @@ def _job_action_target(job, paths: list[dict], is_saved: bool = False) -> tuple[
         return (
             "Close the top gap for your saved role" if is_saved else "Turn a job gap into a focused learning sprint",
             learning_target["action_path"] if learning_target else JOB_GAP_ACTION_MAP.get(top_gap, "/learn"),
-            f"{build_job_fit_summary(job)} {'Because you saved this role, ' if is_saved else ''}the clearest next move is to close {top_gap} with one targeted lesson or implementation task.",
+            f"{build_job_fit_summary(job)} {'Because you saved this role, ' if is_saved else 'The '}clearest next move is to close {top_gap} with one targeted lesson or implementation task.",
         )
     return (
         "Use your saved role to tighten interview positioning" if is_saved else "Use this role to tighten interview positioning",
         "/interview",
-        f"{build_job_fit_summary(job)} {'You saved it, so ' if is_saved else ''}treat this role as an interview calibration target and practice explaining your overlap clearly.",
+        f"{build_job_fit_summary(job)} {'You saved it, so ' if is_saved else 'Treat '}this role as an interview calibration target and practice explaining your overlap clearly.",
     )
 
 

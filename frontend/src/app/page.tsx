@@ -66,6 +66,13 @@ export default async function DashboardPage() {
               </div>
             ))}
           </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {today.highlights.map((item) => (
+              <div key={item} className="rounded-2xl bg-cream p-4 text-sm text-ink/80">
+                {item}
+              </div>
+            ))}
+          </div>
         </Panel>
       </div>
 
@@ -77,8 +84,7 @@ export default async function DashboardPage() {
             description="Keep the fundamentals active while you build."
           />
           <p className="text-sm text-ink/70">
-            Category: {summary.recommended_exercise?.category} · Difficulty:{" "}
-            {summary.recommended_exercise?.difficulty}
+            Category: {summary.recommended_exercise?.category} | Difficulty: {summary.recommended_exercise?.difficulty}
           </p>
           <Link href="/practice/python" className="inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold">
             Open practice hub
@@ -94,9 +100,7 @@ export default async function DashboardPage() {
           {summary.active_projects.map((project) => (
             <div key={project.id} className="rounded-2xl bg-white p-4">
               <p className="font-semibold text-ink">{project.title}</p>
-              <p className="text-sm text-ink/70">
-                {project.status} · Portfolio score {project.portfolio_score}
-              </p>
+              <p className="text-sm text-ink/70">{project.status} | Portfolio score {project.portfolio_score}</p>
             </div>
           ))}
         </Panel>
@@ -124,8 +128,12 @@ export default async function DashboardPage() {
           />
           {topNews ? (
             <>
+              <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.24em] text-ink/55">
+                <span>{topNews.source_name}</span>
+                <span>Signal {topNews.signal_score}</span>
+                {topNews.is_saved ? <span className="rounded-full bg-ink px-2 py-1 text-[10px] text-cream">Saved</span> : null}
+              </div>
               <p className="text-sm text-ink/70">{topNews.summary}</p>
-              <p className="text-sm text-ink/70">Source: {topNews.source_name} · Signal {topNews.signal_score}</p>
               <p className="text-sm text-ink/70">{topNews.why_it_matters}</p>
               <Link href="/news" className="inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold">
                 Open news feed
@@ -135,9 +143,10 @@ export default async function DashboardPage() {
           {topJob ? (
             <div className="rounded-2xl bg-cream p-4">
               <p className="font-semibold text-ink">{topJob.title}</p>
-              <p className="mt-2 text-sm text-ink/70">
-                {topJob.company_name} · Fit {topJob.fit_score}
-              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink/70">
+                <span>{topJob.company_name} | Fit {topJob.fit_score}</span>
+                {topJob.is_saved ? <span className="rounded-full bg-ink px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-cream">Saved</span> : null}
+              </div>
               <p className="mt-2 text-sm text-ink/70">{topJob.fit_summary}</p>
               <Link href="/jobs" className="mt-3 inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold">
                 Open jobs

@@ -156,20 +156,45 @@ def _dashboard_job_reason(fit_score: int, is_saved: bool = False) -> str:
 
 
 def _today_news_focus(category: str, is_saved: bool = False) -> str:
-    prefix = "Revisit the saved signal and " if is_saved else ""
     return {
-        "model-release": f"{prefix}note one experiment it suggests for your stack.",
-        "agents": f"{prefix}translate it into one workflow or tool-use improvement for a project.",
-        "retrieval": f"{prefix}use it to improve one RAG or evaluation note today.",
-        "evaluation": f"{prefix}turn it into one benchmark or review task.",
-        "open-source": f"{prefix}compare it against your current project stack and write down a yes/no decision.",
-    }.get(category, f"{prefix}convert it into a concrete build or learning action.")
+        "model-release": "Revisit the saved signal and note one experiment it suggests for your stack."
+        if is_saved
+        else "Review the top model or platform release and note one experiment it suggests for your stack.",
+        "agents": "Revisit the saved signal and translate it into one workflow or tool-use improvement for a project."
+        if is_saved
+        else "Translate the top agent signal into one workflow or tool-use improvement for a project.",
+        "retrieval": "Revisit the saved signal and use it to improve one RAG or evaluation note today."
+        if is_saved
+        else "Use the top retrieval signal to improve one RAG or evaluation note today.",
+        "evaluation": "Revisit the saved signal and turn it into one benchmark or review task."
+        if is_saved
+        else "Take the top evaluation signal and turn it into one benchmark or review task.",
+        "open-source": "Revisit the saved signal and compare it against your current project stack before making a yes or no decision."
+        if is_saved
+        else "Compare the top tooling signal against your current project stack and write down a yes or no decision.",
+    }.get(
+        category,
+        "Revisit the saved signal and convert it into a concrete build or learning action."
+        if is_saved
+        else "Review one external signal and convert it into a concrete build or learning action.",
+    )
 
 
 def _today_job_focus(fit_score: int, is_saved: bool = False) -> str:
-    prefix = "Use your saved role as the bar and " if is_saved else ""
     if fit_score >= 85:
-        return f"{prefix}treat it as a checklist for what your current project should prove this week."
+        return (
+            "Use your saved role as the bar and treat it as a checklist for what your current project should prove this week."
+            if is_saved
+            else "Use the top-fit role as a checklist for what your current project should prove this week."
+        )
     if fit_score >= 70:
-        return f"{prefix}pick one portfolio or interview gap it exposes and close it this week."
-    return f"{prefix}identify which topic deserves the next focused learning sprint."
+        return (
+            "Use your saved role as the bar and pick one portfolio or interview gap it exposes to close this week."
+            if is_saved
+            else "Pick one portfolio or interview gap exposed by the current best-fit role and close it this week."
+        )
+    return (
+        "Use your saved role as the bar and identify which topic deserves the next focused learning sprint."
+        if is_saved
+        else "Use the current job board to identify which topic deserves the next focused learning sprint."
+    )
