@@ -175,6 +175,7 @@ export const mockInterviewQuestions: InterviewQuestion[] = [
 export const mockInterviewRoadmap: InterviewRoadmap = {
   focus_areas: ["Python fluency", "LLM systems", "RAG debugging", "Behavioral transition story"],
   weekly_plan: ["Monday practice", "Wednesday mock system design", "Friday review and refine"],
+  rationale: ["Project proof and interview readiness should reinforce each other."],
 };
 
 export const mockRecommendations: Recommendation[] = [

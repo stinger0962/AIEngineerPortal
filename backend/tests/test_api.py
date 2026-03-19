@@ -166,6 +166,23 @@ def test_news_and_jobs_phase_two_routes():
     assert fit_response.json()["fit_score"] >= 45
 
 
+def test_phase_three_interview_routes_are_personalized():
+    roadmap = client.get("/api/v1/interview/roadmap")
+    assert roadmap.status_code == 200
+    payload = roadmap.json()
+    assert payload["focus_areas"]
+    assert payload["weekly_plan"]
+    assert payload["rationale"]
+
+    readiness = client.get("/api/v1/interview/portfolio-readiness")
+    assert readiness.status_code == 200
+    readiness_payload = readiness.json()
+    assert "overall_score" in readiness_payload
+    assert readiness_payload["strongest_signals"]
+    assert readiness_payload["gaps_to_close"]
+    assert readiness_payload["next_best_moves"]
+
+
 def test_recommendations_include_signal_specific_actions():
     response = client.get("/api/v1/recommendations/next-actions")
     assert response.status_code == 200

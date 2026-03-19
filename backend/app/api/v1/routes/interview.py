@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas import InterviewQuestionOut, InterviewRoadmap
-from app.services.interview_service import build_roadmap, list_questions
+from app.schemas import InterviewQuestionOut, InterviewRoadmap, PortfolioReadiness
+from app.services.interview_service import build_portfolio_readiness, build_roadmap, list_questions
 
 router = APIRouter(prefix="/interview", tags=["interview"])
 
@@ -18,5 +18,10 @@ def get_questions(category: Optional[str] = Query(default=None), db: Session = D
 
 
 @router.get("/roadmap", response_model=InterviewRoadmap)
-def get_roadmap() -> InterviewRoadmap:
-    return InterviewRoadmap(**build_roadmap())
+def get_roadmap(db: Session = Depends(get_db)) -> InterviewRoadmap:
+    return InterviewRoadmap(**build_roadmap(db))
+
+
+@router.get("/portfolio-readiness", response_model=PortfolioReadiness)
+def get_portfolio_readiness(db: Session = Depends(get_db)) -> PortfolioReadiness:
+    return PortfolioReadiness(**build_portfolio_readiness(db))

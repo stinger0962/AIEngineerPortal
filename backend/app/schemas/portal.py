@@ -218,6 +218,14 @@ class InterviewQuestionOut(PortalBase):
 class InterviewRoadmap(BaseModel):
     focus_areas: List[str]
     weekly_plan: List[str]
+    rationale: List[str] = []
+
+
+class PortfolioReadiness(BaseModel):
+    overall_score: int
+    strongest_signals: List[str]
+    gaps_to_close: List[str]
+    next_best_moves: List[str]
 
 
 class RecommendationOut(BaseModel):

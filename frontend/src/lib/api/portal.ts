@@ -26,6 +26,7 @@ import type {
   KnowledgeArticle,
   LearningPath,
   NewsItem,
+  PortfolioReadiness,
   Project,
   Recommendation,
 } from "@/lib/types/portal";
@@ -145,5 +146,6 @@ export const portalApi = {
     ),
   getInterviewQuestions: () => fetchJson<InterviewQuestion[]>("/interview/questions", undefined, mockInterviewQuestions),
   getInterviewRoadmap: () => fetchJson<InterviewRoadmap>("/interview/roadmap", undefined, mockInterviewRoadmap),
+  getPortfolioReadiness: () => fetchJson<PortfolioReadiness>("/interview/portfolio-readiness"),
   getRecommendations: () => fetchJson<Recommendation[]>("/recommendations/next-actions", undefined, mockRecommendations),
 };

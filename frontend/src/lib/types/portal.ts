@@ -168,6 +168,14 @@ export type InterviewQuestion = {
 export type InterviewRoadmap = {
   focus_areas: string[];
   weekly_plan: string[];
+  rationale: string[];
+};
+
+export type PortfolioReadiness = {
+  overall_score: number;
+  strongest_signals: string[];
+  gaps_to_close: string[];
+  next_best_moves: string[];
 };
 
 export type Recommendation = {

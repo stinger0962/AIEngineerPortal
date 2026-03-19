@@ -17,6 +17,7 @@ from app.schemas.portal import (
     LessonCompletionResponse,
     LessonOut,
     NewsItemOut,
+    PortfolioReadiness,
     ProgressSnapshotOut,
     ProjectIn,
     ProjectOut,
