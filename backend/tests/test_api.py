@@ -180,3 +180,30 @@ def test_recommendations_include_signal_specific_actions():
         )
         for item in payload
     )
+
+
+def test_saved_signals_drive_recommendations_and_today_view():
+    news_items = client.get("/api/v1/news").json()
+    saved_news = next(item for item in news_items if item["category"] == "agents")
+    save_news_response = client.post(f"/api/v1/news/{saved_news['id']}/save")
+    assert save_news_response.status_code == 200
+
+    jobs = client.get("/api/v1/jobs").json()
+    saved_job = jobs[0]
+    save_job_response = client.post(f"/api/v1/jobs/{saved_job['id']}/save")
+    assert save_job_response.status_code == 200
+
+    recommendations = client.get("/api/v1/recommendations/next-actions").json()
+    news_recommendation = next(item for item in recommendations if item["source_kind"] == "news")
+    job_recommendation = next(item for item in recommendations if item["source_kind"] == "jobs")
+    assert news_recommendation["title"] == "Act on a saved AI signal"
+    assert news_recommendation["action_path"].startswith("/learn/lesson/ai-agents-and-tools")
+    assert job_recommendation["title"] in {
+        "Turn your saved target role into portfolio proof",
+        "Close the top gap for your saved role",
+        "Use your saved role to tighten interview positioning",
+    }
+
+    today = client.get("/api/v1/dashboard/today").json()
+    assert any("saved signal" in item.lower() for item in today["focus"])
+    assert any("saved 1 news items and 1 roles" in item.lower() for item in today["highlights"])

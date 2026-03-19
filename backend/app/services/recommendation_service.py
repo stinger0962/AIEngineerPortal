@@ -71,10 +71,9 @@ def next_actions(db: Session) -> list[dict]:
         },
     ]
 
-    top_news = list_news(db)[:1]
-    if top_news:
-        news = top_news[0]
-        news_title, news_path, news_reason = _news_action_target(news.category, paths)
+    news, is_saved_news = _preferred_news_item(db)
+    if news:
+        news_title, news_path, news_reason = _news_action_target(news.category, paths, is_saved_news)
         recommendations.append(
             {
                 "title": news_title,
@@ -84,10 +83,9 @@ def next_actions(db: Session) -> list[dict]:
             }
         )
 
-    top_jobs = list_jobs(db, min_fit_score=60)[:1]
-    if top_jobs:
-        job = top_jobs[0]
-        job_title, job_path, job_reason = _job_action_target(job, paths)
+    job, is_saved_job = _preferred_job_item(db)
+    if job:
+        job_title, job_path, job_reason = _job_action_target(job, paths, is_saved_job)
         recommendations.append(
             {
                 "title": job_title,
@@ -100,35 +98,55 @@ def next_actions(db: Session) -> list[dict]:
     return recommendations
 
 
-def _news_action_target(category: str, paths: list[dict]) -> tuple[str, str, str]:
+def _preferred_news_item(db: Session):
+    saved_news = list_news(db, saved_only=True)
+    if saved_news:
+        return saved_news[0], True
+    top_news = list_news(db)[:1]
+    return (top_news[0], False) if top_news else (None, False)
+
+
+def _preferred_job_item(db: Session):
+    saved_jobs = list_jobs(db, saved_only=True)
+    if saved_jobs:
+        return saved_jobs[0], True
+    top_jobs = list_jobs(db, min_fit_score=60)[:1]
+    return (top_jobs[0], False) if top_jobs else (None, False)
+
+
+def _news_action_target(category: str, paths: list[dict], is_saved: bool = False) -> tuple[str, str, str]:
     default_title, default_path = NEWS_ACTION_MAP.get(category, ("Review one external AI signal", "/news"))
     suggested_path = _best_learning_target_for_news(category, paths)
     if suggested_path:
-        return default_title, suggested_path["action_path"], suggested_path["reason"]
+        title = "Act on a saved AI signal" if is_saved else default_title
+        reason = f"You already flagged this signal. {suggested_path['reason']}" if is_saved else suggested_path["reason"]
+        return title, suggested_path["action_path"], reason
     if default_path.startswith("/learn/"):
-        return default_title, default_path, "Use this signal to deepen the matching learning path before it becomes background noise."
-    return default_title, default_path, "Use this signal to make one clear project or learning decision this week."
+        reason = "You saved this signal, so convert it into one learning decision before it goes stale." if is_saved else "Use this signal to deepen the matching learning path before it becomes background noise."
+        return ("Act on a saved AI signal" if is_saved else default_title), default_path, reason
+    reason = "You saved this signal, so translate it into one concrete project or interview move this week." if is_saved else "Use this signal to make one clear project or learning decision this week."
+    return ("Act on a saved AI signal" if is_saved else default_title), default_path, reason
 
 
-def _job_action_target(job, paths: list[dict]) -> tuple[str, str, str]:
+def _job_action_target(job, paths: list[dict], is_saved: bool = False) -> tuple[str, str, str]:
     if job.fit_score >= 85:
         return (
-            "Use a strong-fit role to sharpen portfolio proof",
+            "Turn your saved target role into portfolio proof" if is_saved else "Use a strong-fit role to sharpen portfolio proof",
             "/projects",
-            f"{build_job_fit_summary(job)} Update one active project so it clearly mirrors the system shape {job.company_name} is hiring for.",
+            f"{build_job_fit_summary(job)} {'You saved this role, so ' if is_saved else ''}update one active project so it clearly mirrors the system shape {job.company_name} is hiring for.",
         )
     if job.skill_gaps_json:
         top_gap = job.skill_gaps_json[0]
         learning_target = _best_learning_target_for_gap(top_gap, paths)
         return (
-            "Turn a job gap into a focused learning sprint",
+            "Close the top gap for your saved role" if is_saved else "Turn a job gap into a focused learning sprint",
             learning_target["action_path"] if learning_target else JOB_GAP_ACTION_MAP.get(top_gap, "/learn"),
-            f"{build_job_fit_summary(job)} The clearest next move is to close {top_gap} with one targeted lesson or implementation task.",
+            f"{build_job_fit_summary(job)} {'Because you saved this role, ' if is_saved else ''}the clearest next move is to close {top_gap} with one targeted lesson or implementation task.",
         )
     return (
-        "Use this role to tighten interview positioning",
+        "Use your saved role to tighten interview positioning" if is_saved else "Use this role to tighten interview positioning",
         "/interview",
-        f"{build_job_fit_summary(job)} Treat this role as an interview calibration target and practice explaining your overlap clearly.",
+        f"{build_job_fit_summary(job)} {'You saved it, so ' if is_saved else ''}treat this role as an interview calibration target and practice explaining your overlap clearly.",
     )
 
 
