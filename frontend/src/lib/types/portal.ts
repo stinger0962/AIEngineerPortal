@@ -50,7 +50,19 @@ export type Course = {
   description: string;
   difficulty: string;
   estimated_hours: number;
-  milestones_json: { label: string; status: string }[];
+  milestones_json: {
+    label: string;
+    status: string;
+    goal?: string;
+    outcome?: string;
+    path_slug?: string;
+    path_title?: string;
+    lesson_slugs?: string[];
+    exercise_slugs?: string[];
+    project_slug?: string;
+    deliverable?: string;
+    why_it_matters?: string;
+  }[];
   status: string;
   track_focus: string;
 };

@@ -73,6 +73,19 @@ def test_phase_four_python_lesson_has_real_depth():
     assert "## Takeaway" in payload["content_md"]
 
 
+def test_phase_four_foundations_course_has_guided_milestones():
+    course = client.get("/api/v1/courses/ai-engineer-foundations")
+    assert course.status_code == 200
+    payload = course.json()
+    assert payload["estimated_hours"] == 18
+    assert len(payload["milestones_json"]) >= 4
+    first = payload["milestones_json"][0]
+    assert first["path_slug"] == "python-for-ai-engineers"
+    assert first["lesson_slugs"]
+    assert first["exercise_slugs"]
+    assert "deliverable" in first
+
+
 def test_exercise_attempt_roundtrip():
     recommended = client.get("/api/v1/exercises/recommended").json()
     exercise_id = recommended[0]["id"]

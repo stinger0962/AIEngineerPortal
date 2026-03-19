@@ -726,12 +726,168 @@ Python becomes portfolio leverage when it demonstrates engineering discipline, n
 ]
 
 COURSES = [
-    ("AI Engineer Foundations", "ai-engineer-foundations", "A practical transition track from senior software engineer to AI engineer.", "beginner", 24, "foundations"),
-    ("Practical LLM Engineer", "practical-llm-engineer", "Ship focused LLM features with production awareness.", "intermediate", 22, "llm"),
-    ("RAG Builder Track", "rag-builder-track", "Design, evaluate, and improve retrieval workflows.", "intermediate", 20, "rag"),
-    ("AI Agents Builder Track", "ai-agents-builder-track", "Build tool-using systems with explicit control surfaces.", "intermediate", 18, "agents"),
-    ("MLOps for Software Engineers", "mlops-for-software-engineers", "Apply software engineering discipline to AI delivery.", "advanced", 21, "mlops"),
-    ("Interview Prep Track", "interview-prep-track", "Convert learning and projects into interview-ready performance.", "intermediate", 12, "interview"),
+    {
+        "title": "AI Engineer Foundations",
+        "slug": "ai-engineer-foundations",
+        "description": "A guided transition track that turns software engineering strength into visible AI engineering proof.",
+        "difficulty": "beginner",
+        "estimated_hours": 18,
+        "track_focus": "foundations",
+        "status": "active",
+        "milestones_json": [
+            {
+                "label": "Week 1: Build Python execution confidence",
+                "status": "active",
+                "goal": "Learn the runtime habits, boundary modeling, and async instincts that applied AI work depends on.",
+                "outcome": "You can explain and implement safer provider boundaries, cleaner scripts, and rerunnable Python workflows.",
+                "path_slug": "python-for-ai-engineers",
+                "path_title": "Python for AI Engineers",
+                "lesson_slugs": [
+                    "python-for-ai-engineers-1",
+                    "python-for-ai-engineers-2",
+                    "python-for-ai-engineers-3",
+                ],
+                "exercise_slugs": [
+                    "normalize-provider-payloads",
+                    "retry-provider-call-timeout-backoff",
+                ],
+                "project_slug": "evaluation-dashboard",
+                "deliverable": "Refactor one project boundary or utility into a typed, rerunnable Python module.",
+                "why_it_matters": "This is the fastest way to stop feeling like Python is the bottleneck in AI work.",
+            },
+            {
+                "label": "Week 2: Understand the LLM application shape",
+                "status": "planned",
+                "goal": "Learn how prompt, context, tools, memory, latency, and guardrails interact in a real product feature.",
+                "outcome": "You can map the request lifecycle of an LLM feature and explain the major tradeoffs clearly.",
+                "path_slug": "llm-app-foundations",
+                "path_title": "LLM App Foundations",
+                "lesson_slugs": [
+                    "llm-app-foundations-1",
+                    "llm-app-foundations-2",
+                    "llm-app-foundations-3",
+                ],
+                "exercise_slugs": [
+                    "render-safe-prompt-template",
+                ],
+                "project_slug": "rag-research-brief-assistant",
+                "deliverable": "Document one assistant workflow with explicit context assembly, guardrails, and failure handling.",
+                "why_it_matters": "Most AI engineer interviews and projects assume this systems map, not just prompt familiarity.",
+            },
+            {
+                "label": "Week 3: Ground answers with retrieval and evaluation",
+                "status": "planned",
+                "goal": "Learn how retrieval quality, ranking, and evaluation loops shape product trust.",
+                "outcome": "You can debug a weak RAG answer by separating retrieval, prompting, and answer quality issues.",
+                "path_slug": "rag-systems",
+                "path_title": "RAG Systems",
+                "lesson_slugs": [
+                    "rag-systems-1",
+                    "rag-systems-2",
+                    "rag-systems-4",
+                ],
+                "exercise_slugs": [
+                    "score-retrieval-candidates",
+                    "compute-faithfulness-citation-coverage",
+                ],
+                "project_slug": "rag-research-brief-assistant",
+                "deliverable": "Add one retrieval or evaluation improvement to a project and record what changed.",
+                "why_it_matters": "Retrieval and evaluation are where many applied AI systems become real engineering work.",
+            },
+            {
+                "label": "Week 4: Convert learning into visible proof",
+                "status": "planned",
+                "goal": "Use project evidence, system design language, and interview storytelling to turn study into hiring leverage.",
+                "outcome": "You can point to at least one credible project story with architecture, metrics, tradeoffs, and next steps.",
+                "path_slug": "ai-engineer-interview-readiness",
+                "path_title": "AI Engineer Interview Readiness",
+                "lesson_slugs": [
+                    "ai-engineer-interview-readiness-1",
+                    "ai-engineer-interview-readiness-2",
+                    "ai-engineer-interview-readiness-5",
+                ],
+                "exercise_slugs": [],
+                "project_slug": "evaluation-dashboard",
+                "deliverable": "Turn one active project into an interview-ready write-up and talking track.",
+                "why_it_matters": "This is where the portal becomes career leverage instead of just a study tracker.",
+            },
+        ],
+    },
+    {
+        "title": "Practical LLM Engineer",
+        "slug": "practical-llm-engineer",
+        "description": "Ship focused LLM features with production awareness.",
+        "difficulty": "intermediate",
+        "estimated_hours": 22,
+        "track_focus": "llm",
+        "status": "active",
+        "milestones_json": [
+            {"label": "Map the end-to-end request lifecycle", "status": "planned"},
+            {"label": "Design one narrow assistant with clear guardrails", "status": "planned"},
+            {"label": "Instrument latency, failure, and review loops", "status": "planned"},
+            {"label": "Document the tradeoffs like a product engineer", "status": "planned"},
+        ],
+    },
+    {
+        "title": "RAG Builder Track",
+        "slug": "rag-builder-track",
+        "description": "Design, evaluate, and improve retrieval workflows.",
+        "difficulty": "intermediate",
+        "estimated_hours": 20,
+        "track_focus": "rag",
+        "status": "active",
+        "milestones_json": [
+            {"label": "Choose chunking and metadata strategy", "status": "planned"},
+            {"label": "Improve ranking and citations", "status": "planned"},
+            {"label": "Measure retrieval and answer quality separately", "status": "planned"},
+            {"label": "Turn one RAG build into portfolio proof", "status": "planned"},
+        ],
+    },
+    {
+        "title": "AI Agents Builder Track",
+        "slug": "ai-agents-builder-track",
+        "description": "Build tool-using systems with explicit control surfaces.",
+        "difficulty": "intermediate",
+        "estimated_hours": 18,
+        "track_focus": "agents",
+        "status": "active",
+        "milestones_json": [
+            {"label": "Decide when an agent is justified", "status": "planned"},
+            {"label": "Model tools and state transitions explicitly", "status": "planned"},
+            {"label": "Add approvals, retries, and traces", "status": "planned"},
+            {"label": "Ship one auditable workflow artifact", "status": "planned"},
+        ],
+    },
+    {
+        "title": "MLOps for Software Engineers",
+        "slug": "mlops-for-software-engineers",
+        "description": "Apply software engineering discipline to AI delivery.",
+        "difficulty": "advanced",
+        "estimated_hours": 21,
+        "track_focus": "mlops",
+        "status": "active",
+        "milestones_json": [
+            {"label": "Choose the runtime shape", "status": "planned"},
+            {"label": "Harden secrets and configuration boundaries", "status": "planned"},
+            {"label": "Separate request work from background work", "status": "planned"},
+            {"label": "Make a project deployable outside localhost", "status": "planned"},
+        ],
+    },
+    {
+        "title": "Interview Prep Track",
+        "slug": "interview-prep-track",
+        "description": "Convert learning and projects into interview-ready performance.",
+        "difficulty": "intermediate",
+        "estimated_hours": 12,
+        "track_focus": "interview",
+        "status": "active",
+        "milestones_json": [
+            {"label": "Clarify the transition narrative", "status": "planned"},
+            {"label": "Practice AI system design tradeoffs", "status": "planned"},
+            {"label": "Refresh Python and backend reps under pressure", "status": "planned"},
+            {"label": "Turn projects into answer proof points", "status": "planned"},
+        ],
+    },
 ]
 
 PATHS = [(path["title"], path["slug"], path["description"], path["level"], path["estimated_hours"]) for path in LEARNING_LIBRARY]
@@ -767,26 +923,7 @@ def build_lessons():
 
 
 def build_courses():
-    courses = []
-    for title, slug, description, difficulty, estimated_hours, track_focus in COURSES:
-        courses.append(
-            {
-                "title": title,
-                "slug": slug,
-                "description": description,
-                "difficulty": difficulty,
-                "estimated_hours": estimated_hours,
-                "track_focus": track_focus,
-                "milestones_json": [
-                    {"label": "Build conceptual map", "status": "planned"},
-                    {"label": "Ship one practical module", "status": "planned"},
-                    {"label": "Document tradeoffs and metrics", "status": "planned"},
-                    {"label": "Convert into interview stories", "status": "planned"},
-                ],
-                "status": "active",
-            }
-        )
-    return courses
+    return [dict(course) for course in COURSES]
 
 
 EXERCISES = [

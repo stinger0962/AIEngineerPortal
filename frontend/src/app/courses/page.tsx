@@ -9,7 +9,11 @@ export default async function CoursesPage() {
 
   return (
     <div className="space-y-6">
-      <SectionHeading eyebrow="Course Hub" title="Curated tracks for portfolio and interview progress." description="These tracks organize the broader learning center into guided sequences." />
+      <SectionHeading
+        eyebrow="Course Hub"
+        title="Guided tracks for turning study into visible execution."
+        description="These tracks now organize the broader learning center into week-by-week milestones with linked lessons, drills, and project proof points."
+      />
       <div className="grid gap-6 xl:grid-cols-2">
         {courses.map((course) => (
           <Panel key={course.id} className="space-y-4">
@@ -20,10 +24,18 @@ export default async function CoursesPage() {
               </div>
               <div className="rounded-full bg-cream px-4 py-2 text-sm text-ink">{course.status}</div>
             </div>
+            <div className="rounded-2xl bg-cream p-4 text-sm text-ink/75">
+              <div className="text-xs uppercase tracking-[0.24em] text-rust">Track summary</div>
+              <p className="mt-2 leading-6">
+                {course.difficulty} / {course.estimated_hours} hours / {course.track_focus}
+              </p>
+            </div>
             <div className="space-y-2">
               {course.milestones_json.map((milestone) => (
                 <div key={milestone.label} className="rounded-2xl bg-mint p-4 text-sm text-ink">
-                  {milestone.label} · {milestone.status}
+                  <div className="font-semibold">{milestone.label}</div>
+                  <div className="mt-1 text-ink/70">{milestone.status}</div>
+                  {milestone.goal ? <p className="mt-2 text-ink/75">{milestone.goal}</p> : null}
                 </div>
               ))}
             </div>
