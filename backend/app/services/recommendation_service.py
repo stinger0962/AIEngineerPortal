@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import User
+from app.models import ProgressSnapshot, Project, User
 from app.services.learning_service import list_paths
 from app.services.dashboard_service import build_dashboard_summary
 from app.services.jobs_service import build_job_fit_summary, list_jobs
@@ -50,6 +50,8 @@ def next_actions(db: Session) -> list[dict]:
     lesson = summary["next_lesson"]
     exercise = summary["recommended_exercise"]
     paths = list_paths(db, user.id) if user else []
+    snapshot = _latest_progress_snapshot(db, user.id) if user else None
+    project_action = _project_or_interview_action(db, snapshot)
     recommendations = [
         {
             "title": "Advance the next learning milestone",
@@ -64,10 +66,10 @@ def next_actions(db: Session) -> list[dict]:
             "source_kind": "practice",
         },
         {
-            "title": "Convert project work into interview leverage",
-            "reason": "Update one project with concrete architecture decisions and metrics.",
-            "action_path": "/projects",
-            "source_kind": "projects",
+            "title": project_action["title"],
+            "reason": project_action["reason"],
+            "action_path": project_action["action_path"],
+            "source_kind": project_action["source_kind"],
         },
     ]
 
@@ -96,6 +98,63 @@ def next_actions(db: Session) -> list[dict]:
         )
 
     return recommendations
+
+
+def _latest_progress_snapshot(db: Session, user_id: int) -> ProgressSnapshot | None:
+    return db.scalar(
+        select(ProgressSnapshot)
+        .where(ProgressSnapshot.user_id == user_id)
+        .order_by(ProgressSnapshot.date.desc(), ProgressSnapshot.id.desc())
+    )
+
+
+def _project_or_interview_action(db: Session, snapshot: ProgressSnapshot | None) -> dict:
+    completed_projects = db.scalars(
+        select(Project).where(Project.status == "complete").order_by(Project.portfolio_score.desc(), Project.id.asc())
+    ).all()
+    active_projects = db.scalars(
+        select(Project).where(Project.status.in_(["active", "planned"])).order_by(Project.portfolio_score.desc(), Project.id.asc())
+    ).all()
+    readiness = snapshot.interview_readiness_score if snapshot else 0
+
+    if not completed_projects:
+        target = active_projects[0] if active_projects else None
+        return {
+            "title": "Convert project work into interview leverage",
+            "reason": (
+                f"Push {target.title} toward a finished, interview-ready story with clearer architecture decisions and metrics."
+                if target
+                else "Finish one project far enough that it becomes a credible interview story, not just a draft."
+            ),
+            "action_path": f"/projects/{target.slug}" if target else "/projects",
+            "source_kind": "projects",
+        }
+
+    if readiness < 45:
+        return {
+            "title": "Turn completed work into interview reps",
+            "reason": (
+                f"You already have {len(completed_projects)} completed project proof point(s). The weaker gap is explaining them clearly under interview pressure."
+            ),
+            "action_path": "/interview",
+            "source_kind": "interview",
+        }
+
+    if active_projects:
+        target = active_projects[0]
+        return {
+            "title": "Keep one portfolio artifact improving",
+            "reason": f"{target.title} is active, so tighten one metric, architecture note, or demo-quality workflow this week.",
+            "action_path": f"/projects/{target.slug}",
+            "source_kind": "projects",
+        }
+
+    return {
+        "title": "Compound interview readiness with sharper stories",
+        "reason": "Project proof exists now, so the highest-value move is sharpening system design and behavioral explanations.",
+        "action_path": "/interview",
+        "source_kind": "interview",
+    }
 
 
 def _preferred_news_item(db: Session):

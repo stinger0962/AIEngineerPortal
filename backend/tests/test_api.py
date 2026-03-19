@@ -231,3 +231,11 @@ def test_dashboard_summary_adapts_to_completed_lessons_and_practice_history():
 
     next_summary = client.get("/api/v1/dashboard/summary").json()
     assert next_summary["recommended_exercise"]["id"] != first_recommended_id
+
+
+def test_recommendations_prefer_interview_when_project_proof_exists():
+    updated = client.get("/api/v1/recommendations/next-actions").json()
+    internal = next(item for item in updated if item["source_kind"] in {"projects", "interview"})
+    assert internal["source_kind"] == "interview"
+    assert internal["action_path"] == "/interview"
+    assert "completed project proof point" in internal["reason"].lower()
