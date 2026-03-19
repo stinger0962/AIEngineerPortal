@@ -207,3 +207,27 @@ def test_saved_signals_drive_recommendations_and_today_view():
     today = client.get("/api/v1/dashboard/today").json()
     assert any("saved signal" in item.lower() for item in today["focus"])
     assert any("saved 1 news items and 1 roles" in item.lower() for item in today["highlights"])
+
+
+def test_dashboard_summary_adapts_to_completed_lessons_and_practice_history():
+    agent_news = next(item for item in client.get("/api/v1/news").json() if item["category"] == "agents")
+    assert client.post(f"/api/v1/news/{agent_news['id']}/save").status_code == 200
+
+    paths = client.get("/api/v1/learning/paths").json()
+    agents_path = next(path for path in paths if path["slug"] == "ai-agents-and-tools")
+    first_agent_lesson_id = agents_path["lessons"][0]["id"]
+    assert client.post(f"/api/v1/learning/lessons/{first_agent_lesson_id}/complete").status_code == 200
+
+    summary = client.get("/api/v1/dashboard/summary").json()
+    assert summary["next_lesson"]["slug"] == "ai-agents-and-tools-2"
+    assert summary["recommended_exercise"]["category"] in {"prompt-formatting", "api-async"}
+    first_recommended_id = summary["recommended_exercise"]["id"]
+
+    attempt_response = client.post(
+        f"/api/v1/exercises/{first_recommended_id}/attempt",
+        json={"submitted_code": "def solve(payload):\n    return payload\n", "notes": "Rotate to next drill"},
+    )
+    assert attempt_response.status_code == 200
+
+    next_summary = client.get("/api/v1/dashboard/summary").json()
+    assert next_summary["recommended_exercise"]["id"] != first_recommended_id

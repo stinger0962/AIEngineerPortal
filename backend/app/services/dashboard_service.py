@@ -1,10 +1,47 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Exercise, JobPosting, Lesson, LessonCompletion, NewsItem, ProgressSnapshot, Project, User
+from app.models import Exercise, JobPosting, Lesson, LessonCompletion, NewsItem, ProgressSnapshot, Project, User, UserExerciseAttempt
 from app.services.progress_service import refresh_progress_snapshot
+from app.services.learning_service import list_paths
+
+NEWS_TO_PATH = {
+    "model-release": "llm-app-foundations",
+    "agents": "ai-agents-and-tools",
+    "retrieval": "rag-systems",
+    "evaluation": "evaluation-and-observability",
+    "open-source": "ai-deployment-and-mlops",
+}
+
+NEWS_TO_EXERCISE_CATEGORIES = {
+    "model-release": ["api-async", "prompt-formatting"],
+    "agents": ["prompt-formatting", "api-async"],
+    "retrieval": ["retrieval", "evaluation"],
+    "evaluation": ["evaluation", "retrieval"],
+    "open-source": ["python-refresh", "api-async"],
+}
+
+JOB_GAP_TO_PATH = {
+    "MLOps depth": "ai-deployment-and-mlops",
+    "Kubernetes operations": "ai-deployment-and-mlops",
+    "Deep learning breadth": "python-for-ai-engineers",
+    "PyTorch practice": "python-for-ai-engineers",
+    "Workflow orchestration": "ai-agents-and-tools",
+    "Distributed systems depth": "ai-deployment-and-mlops",
+}
+
+JOB_GAP_TO_EXERCISE_CATEGORIES = {
+    "MLOps depth": ["evaluation", "api-async"],
+    "Kubernetes operations": ["api-async", "evaluation"],
+    "Deep learning breadth": ["python-refresh", "data-transformation"],
+    "PyTorch practice": ["python-refresh", "data-transformation"],
+    "Workflow orchestration": ["prompt-formatting", "api-async"],
+    "Distributed systems depth": ["api-async", "evaluation"],
+}
+
+DEFAULT_EXERCISE_CATEGORIES = ["python-refresh", "evaluation", "retrieval", "api-async", "data-transformation", "prompt-formatting"]
 
 
 def get_default_user(db: Session) -> User:
@@ -14,19 +51,9 @@ def get_default_user(db: Session) -> User:
 def build_dashboard_summary(db: Session) -> dict:
     user = get_default_user(db)
     snapshot = refresh_progress_snapshot(db, user.id)
-    completed_ids = set(
-        db.scalars(select(LessonCompletion.lesson_id).where(LessonCompletion.user_id == user.id)).all()
-    )
-
-    next_lesson = None
-    for lesson in db.scalars(select(Lesson).order_by(Lesson.id.asc())).all():
-        if lesson.id not in completed_ids:
-            next_lesson = lesson
-            break
-
-    recommended_exercise = db.scalar(
-        select(Exercise).where(Exercise.category.in_(["python-refresh", "evaluation"])).order_by(Exercise.id.asc())
-    )
+    paths = list_paths(db, user.id)
+    next_lesson = _select_next_lesson(db, user.id, paths)
+    recommended_exercise = _select_recommended_exercise(db, user.id)
     active_projects = db.scalars(select(Project).where(Project.status.in_(["active", "planned"])).limit(3)).all()
     top_news = _preferred_news_signal(db)
     top_job = _preferred_job_signal(db)
@@ -119,6 +146,100 @@ def build_today_view(db: Session) -> dict:
             "Evaluation patterns should move from theory into repeatable practice.",
         ],
     }
+
+
+def _select_next_lesson(db: Session, user_id: int, paths: list[dict]) -> Lesson | None:
+    preferred_slugs = _preferred_learning_path_slugs(db)
+    target = _next_unfinished_from_paths(paths, preferred_slugs)
+    if not target:
+        target = _next_unfinished_from_paths(paths, [path["slug"] for path in sorted(paths, key=lambda item: item["order_index"])])
+    if not target:
+        return None
+    return db.scalar(select(Lesson).where(Lesson.slug == target["slug"]))
+
+
+def _preferred_learning_path_slugs(db: Session) -> list[str]:
+    slugs: list[str] = []
+    news = _preferred_news_signal(db)
+    if news:
+        path_slug = NEWS_TO_PATH.get(news.category)
+        if path_slug:
+            slugs.append(path_slug)
+    job = _preferred_job_signal(db)
+    if job:
+        for gap in job.skill_gaps_json or []:
+            path_slug = JOB_GAP_TO_PATH.get(gap)
+            if path_slug and path_slug not in slugs:
+                slugs.append(path_slug)
+    return slugs
+
+
+def _next_unfinished_from_paths(paths: list[dict], path_slugs: list[str]) -> dict | None:
+    for slug in path_slugs:
+        path = next((item for item in paths if item["slug"] == slug), None)
+        if not path:
+            continue
+        lesson = next((item for item in path["lessons"] if not item["is_completed"]), None)
+        if lesson:
+            return lesson
+    return None
+
+
+def _select_recommended_exercise(db: Session, user_id: int) -> Exercise | None:
+    attempt_counts = {
+        category: count
+        for category, count in db.execute(
+            select(Exercise.category, func.count(UserExerciseAttempt.id))
+            .select_from(Exercise)
+            .outerjoin(
+                UserExerciseAttempt,
+                (UserExerciseAttempt.exercise_id == Exercise.id) & (UserExerciseAttempt.user_id == user_id),
+            )
+            .group_by(Exercise.category)
+        ).all()
+    }
+    attempted_exercise_ids = set(
+        db.scalars(select(UserExerciseAttempt.exercise_id).where(UserExerciseAttempt.user_id == user_id)).all()
+    )
+    preferred_categories = _preferred_exercise_categories(db)
+
+    candidates = db.scalars(select(Exercise).order_by(Exercise.id.asc())).all()
+    ranked = sorted(
+        candidates,
+        key=lambda exercise: (
+            attempt_counts.get(exercise.category, 0),
+            _category_priority(exercise.category, preferred_categories),
+            1 if exercise.id in attempted_exercise_ids else 0,
+            exercise.id,
+        ),
+    )
+    return ranked[0] if ranked else None
+
+
+def _preferred_exercise_categories(db: Session) -> list[str]:
+    categories: list[str] = []
+    news = _preferred_news_signal(db)
+    if news:
+        for category in NEWS_TO_EXERCISE_CATEGORIES.get(news.category, []):
+            if category not in categories:
+                categories.append(category)
+    job = _preferred_job_signal(db)
+    if job:
+        for gap in job.skill_gaps_json or []:
+            for category in JOB_GAP_TO_EXERCISE_CATEGORIES.get(gap, []):
+                if category not in categories:
+                    categories.append(category)
+    for category in DEFAULT_EXERCISE_CATEGORIES:
+        if category not in categories:
+            categories.append(category)
+    return categories
+
+
+def _category_priority(category: str, preferred_categories: list[str]) -> int:
+    try:
+        return preferred_categories.index(category)
+    except ValueError:
+        return len(preferred_categories) + 1
 
 
 def _preferred_news_signal(db: Session) -> NewsItem | None:
