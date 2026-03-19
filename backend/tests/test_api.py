@@ -158,3 +158,11 @@ def test_news_and_jobs_phase_two_routes():
     fit_response = client.post(f"/api/v1/jobs/{job_id}/analyze-fit")
     assert fit_response.status_code == 200
     assert fit_response.json()["fit_score"] >= 45
+
+
+def test_recommendations_include_signal_specific_actions():
+    response = client.get("/api/v1/recommendations/next-actions")
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(item["source_kind"] == "news" and item["action_path"].startswith("/learn/") for item in payload)
+    assert any(item["source_kind"] == "jobs" and item["action_path"] in {"/projects", "/interview", "/learn", "/learn/ai-deployment-and-mlops", "/learn/ai-agents-and-tools", "/learn/python-for-ai-engineers"} for item in payload)
