@@ -109,6 +109,10 @@ export type NewsItem = {
   is_saved: boolean;
   why_it_matters: string;
   suggested_action: string;
+  focus_area: string;
+  recommended_path_slug?: string | null;
+  recommended_path_title?: string | null;
+  recommended_exercise_category?: string | null;
 };
 
 export type Project = {
@@ -144,6 +148,11 @@ export type JobPosting = {
   is_saved: boolean;
   fit_summary: string;
   suggested_action: string;
+  primary_gap?: string | null;
+  focus_area: string;
+  recommended_path_slug?: string | null;
+  recommended_path_title?: string | null;
+  recommended_exercise_category?: string | null;
 };
 
 export type InterviewQuestion = {

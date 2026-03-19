@@ -76,6 +76,45 @@ TITLE_AI_TERMS = [
 
 CONTENT_AI_TERMS = ["rag", "retrieval", "agent", "evaluation", "llm", "machine learning", "ml infra", "fine-tuning"]
 
+JOB_GAP_GUIDANCE = {
+    "MLOps depth": {
+        "focus_area": "deployment maturity",
+        "path_slug": "ai-deployment-and-mlops",
+        "path_title": "AI Deployment and MLOps",
+        "exercise_category": "api-async",
+    },
+    "Kubernetes operations": {
+        "focus_area": "runtime operations",
+        "path_slug": "ai-deployment-and-mlops",
+        "path_title": "AI Deployment and MLOps",
+        "exercise_category": "api-async",
+    },
+    "Deep learning breadth": {
+        "focus_area": "python depth",
+        "path_slug": "python-for-ai-engineers",
+        "path_title": "Python for AI Engineers",
+        "exercise_category": "python-refresh",
+    },
+    "PyTorch practice": {
+        "focus_area": "model implementation fluency",
+        "path_slug": "python-for-ai-engineers",
+        "path_title": "Python for AI Engineers",
+        "exercise_category": "data-transformation",
+    },
+    "Workflow orchestration": {
+        "focus_area": "agent control flow",
+        "path_slug": "ai-agents-and-tools",
+        "path_title": "AI Agents and Tools",
+        "exercise_category": "prompt-formatting",
+    },
+    "Distributed systems depth": {
+        "focus_area": "system reliability",
+        "path_slug": "ai-deployment-and-mlops",
+        "path_title": "AI Deployment and MLOps",
+        "exercise_category": "evaluation",
+    },
+}
+
 
 def _contains_phrase(haystack: str, phrase: str) -> bool:
     pattern = r"\b" + re.escape(phrase).replace(r"\ ", r"[\s/-]+") + r"\b"
@@ -162,6 +201,8 @@ def set_job_saved(db: Session, job_id: int, saved: bool = True) -> JobPosting | 
 
 
 def serialize_job_posting(job: JobPosting) -> dict:
+    primary_gap = job.skill_gaps_json[0] if job.skill_gaps_json else None
+    guidance = JOB_GAP_GUIDANCE.get(primary_gap or "", {})
     return {
         "id": job.id,
         "source_name": job.source_name,
@@ -182,6 +223,11 @@ def serialize_job_posting(job: JobPosting) -> dict:
         "last_synced_at": job.last_synced_at,
         "fit_summary": build_job_fit_summary(job),
         "suggested_action": build_job_suggested_action(job),
+        "primary_gap": primary_gap,
+        "focus_area": guidance.get("focus_area", "portfolio evidence"),
+        "recommended_path_slug": guidance.get("path_slug"),
+        "recommended_path_title": guidance.get("path_title"),
+        "recommended_exercise_category": guidance.get("exercise_category"),
     }
 
 

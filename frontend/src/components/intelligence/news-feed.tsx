@@ -165,6 +165,20 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
               <p className="text-xs uppercase tracking-[0.24em] text-ink/50">Why this matters</p>
               <p className="mt-2 text-sm text-ink/70">{item.why_it_matters}</p>
               <p className="mt-3 text-sm font-medium text-ink">{item.suggested_action}</p>
+              <div className="mt-4 grid gap-2 md:grid-cols-3">
+                <div className="rounded-2xl bg-white px-3 py-3 text-sm text-ink/75">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-ink/45">Focus area</p>
+                  <p className="mt-1 font-medium text-ink">{item.focus_area}</p>
+                </div>
+                <div className="rounded-2xl bg-white px-3 py-3 text-sm text-ink/75">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-ink/45">Best next path</p>
+                  <p className="mt-1 font-medium text-ink">{item.recommended_path_title ?? "Review in context"}</p>
+                </div>
+                <div className="rounded-2xl bg-white px-3 py-3 text-sm text-ink/75">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-ink/45">Best next drill</p>
+                  <p className="mt-1 font-medium text-ink">{item.recommended_exercise_category ?? "general practice"}</p>
+                </div>
+              </div>
             </div>
             <div className="flex flex-wrap gap-3">
               <button
@@ -182,6 +196,14 @@ export function NewsFeed({ initialItems, initialMeta }: NewsFeedProps) {
               >
                 Open source
               </Link>
+              {item.recommended_path_slug ? (
+                <Link
+                  href={`/learn/${item.recommended_path_slug}`}
+                  className="inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold"
+                >
+                  Open path
+                </Link>
+              ) : null}
             </div>
           </Panel>
         ))}

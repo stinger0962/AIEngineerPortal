@@ -144,6 +144,10 @@ class NewsItemOut(PortalBase):
     last_synced_at: datetime
     why_it_matters: str
     suggested_action: str
+    focus_area: str
+    recommended_path_slug: Optional[str] = None
+    recommended_path_title: Optional[str] = None
+    recommended_exercise_category: Optional[str] = None
 
 
 class ProjectOut(PortalBase):
@@ -181,6 +185,11 @@ class JobPostingOut(PortalBase):
     last_synced_at: datetime
     fit_summary: str
     suggested_action: str
+    primary_gap: Optional[str] = None
+    focus_area: str
+    recommended_path_slug: Optional[str] = None
+    recommended_path_title: Optional[str] = None
+    recommended_exercise_category: Optional[str] = None
 
 
 class ProjectIn(BaseModel):

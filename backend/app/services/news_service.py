@@ -55,6 +55,39 @@ CATEGORY_KEYWORDS = {
     "open-source": ["open-source", "oss", "model", "serving", "framework"],
 }
 
+NEWS_GUIDANCE = {
+    "model-release": {
+        "focus_area": "stack decisions",
+        "path_slug": "llm-app-foundations",
+        "path_title": "LLM App Foundations",
+        "exercise_category": "api-async",
+    },
+    "agents": {
+        "focus_area": "workflow orchestration",
+        "path_slug": "ai-agents-and-tools",
+        "path_title": "AI Agents and Tools",
+        "exercise_category": "prompt-formatting",
+    },
+    "retrieval": {
+        "focus_area": "retrieval quality",
+        "path_slug": "rag-systems",
+        "path_title": "RAG Systems",
+        "exercise_category": "retrieval",
+    },
+    "evaluation": {
+        "focus_area": "measurement discipline",
+        "path_slug": "evaluation-and-observability",
+        "path_title": "Evaluation and Observability",
+        "exercise_category": "evaluation",
+    },
+    "open-source": {
+        "focus_area": "tooling choices",
+        "path_slug": "ai-deployment-and-mlops",
+        "path_title": "AI Deployment and MLOps",
+        "exercise_category": "python-refresh",
+    },
+}
+
 
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
@@ -151,6 +184,7 @@ def set_news_saved(db: Session, news_id: int, saved: bool = True) -> NewsItem | 
 
 
 def serialize_news_item(item: NewsItem) -> dict:
+    guidance = NEWS_GUIDANCE.get(item.category, {})
     return {
         "id": item.id,
         "source_name": item.source_name,
@@ -167,6 +201,10 @@ def serialize_news_item(item: NewsItem) -> dict:
         "last_synced_at": item.last_synced_at,
         "why_it_matters": build_news_why_it_matters(item),
         "suggested_action": build_news_suggested_action(item),
+        "focus_area": guidance.get("focus_area", "external signal translation"),
+        "recommended_path_slug": guidance.get("path_slug"),
+        "recommended_path_title": guidance.get("path_title"),
+        "recommended_exercise_category": guidance.get("exercise_category"),
     }
 
 

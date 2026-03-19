@@ -139,6 +139,9 @@ def test_news_and_jobs_phase_two_routes():
     assert news_response.status_code == 200
     assert len(news_response.json()) >= 1
     assert "is_seeded" in news_response.json()[0]
+    assert "focus_area" in news_response.json()[0]
+    assert "recommended_path_slug" in news_response.json()[0]
+    assert "recommended_exercise_category" in news_response.json()[0]
 
     news_meta = client.get("/api/v1/news/meta")
     assert news_meta.status_code == 200
@@ -149,6 +152,9 @@ def test_news_and_jobs_phase_two_routes():
     jobs = jobs_response.json()
     assert len(jobs) >= 1
     assert "is_seeded" in jobs[0]
+    assert "focus_area" in jobs[0]
+    assert "primary_gap" in jobs[0]
+    assert "recommended_exercise_category" in jobs[0]
 
     jobs_meta = client.get("/api/v1/jobs/meta")
     assert jobs_meta.status_code == 200

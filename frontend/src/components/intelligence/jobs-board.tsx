@@ -183,6 +183,20 @@ export function JobsBoard({ initialJobs, initialMeta }: JobsBoardProps) {
               <p className="text-xs uppercase tracking-[0.24em] text-ink/50">Fit read</p>
               <p className="mt-2 text-sm text-ink/70">{job.fit_summary}</p>
               <p className="mt-3 text-sm font-medium text-ink">{job.suggested_action}</p>
+              <div className="mt-4 grid gap-2 md:grid-cols-3">
+                <div className="rounded-2xl bg-white px-3 py-3 text-sm text-ink/75">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-ink/45">Primary gap</p>
+                  <p className="mt-1 font-medium text-ink">{job.primary_gap ?? "portfolio proof"}</p>
+                </div>
+                <div className="rounded-2xl bg-white px-3 py-3 text-sm text-ink/75">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-ink/45">Best next path</p>
+                  <p className="mt-1 font-medium text-ink">{job.recommended_path_title ?? "Interview preparation"}</p>
+                </div>
+                <div className="rounded-2xl bg-white px-3 py-3 text-sm text-ink/75">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-ink/45">Best next drill</p>
+                  <p className="mt-1 font-medium text-ink">{job.recommended_exercise_category ?? "general practice"}</p>
+                </div>
+              </div>
             </div>
             {job.skill_gaps_json.length ? (
               <div className="rounded-2xl bg-white p-4">
@@ -214,6 +228,14 @@ export function JobsBoard({ initialJobs, initialMeta }: JobsBoardProps) {
               >
                 Open posting
               </Link>
+              {job.recommended_path_slug ? (
+                <Link
+                  href={`/learn/${job.recommended_path_slug}`}
+                  className="inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold"
+                >
+                  Open path
+                </Link>
+              ) : null}
             </div>
           </Panel>
         ))}
