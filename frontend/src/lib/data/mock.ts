@@ -169,6 +169,9 @@ export const mockInterviewQuestions: InterviewQuestion[] = [
     question_text: "How would you structure a Python service that wraps an LLM provider and remains testable?",
     answer_outline_md: "Clarify interface boundaries, test seams, retries, and observability.",
     tags_json: ["python", "ai-engineer"],
+    practice_count: 0,
+    last_practiced_at: null,
+    average_confidence: null,
   },
 ];
 

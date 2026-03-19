@@ -8,6 +8,8 @@ from app.schemas.portal import (
     ExerciseDetail,
     ExerciseOut,
     FeedRefreshMetaOut,
+    InterviewPracticeIn,
+    InterviewPracticeOut,
     InterviewQuestionOut,
     InterviewRoadmap,
     JobFitAnalysisOut,
@@ -22,4 +24,5 @@ from app.schemas.portal import (
     ProjectIn,
     ProjectOut,
     RecommendationOut,
+    SkillGapInsight,
 )

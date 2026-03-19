@@ -19,6 +19,7 @@ import type {
   ExerciseAttempt,
   ExerciseDetail,
   FeedRefreshMeta,
+  InterviewPractice,
   InterviewQuestion,
   InterviewRoadmap,
   JobFitAnalysis,
@@ -29,6 +30,7 @@ import type {
   PortfolioReadiness,
   Project,
   Recommendation,
+  SkillGapInsight,
 } from "@/lib/types/portal";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -147,5 +149,20 @@ export const portalApi = {
   getInterviewQuestions: () => fetchJson<InterviewQuestion[]>("/interview/questions", undefined, mockInterviewQuestions),
   getInterviewRoadmap: () => fetchJson<InterviewRoadmap>("/interview/roadmap", undefined, mockInterviewRoadmap),
   getPortfolioReadiness: () => fetchJson<PortfolioReadiness>("/interview/portfolio-readiness"),
+  getInterviewSkillGaps: () => fetchJson<SkillGapInsight[]>("/interview/skill-gaps"),
+  practiceInterviewQuestion: (questionId: number, confidence_score: number, notes: string) =>
+    fetchJson<InterviewPractice>(
+      `/interview/questions/${questionId}/practice`,
+      {
+        method: "POST",
+        body: JSON.stringify({ confidence_score, notes }),
+      },
+      {
+        question_id: questionId,
+        practice_count: 1,
+        last_practiced_at: new Date().toISOString(),
+        average_confidence: confidence_score,
+      },
+    ),
   getRecommendations: () => fetchJson<Recommendation[]>("/recommendations/next-actions", undefined, mockRecommendations),
 };

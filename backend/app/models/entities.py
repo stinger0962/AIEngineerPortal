@@ -189,6 +189,17 @@ class InterviewQuestion(Base):
     tags_json: Mapped[List] = mapped_column(JSON, default=list)
 
 
+class InterviewQuestionPractice(Base):
+    __tablename__ = "interview_question_practice"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    question_id: Mapped[int] = mapped_column(ForeignKey("interview_questions.id"))
+    confidence_score: Mapped[int] = mapped_column(Integer, default=3)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    practiced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ProgressSnapshot(Base):
     __tablename__ = "progress_snapshots"
 

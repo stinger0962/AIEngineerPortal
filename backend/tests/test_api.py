@@ -182,6 +182,28 @@ def test_phase_three_interview_routes_are_personalized():
     assert readiness_payload["gaps_to_close"]
     assert readiness_payload["next_best_moves"]
 
+    skill_gaps = client.get("/api/v1/interview/skill-gaps")
+    assert skill_gaps.status_code == 200
+    assert len(skill_gaps.json()) >= 1
+    assert "action_path" in skill_gaps.json()[0]
+
+
+def test_interview_question_practice_updates_question_stats():
+    question = client.get("/api/v1/interview/questions").json()[0]
+    response = client.post(
+        f"/api/v1/interview/questions/{question['id']}/practice",
+        json={"confidence_score": 4, "notes": "Solid first spoken rep"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["question_id"] == question["id"]
+    assert payload["practice_count"] >= 1
+    assert payload["average_confidence"] >= 4
+
+    updated_question = client.get("/api/v1/interview/questions").json()[0]
+    assert updated_question["practice_count"] >= 1
+    assert updated_question["average_confidence"] >= 4
+
 
 def test_recommendations_include_signal_specific_actions():
     response = client.get("/api/v1/recommendations/next-actions")

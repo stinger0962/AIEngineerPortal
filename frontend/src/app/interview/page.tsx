@@ -1,12 +1,16 @@
+import Link from "next/link";
+
+import { InterviewQuestionBoard } from "@/components/interview/interview-question-board";
 import { Panel } from "@/components/ui/panel";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { portalApi } from "@/lib/api/portal";
 
 export default async function InterviewPage() {
-  const [questions, roadmap, readiness] = await Promise.all([
+  const [questions, roadmap, readiness, skillGaps] = await Promise.all([
     portalApi.getInterviewQuestions(),
     portalApi.getInterviewRoadmap(),
     portalApi.getPortfolioReadiness(),
+    portalApi.getInterviewSkillGaps(),
   ]);
 
   return (
@@ -14,13 +18,13 @@ export default async function InterviewPage() {
       <SectionHeading
         eyebrow="Interview Prep"
         title="Turn progress into interview readiness."
-        description="Phase 3 starts by turning your live portal state into a personalized roadmap and a portfolio-readiness read."
+        description="Phase 3 now ties your live portal state to interview planning, practice tracking, and portfolio-readiness scoring."
       />
       <div className="grid gap-4 md:grid-cols-4">
         <Panel className="space-y-2">
           <p className="text-xs uppercase tracking-[0.24em] text-ink/50">Readiness</p>
           <p className="text-4xl font-semibold text-ink">{readiness.overall_score}/100</p>
-          <p className="text-sm text-ink/70">Computed from project proof, interview readiness, learning progress, and practice reps.</p>
+          <p className="text-sm text-ink/70">Computed from project proof, interview readiness, learning progress, saved signals, and practice reps.</p>
         </Panel>
         <Panel className="space-y-2">
           <p className="text-xs uppercase tracking-[0.24em] text-ink/50">Strongest signals</p>
@@ -35,7 +39,7 @@ export default async function InterviewPage() {
         <Panel className="space-y-2">
           <p className="text-xs uppercase tracking-[0.24em] text-ink/50">Questions loaded</p>
           <p className="text-3xl font-semibold text-ink">{questions.length}</p>
-          <p className="text-sm text-ink/70">Use the roadmap below to decide which ones deserve reps this week.</p>
+          <p className="text-sm text-ink/70">Log reps here so the portal can see your real interview rhythm.</p>
         </Panel>
       </div>
 
@@ -60,7 +64,23 @@ export default async function InterviewPage() {
           </Panel>
 
           <Panel className="space-y-4">
-            <SectionHeading eyebrow="Readiness" title="Portfolio read" description="Use this to decide whether to invest the next hour in building, explaining, or rehearsing." />
+            <SectionHeading eyebrow="Skill Gaps" title="What still needs coverage" description="This blends job-market signals with your current portal progress." />
+            {skillGaps.map((gap) => (
+              <div key={`${gap.title}-${gap.action_path}`} className="rounded-2xl bg-white p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <p className="font-semibold text-ink">{gap.title}</p>
+                  <span className="rounded-full bg-cream px-3 py-1 text-xs uppercase tracking-[0.2em] text-ink/60">{gap.urgency}</span>
+                </div>
+                <p className="mt-2 text-sm text-ink/70">{gap.evidence}</p>
+                <Link href={gap.action_path} className="mt-3 inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold">
+                  Open next step
+                </Link>
+              </div>
+            ))}
+          </Panel>
+
+          <Panel className="space-y-4">
+            <SectionHeading eyebrow="Readiness" title="Portfolio read" description="Use this to decide whether to spend the next hour building, explaining, or rehearsing." />
             <div className="grid gap-3">
               {readiness.strongest_signals.map((item) => (
                 <div key={item} className="rounded-2xl bg-white p-4 text-sm text-ink/80">
@@ -86,7 +106,7 @@ export default async function InterviewPage() {
         </div>
 
         <Panel className="space-y-4">
-          <SectionHeading eyebrow="Questions" title="Answer structure library" description="Use the roadmap rationale to choose which questions deserve a spoken rep this week." />
+          <SectionHeading eyebrow="Questions" title="Answer structure library" description="Use the rationale and gap summary to choose which questions deserve a spoken rep this week." />
           {roadmap.rationale.length ? (
             <div className="grid gap-3">
               {roadmap.rationale.map((item) => (
@@ -96,15 +116,7 @@ export default async function InterviewPage() {
               ))}
             </div>
           ) : null}
-          {questions.map((question) => (
-            <div key={question.id} className="rounded-[24px] bg-cream p-5">
-              <p className="text-xs uppercase tracking-[0.24em] text-ink/50">
-                {question.category} | {question.difficulty}
-              </p>
-              <h3 className="mt-2 text-lg font-semibold text-ink">{question.question_text}</h3>
-              <p className="mt-2 text-sm text-ink/70">{question.answer_outline_md}</p>
-            </div>
-          ))}
+          <InterviewQuestionBoard initialQuestions={questions} />
         </Panel>
       </div>
     </div>

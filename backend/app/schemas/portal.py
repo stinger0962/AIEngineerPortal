@@ -213,6 +213,21 @@ class InterviewQuestionOut(PortalBase):
     question_text: str
     answer_outline_md: str
     tags_json: List[str]
+    practice_count: int = 0
+    last_practiced_at: Optional[datetime] = None
+    average_confidence: Optional[float] = None
+
+
+class InterviewPracticeIn(BaseModel):
+    confidence_score: int = 3
+    notes: str = ""
+
+
+class InterviewPracticeOut(BaseModel):
+    question_id: int
+    practice_count: int
+    last_practiced_at: datetime
+    average_confidence: float
 
 
 class InterviewRoadmap(BaseModel):
@@ -226,6 +241,13 @@ class PortfolioReadiness(BaseModel):
     strongest_signals: List[str]
     gaps_to_close: List[str]
     next_best_moves: List[str]
+
+
+class SkillGapInsight(BaseModel):
+    title: str
+    urgency: str
+    evidence: str
+    action_path: str
 
 
 class RecommendationOut(BaseModel):

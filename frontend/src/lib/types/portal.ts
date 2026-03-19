@@ -163,6 +163,9 @@ export type InterviewQuestion = {
   question_text: string;
   answer_outline_md: string;
   tags_json: string[];
+  practice_count: number;
+  last_practiced_at?: string | null;
+  average_confidence?: number | null;
 };
 
 export type InterviewRoadmap = {
@@ -176,6 +179,20 @@ export type PortfolioReadiness = {
   strongest_signals: string[];
   gaps_to_close: string[];
   next_best_moves: string[];
+};
+
+export type SkillGapInsight = {
+  title: string;
+  urgency: string;
+  evidence: string;
+  action_path: string;
+};
+
+export type InterviewPractice = {
+  question_id: number;
+  practice_count: number;
+  last_practiced_at: string;
+  average_confidence: number;
 };
 
 export type Recommendation = {
