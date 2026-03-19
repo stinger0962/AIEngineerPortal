@@ -1,6 +1,6 @@
 # AI Engineer Portal
 
-AI Engineer Portal is a private personal operating system for a senior full-stack engineer transitioning into AI engineering. This Phase 1 implementation ships a real MVP with:
+AI Engineer Portal is a private personal operating system for a senior full-stack engineer transitioning into AI engineering. The product is live through Phase 3, and Phase 4 now focuses on turning the learning system into real curriculum depth. The portal currently includes:
 
 - a personalized dashboard
 - a structured learning center
@@ -53,14 +53,21 @@ py -3.8 -m uvicorn app.main:app --reload --app-dir backend
 - Backend API: `http://localhost:8000/api/v1`
 - API docs: `http://localhost:8000/docs`
 
-## Phase 1 notes
+## Product status
 
 - The product is single-user and private for now.
 - Reference content is synced automatically on backend startup so deployed environments can pick up learning, exercise, article, and interview content improvements without wiping user activity.
-- News and jobs are scaffolded in the navigation but intentionally deferred from dynamic ingestion in Phase 1.
+- Phase 2 and Phase 3 are live: the portal now includes market intelligence, signal-driven recommendations, interview planning, skill-gap surfacing, and portfolio-readiness scoring.
+- Phase 4 is active and focuses on real curriculum depth across lessons, courses, practice, knowledge, interview prep, and project blueprints.
 - Deployment assets are included under [`infra/`](D:\AIEngineerPortal\infra) for local/VPS parity.
 
-The current Phase 1 delivery checkpoint is documented in [`docs/phase-1-checkpoint.md`](D:\AIEngineerPortal\docs\phase-1-checkpoint.md).
+Checkpoints and roadmap:
+
+- [`docs/phase-1-checkpoint.md`](D:\AIEngineerPortal\docs\phase-1-checkpoint.md)
+- [`docs/phase-2-checkpoint.md`](D:\AIEngineerPortal\docs\phase-2-checkpoint.md)
+- [`docs/phase-3-checkpoint.md`](D:\AIEngineerPortal\docs\phase-3-checkpoint.md)
+- [`docs/revised-roadmap.md`](D:\AIEngineerPortal\docs\revised-roadmap.md)
+- [`docs/phase-4-plan.md`](D:\AIEngineerPortal\docs\phase-4-plan.md)
 
 ## Production deployment
 

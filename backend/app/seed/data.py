@@ -22,37 +22,620 @@ LEARNING_LIBRARY = [
         "slug": "python-for-ai-engineers",
         "description": "Build practical Python fluency for APIs, pipelines, evaluation scripts, and debugging in applied AI systems.",
         "level": "beginner",
-        "estimated_hours": 14,
+        "estimated_hours": 6,
         "lessons": [
             {
                 "title": "Python runtime habits that matter in AI work",
                 "summary": "Focus on data modeling, IO boundaries, debugging, and iteration speed rather than syntax memorization.",
-                "content_md": "## Why this path starts with Python\n\nFor an experienced full-stack engineer, the real gap is speed under pressure across APIs, scripts, provider SDKs, and evaluation loops.\n\n### Optimize for\n- readable control flow\n- explicit inputs and outputs\n- lightweight validation\n- fast debugging\n- safe serialization",
-                "estimated_minutes": 35,
+                "content_md": """## Why this path starts with Python
+
+For an experienced full-stack engineer, the Python gap is usually not syntax. The real gap is confidence under pressure while moving through provider SDKs, JSON payloads, scripts, evaluation loops, and one-off debugging sessions.
+
+If JavaScript and TypeScript taught you how to ship product features, Python should now become your fast execution language for:
+
+- API integrations
+- ingestion and ETL scripts
+- evaluation tooling
+- retrieval pipelines
+- experiment harnesses
+- lightweight services
+
+## The operating principle
+
+In AI work, Python is the language that sits closest to the messy boundary between an idea and a working system. That means your Python habits should optimize for:
+
+- readable control flow
+- explicit inputs and outputs
+- lightweight validation
+- fast debugging
+- safe serialization
+- rerunnable scripts
+
+## What good Python feels like in AI work
+
+A good Python module in an AI system should feel calm to read. You should be able to answer:
+
+1. What comes in?
+2. What gets validated?
+3. What gets transformed?
+4. What leaves the boundary?
+5. What happens when something fails?
+
+When those answers are unclear, AI systems get fragile quickly because the payloads are semi-structured and the failure modes are messy.
+
+## Runtime habits that compound
+
+### 1. Name the boundary clearly
+
+A provider response, uploaded file, benchmark row, or retrieved chunk is a boundary. Treat it like one.
+
+Bad habit:
+
+- pass the raw payload everywhere and let downstream code guess structure
+
+Better habit:
+
+- normalize once at the edge
+- raise or record errors early
+- keep the middle of the system boring
+
+### 2. Log enough to debug, not enough to drown
+
+In AI systems, debugging often means inspecting:
+
+- request identifiers
+- provider or model name
+- retry count
+- latency
+- prompt or context version
+- schema mismatch reason
+
+If your logs do not preserve the path of failure, you will keep changing prompts when the real issue is payload shape or retrieval quality.
+
+### 3. Prefer small functions with obvious return shapes
+
+Many Python bugs in AI projects come from helper functions that quietly return different shapes in different branches. Keep return values stable.
+
+```python
+from typing import TypedDict
+
+
+class NormalizedResponse(TypedDict):
+    request_id: str
+    content: str
+    status: str
+
+
+def normalize_provider_payload(payload: dict) -> NormalizedResponse:
+    return {
+        "request_id": str(payload.get("id", "missing")),
+        "content": str(payload.get("content", "")).strip(),
+        "status": str(payload.get("status", "ok")),
+    }
+```
+
+This is not fancy. That is the point. In AI engineering, boring boundaries are a competitive advantage.
+
+### 4. Make scripts rerunnable
+
+Many high-leverage AI tasks live in scripts:
+
+- dataset preparation
+- benchmark generation
+- document cleanup
+- ingestion backfills
+- prompt experiment exports
+
+If a script is not idempotent, you cannot trust it after the first run.
+
+Practical rules:
+
+- use explicit input and output paths
+- do not silently overwrite valuable artifacts
+- print summary stats at the end
+- make failure conditions visible
+
+## A concrete mental model
+
+When you write Python for AI systems, think in layers:
+
+- boundary layer: requests, files, provider responses, queue payloads
+- transformation layer: shaping, cleaning, scoring, filtering
+- orchestration layer: retries, sequencing, branching, persistence
+- review layer: logs, traces, metrics, evaluation output
+
+Your speed improves once each layer has a clean responsibility.
+
+## Common failure patterns
+
+Watch for these early:
+
+- one function fetching data, validating it, logging, retrying, and formatting the UI payload all at once
+- hidden mutation of shared dicts
+- magical string keys sprinkled across the codebase
+- scripts that only work from one local directory
+- exception handling that swallows the failure reason
+
+## What to practice after this lesson
+
+- normalize one loose payload into a typed internal shape
+- rewrite one AI script so it is safe to rerun
+- add one log line that would actually help you debug a provider failure
+
+## Takeaway
+
+The win is not becoming a Python trivia expert. The win is becoming fast and trustworthy when AI systems hand you messy inputs, weak guarantees, and operational ambiguity.
+""",
+                "estimated_minutes": 50,
             },
             {
                 "title": "Modeling data with dicts, dataclasses, and Pydantic",
                 "summary": "Use strict validation at boundaries and keep the middle of the system simple.",
-                "content_md": "## Data modeling choices\n\nAI systems move semi-structured data around constantly.\n\n### Use dicts for exploration\n### Use dataclasses for internal domain objects\n### Use Pydantic for API and persistence boundaries",
-                "estimated_minutes": 40,
+                "content_md": """## Data modeling choices
+
+AI systems move semi-structured data around constantly. That does not mean everything should stay an untyped dict forever.
+
+The practical question is not which modeling approach is best. It is where you need speed and where you need trust.
+
+## A useful rule of thumb
+
+- use dicts for fast exploration
+- use dataclasses for stable internal objects
+- use Pydantic for boundaries you cannot afford to guess at
+
+## Dicts: good for discovery, risky as a long-term contract
+
+Dicts are perfect when:
+
+- the payload shape is still changing
+- you are prototyping an integration
+- you are inspecting raw documents or responses
+
+But if a dict crosses too many layers, the whole system becomes a rumor about structure instead of a contract.
+
+## Dataclasses: good for internal clarity
+
+Dataclasses work well when you already know the shape and want readable internal code.
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class RetrievedChunk:
+    doc_id: str
+    text: str
+    score: float
+    source: str
+```
+
+This is great for the middle of the system where you want:
+
+- readable attributes
+- low ceremony
+- clear intent
+
+## Pydantic: use it where trust matters
+
+Pydantic is strongest at system boundaries:
+
+- request validation
+- response normalization
+- persistence contracts
+- config parsing
+
+Why? Because these are the places where bad assumptions become production bugs.
+
+```python
+from pydantic import BaseModel, Field
+
+
+class ProviderResult(BaseModel):
+    request_id: str = Field(min_length=1)
+    content: str
+    model: str
+    latency_ms: int
+```
+
+If the provider returns nonsense, you find out immediately instead of carrying silent damage downstream.
+
+## A layered pattern that works well
+
+Try this pattern:
+
+1. receive raw payload as dict
+2. validate and normalize with Pydantic
+3. convert to simpler internal objects when helpful
+4. emit stable shapes at the next boundary
+
+This keeps your code flexible without becoming vague.
+
+## How this shows up in real portal work
+
+Examples:
+
+- news ingestion starts as raw remote payloads
+- jobs ingestion normalizes inconsistent fields across sources
+- learning and interview APIs return stable shapes to the frontend
+- project data should stay explicit so scoring and recommendations remain trustworthy
+
+## Decision guide
+
+Use a dict when:
+
+- you are exploring
+- the schema is not stable
+- the value of speed is higher than the value of guarantees
+
+Use a dataclass when:
+
+- the shape is stable inside your application
+- you want clean, readable internal code
+
+Use Pydantic when:
+
+- external systems are involved
+- bad input would be expensive
+- you need reliable validation, parsing, and error messages
+
+## Mistakes to avoid
+
+- validating nowhere
+- validating everywhere
+- using Pydantic models deep in the middle of code that only needs simple objects
+- pretending a dict is temporary for months
+
+## Practice prompt
+
+Take one portal payload and decide:
+
+- what is raw input?
+- what is the normalized boundary model?
+- what is the simplest internal shape after validation?
+
+## Takeaway
+
+Good Python data modeling is not about purity. It is about being strict where ambiguity is dangerous and lightweight where speed matters.
+""",
+                "estimated_minutes": 55,
             },
             {
                 "title": "Async IO for provider calls and ingestion work",
                 "summary": "Use async where network waiting dominates and make timeout and retry behavior explicit.",
-                "content_md": "## Async patterns that pay off\n\nUse async for provider calls, multi-document fetches, retrieval fan-out, and background tasks. Avoid mixing sync and async blindly.",
-                "estimated_minutes": 45,
+                "content_md": """## Async patterns that pay off
+
+Async matters in AI work because many valuable operations are waiting problems, not CPU problems.
+
+Examples:
+
+- provider calls
+- multi-document fetches
+- crawling and ingestion
+- retrieval fan-out
+- health checks across dependencies
+
+## The decision rule
+
+Use async when network waiting dominates. Do not use it just because it sounds more advanced.
+
+If you are doing mostly CPU-bound data transforms, async may add complexity without speeding anything up.
+
+## Where async really helps
+
+### Provider integrations
+
+You may need to:
+
+- call a model provider
+- fetch citations
+- store traces
+- query a cache
+
+Those waits stack up quickly if they happen serially.
+
+### Ingestion pipelines
+
+News, jobs, or document pipelines often need to fetch many remote resources in parallel. Async lets you improve throughput without starting with a heavy worker architecture.
+
+## What to make explicit
+
+Async code becomes trustworthy when four things are visible:
+
+- timeout policy
+- retry policy
+- concurrency limits
+- failure logging
+
+If those are hidden, the system may look fast when healthy and become impossible to debug when degraded.
+
+## Example shape
+
+```python
+import asyncio
+
+
+async def fetch_with_timeout(client, url: str) -> dict:
+    return await asyncio.wait_for(client.get(url), timeout=8)
+```
+
+That line is simple, but it expresses an operational decision: this fetch should not hang forever.
+
+## Concurrency is a budget, not a badge
+
+Calling 100 upstream services at once is not maturity. It is often a missing control surface.
+
+Prefer:
+
+- small bounded batches
+- explicit semaphores
+- measured retries
+
+This matters especially when working with provider rate limits or unstable external feeds.
+
+## Mixing sync and async
+
+Two common mistakes:
+
+- calling blocking libraries inside async code
+- forcing async into parts of the system that do not need it
+
+If a dependency is blocking, either keep the path synchronous or isolate the blocking work so the async layer stays honest.
+
+## Debugging async code
+
+You need logs that preserve:
+
+- which task failed
+- which request or URL was involved
+- whether it timed out, retried, or gave up
+
+Without that, async failures feel random even when they are systematic.
+
+## Portal-specific examples
+
+Async is a good fit here for:
+
+- external signal refresh
+- provider-backed assistants in later phases
+- document ingestion and retrieval fan-out
+
+It is not automatically the best fit for:
+
+- every lesson endpoint
+- simple CRUD routes
+- local transformations that are already fast
+
+## Practice prompt
+
+Take one sync network call in your head and ask:
+
+1. What is the timeout?
+2. What is retryable?
+3. What is the concurrency limit?
+4. What gets logged when it fails?
+
+If you cannot answer those, you do not have an operational async design yet.
+
+## Takeaway
+
+Async is valuable when it makes waiting explicit and controlled. It is not a goal on its own.
+""",
+                "estimated_minutes": 50,
             },
             {
                 "title": "File handling, serialization, and safe evaluation scripts",
                 "summary": "Write scripts you can trust repeatedly for dataset prep, prompt experiments, and benchmark runs.",
-                "content_md": "## Script quality matters\n\nFavor pathlib, JSONL, idempotent scripts, stable output locations, and explicit command arguments.",
-                "estimated_minutes": 40,
+                "content_md": """## Script quality matters
+
+Some of the most important AI engineering work never appears in the user-facing product. It happens in scripts:
+
+- data cleanup
+- benchmark creation
+- export jobs
+- prompt experiment runners
+- trace analysis
+
+Weak scripts create invisible instability. Strong scripts create leverage.
+
+## The bar for a good script
+
+A good AI script should be:
+
+- explicit about inputs
+- explicit about outputs
+- safe to rerun
+- easy to inspect after execution
+
+## Prefer pathlib and stable paths
+
+Use `pathlib` so file behavior is readable and portable.
+
+```python
+from pathlib import Path
+
+
+INPUT_PATH = Path("data/raw/eval.jsonl")
+OUTPUT_PATH = Path("data/processed/eval-clean.jsonl")
+```
+
+Hard-coded ad hoc paths make scripts fragile, especially when you revisit them weeks later.
+
+## JSONL is often the right default
+
+For AI experiments, JSONL works well because:
+
+- each row is inspectable
+- partial writes are easier to reason about
+- downstream tools can stream it
+
+Use full JSON when the artifact is naturally one object. Use JSONL when you are processing records.
+
+## Idempotence matters
+
+If a script cannot be rerun safely, it is not ready.
+
+Strategies:
+
+- write to a new output file
+- support overwrite explicitly, not silently
+- include a dry-run mode when useful
+- print counts for processed, skipped, and failed rows
+
+## Make failures actionable
+
+Do not just say failed. Capture:
+
+- which input row or file failed
+- why it failed
+- how many items were skipped
+
+That turns a broken run into a debugging task instead of a mystery.
+
+## Evaluation script checklist
+
+Before trusting an evaluation script, check:
+
+- where do inputs come from?
+- what version of prompt or rubric is being used?
+- where are outputs stored?
+- can I compare this run to a previous run?
+- what happens if one row is malformed?
+
+## A small reliable pattern
+
+```python
+def process_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    cleaned = []
+    failures = []
+    for row in rows:
+        try:
+            cleaned.append(transform_row(row))
+        except Exception as exc:
+            failures.append({"row_id": row.get("id"), "error": str(exc)})
+    return cleaned, failures
+```
+
+This is simple, but it creates the foundation for honest reruns and post-run review.
+
+## Portal-specific leverage
+
+In this portal, strong script habits matter for:
+
+- seeding durable content
+- refreshing intelligence feeds
+- building future evaluation packs
+- generating practice artifacts
+
+## Practice prompt
+
+Take one script you would trust least in production and improve it by adding:
+
+- explicit paths
+- summary output
+- non-destructive write behavior
+- row-level failure capture
+
+## Takeaway
+
+Good scripts are not glamorous, but they are one of the clearest signs that your AI work can survive beyond a single demo run.
+""",
+                "estimated_minutes": 45,
             },
             {
                 "title": "Turning Python fluency into portfolio leverage",
                 "summary": "Use Python skills to make every project more credible through APIs, tooling, and repeatability.",
-                "content_md": "## Portfolio move\n\nShow a clean API surface, typed schemas, evaluation utilities, deployable runtime shape, and debugging-friendly logs.",
-                "estimated_minutes": 35,
+                "content_md": """## Portfolio move
+
+Python fluency becomes valuable in your transition when it changes how your projects feel to another engineer or hiring manager.
+
+The question is not Did I use Python.
+
+The question is:
+
+Did Python make this project look more engineered, more testable, and more production-shaped?
+
+## What Python can signal in a portfolio
+
+Done well, Python can show:
+
+- clean API boundaries
+- typed request and response models
+- scriptable evaluation workflows
+- ingestion or retrieval tooling
+- deployment-ready service structure
+- debugging-friendly logs and traces
+
+## What weak portfolio Python looks like
+
+- one notebook with no clean interface
+- scripts with no stable inputs or outputs
+- provider code scattered across the project
+- no explanation of runtime tradeoffs
+
+That may still demonstrate curiosity, but it does not yet demonstrate AI engineering.
+
+## What stronger portfolio Python looks like
+
+### 1. A clean service boundary
+
+Even a small FastAPI surface helps. It shows:
+
+- inputs
+- outputs
+- validation
+- separation between UI and backend logic
+
+### 2. Evaluation or benchmark tooling
+
+This is especially valuable because it signals maturity. Many demo projects can answer a question once; fewer can measure quality across runs.
+
+### 3. Useful internal scripts
+
+Examples:
+
+- `prepare_eval_set.py`
+- `replay_failed_cases.py`
+- `backfill_chunks.py`
+- `score_run.py`
+
+Those filenames communicate discipline immediately.
+
+### 4. Debuggable operational behavior
+
+If your project logs useful runtime details and exposes health assumptions clearly, it feels more like a real system than a prototype.
+
+## A practical portfolio checklist
+
+For each project, ask:
+
+- Is there at least one stable Python boundary?
+- Is there at least one script or utility that makes the project repeatable?
+- Is there evidence of validation and failure handling?
+- Can I explain the architecture in interview language?
+
+## How this applies to your portal
+
+Good candidates for Python-heavy portfolio proof include:
+
+- the evaluation dashboard
+- a retrieval-backed assistant
+- a jobs or signal ingestion service
+- future adaptive practice generation
+
+## Practice prompt
+
+Take one current project and add one Python artifact that makes it more credible:
+
+- an API route
+- a typed boundary model
+- an evaluation script
+- a replay or debug utility
+
+## Takeaway
+
+Python becomes portfolio leverage when it demonstrates engineering discipline, not just model access.
+""",
+                "estimated_minutes": 45,
             },
         ],
     },

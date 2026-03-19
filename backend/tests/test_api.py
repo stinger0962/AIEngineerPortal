@@ -63,6 +63,16 @@ def test_complete_lesson_updates_progress():
     assert response.json()["completed"] is True
 
 
+def test_phase_four_python_lesson_has_real_depth():
+    lesson = client.get("/api/v1/learning/lessons/python-for-ai-engineers-1")
+    assert lesson.status_code == 200
+    payload = lesson.json()
+    assert payload["estimated_minutes"] >= 45
+    assert "## Runtime habits that compound" in payload["content_md"]
+    assert "```python" in payload["content_md"]
+    assert "## Takeaway" in payload["content_md"]
+
+
 def test_exercise_attempt_roundtrip():
     recommended = client.get("/api/v1/exercises/recommended").json()
     exercise_id = recommended[0]["id"]

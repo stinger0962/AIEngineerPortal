@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 
+import { LessonMarkdown } from "@/components/learning/lesson-markdown";
 import { LessonCompleteButton } from "@/components/forms/lesson-complete-button";
 import { Panel } from "@/components/ui/panel";
 import { SectionHeading } from "@/components/ui/section-heading";
@@ -21,10 +22,24 @@ export default async function LessonPage({ params }: { params: Promise<{ lessonS
           <span>{lesson.estimated_minutes} minutes</span>
           <span>{lesson.is_completed ? "Completed" : "In progress"}</span>
         </div>
-        <article className="prose max-w-none text-sm leading-7 text-ink/80">
-          {lesson.content_md.split("\n").map((line, index) => (
-            <p key={`${line}-${index}`}>{line}</p>
-          ))}
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl bg-cream p-4 text-sm text-ink/75">
+            <div className="text-xs uppercase tracking-[0.24em] text-rust">Lesson focus</div>
+            <p className="mt-2 leading-6">{lesson.summary}</p>
+          </div>
+          <div className="rounded-2xl bg-cream p-4 text-sm text-ink/75">
+            <div className="text-xs uppercase tracking-[0.24em] text-rust">Prerequisites</div>
+            <p className="mt-2 leading-6">
+              {lesson.prerequisites_json.length > 0 ? lesson.prerequisites_json.join(", ") : "None. This is an entry lesson."}
+            </p>
+          </div>
+          <div className="rounded-2xl bg-cream p-4 text-sm text-ink/75">
+            <div className="text-xs uppercase tracking-[0.24em] text-rust">Tags</div>
+            <p className="mt-2 leading-6">{lesson.tags_json.join(" · ")}</p>
+          </div>
+        </div>
+        <article className="space-y-4">
+          <LessonMarkdown content={lesson.content_md} />
         </article>
         <LessonCompleteButton lessonId={lesson.id} />
       </Panel>
