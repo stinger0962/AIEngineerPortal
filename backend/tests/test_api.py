@@ -97,6 +97,18 @@ def test_exercise_attempt_roundtrip():
     assert response.json()["score"] >= 80
 
 
+def test_phase_four_practice_detail_is_coaching_oriented():
+    exercises = client.get("/api/v1/exercises").json()
+    detail = client.get(f"/api/v1/exercises/{exercises[0]['id']}")
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert payload["exercise"]["practice_stage"]
+    assert payload["exercise"]["hint_md"]
+    assert payload["exercise"]["review_checklist_json"]
+    assert payload["exercise"]["success_criteria_json"]
+    assert payload["review_prompt"]
+
+
 def test_knowledge_search():
     response = client.get("/api/v1/knowledge/search", params={"query": "rag"})
     assert response.status_code == 200

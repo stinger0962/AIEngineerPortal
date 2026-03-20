@@ -94,6 +94,16 @@ class ExerciseOut(PortalBase):
     solution_code: str
     explanation_md: str
     tags_json: List[str]
+    progression_label: Optional[str] = None
+    practice_stage: Optional[str] = None
+    hint_md: Optional[str] = None
+    review_checklist_json: List[str] = []
+    success_criteria_json: List[str] = []
+    related_lesson_slugs: List[str] = []
+    related_lesson_titles: List[str] = []
+    next_exercise_id: Optional[int] = None
+    next_exercise_slug: Optional[str] = None
+    next_exercise_title: Optional[str] = None
 
 
 class ExerciseAttemptIn(BaseModel):
@@ -114,6 +124,7 @@ class ExerciseAttemptOut(PortalBase):
 class ExerciseDetail(BaseModel):
     exercise: ExerciseOut
     attempts: List[ExerciseAttemptOut]
+    review_prompt: Optional[str] = None
 
 
 class KnowledgeArticleOut(PortalBase):

@@ -78,6 +78,16 @@ export type Exercise = {
   solution_code: string;
   explanation_md: string;
   tags_json: string[];
+  progression_label?: string | null;
+  practice_stage?: string | null;
+  hint_md?: string | null;
+  review_checklist_json?: string[];
+  success_criteria_json?: string[];
+  related_lesson_slugs?: string[];
+  related_lesson_titles?: string[];
+  next_exercise_id?: number | null;
+  next_exercise_slug?: string | null;
+  next_exercise_title?: string | null;
 };
 
 export type ExerciseAttempt = {
@@ -93,6 +103,7 @@ export type ExerciseAttempt = {
 export type ExerciseDetail = {
   exercise: Exercise;
   attempts: ExerciseAttempt[];
+  review_prompt?: string | null;
 };
 
 export type KnowledgeArticle = {

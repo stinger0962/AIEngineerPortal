@@ -145,12 +145,31 @@ export const mockExercises: Exercise[] = [
     solution_code: "def solve(payload):\n    return payload\n",
     explanation_md: "Prefer small pure functions.",
     tags_json: ["python-refresh"],
+    progression_label: "Step 1 of 3",
+    practice_stage: "Core runtime habits",
+    hint_md: "Normalize the boundary first, keep return shapes stable, and make the middle of the function boring on purpose.",
+    review_checklist_json: [
+      "Did I make the input and output shapes explicit?",
+      "Would a teammate know where validation happens?",
+      "Did I avoid silent mutation or vague branching?",
+    ],
+    success_criteria_json: [
+      "Returns one stable shape across branches",
+      "Makes failure handling obvious",
+      "Keeps the core logic readable in under a minute",
+    ],
+    related_lesson_slugs: ["python-for-ai-engineers-1", "python-for-ai-engineers-2"],
+    related_lesson_titles: ["Python runtime habits that matter in AI work", "Modeling data with dicts, dataclasses, and Pydantic"],
+    next_exercise_id: 2,
+    next_exercise_slug: "python-refresh-2",
+    next_exercise_title: "Python Refresh Drill 2",
   },
 ];
 
 export const mockExerciseDetail: ExerciseDetail = {
   exercise: mockExercises[0],
   attempts: [],
+  review_prompt: "Before you submit, decide what a strong answer should make obvious to the reviewer.",
 };
 
 export const mockArticles: KnowledgeArticle[] = [

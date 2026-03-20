@@ -41,6 +41,7 @@ def get_exercise(exercise_id: int, db: Session = Depends(get_db)) -> ExerciseDet
     return ExerciseDetail(
         exercise=ExerciseOut.model_validate(detail["exercise"]),
         attempts=[ExerciseAttemptOut.model_validate(item) for item in detail["attempts"]],
+        review_prompt=detail["review_prompt"],
     )
 
 
