@@ -103,6 +103,27 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
           <p className="text-sm text-ink/70">No attempts yet.</p>
         )}
       </Panel>
+      {detail.attempts.length ? (
+        <Panel className="space-y-4">
+          <SectionHeading
+            eyebrow="Reference"
+            title="Correct answer and review notes"
+            description="Use the reference solution to compare structure, not just syntax."
+          />
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-3 rounded-2xl bg-[#0f172a] p-4 text-sm text-slate-100">
+              <div className="font-semibold text-slate-200">Reference solution</div>
+              <pre className="overflow-x-auto whitespace-pre-wrap leading-6">
+                <code>{detail.exercise.solution_code}</code>
+              </pre>
+            </div>
+            <div className="rounded-2xl bg-cream p-4 text-sm text-ink">
+              <div className="font-semibold">Why this answer works</div>
+              <p className="mt-3 whitespace-pre-wrap leading-7 text-ink/80">{detail.exercise.explanation_md}</p>
+            </div>
+          </div>
+        </Panel>
+      ) : null}
     </div>
   );
 }
