@@ -1058,7 +1058,95 @@ KNOWLEDGE_ARTICLES = [
         "slug": "what-makes-a-rag-system-trustworthy",
         "category": "architecture",
         "summary": "A practical framework for grounding, citations, retrieval transparency, and evaluation in RAG products.",
-        "content_md": "## Trustworthy RAG\n\nA RAG system becomes trustworthy when a user can tell where the answer came from, why those sources were selected, and what to do when the answer is weak.",
+        "content_md": """## Trustworthy RAG
+
+A RAG system becomes trustworthy when a user can tell where the answer came from, why those sources were selected, and what to do when the answer is weak.
+
+Trust is not a feeling you add at the end. It is an architectural property created by:
+
+- grounded evidence
+- visible provenance
+- retrieval transparency
+- evaluation discipline
+- honest failure handling
+
+## The practical test
+
+Ask these questions about any RAG feature:
+
+1. Can the user inspect the source of a claim?
+2. Can the team diagnose whether failure came from retrieval or generation?
+3. Can weak answers be reviewed without guessing what context the model saw?
+
+If the answer is no, the system may still look good in demos, but it will be hard to trust in repeated use.
+
+## The four pillars
+
+### 1. Grounded evidence
+
+The answer should be tied to retrieved material that is actually relevant, not just attached as decorative citations after generation.
+
+### 2. Provenance the user can follow
+
+Users should be able to see:
+
+- which document supported the answer
+- where that document came from
+- how recent it is
+
+This matters even in internal tools. Provenance reduces overconfidence and shortens debugging loops.
+
+### 3. Retrieval transparency for the team
+
+Engineers should be able to inspect:
+
+- top retrieved chunks
+- their scores or ranking rationale
+- metadata used in filtering
+- what the prompt actually received
+
+If retrieval traces are hidden, weak answers often get misdiagnosed as "prompt problems."
+
+### 4. Evaluation loops that isolate failure modes
+
+Evaluate at least three layers separately:
+
+- retrieval quality
+- answer faithfulness
+- user task usefulness
+
+One vague score is not enough. You want metrics that point to the next engineering move.
+
+## A useful design rule
+
+Build the system so a bad answer can be investigated in under five minutes.
+
+That means the product should preserve:
+
+- the user question
+- retrieved context
+- final answer
+- supporting citations
+- scoring or review notes
+
+## Common anti-patterns
+
+- citations added after the fact with no real grounding
+- hidden retrieval traces
+- mixing source snippets and generated synthesis without boundaries
+- no benchmark set for repeated review
+- assuming that "looked plausible" equals "worked"
+
+## What strong trust looks like
+
+A strong RAG system lets you say:
+
+> We know what the model saw, why it saw it, how the answer used it, and how we judge whether that was good enough.
+
+## Practical takeaway
+
+When improving a RAG project, do not start with prompt tweaking. Start by making grounding, provenance, and evaluation easier to inspect.
+""",
         "source_links_json": ["https://platform.openai.com/docs", "https://fastapi.tiangolo.com"],
         "tags_json": ["rag", "trust", "evaluation"],
     },
@@ -1067,7 +1155,93 @@ KNOWLEDGE_ARTICLES = [
         "slug": "chunking-strategies-product-grade-retrieval",
         "category": "architecture",
         "summary": "Choose chunk sizes and boundaries to preserve meaning, support citations, and improve ranking.",
-        "content_md": "## Chunking strategy\n\nChunking defines the unit your retrieval system can reason about. Good chunking preserves semantic coherence and provenance.",
+        "content_md": """## Chunking strategy
+
+Chunking defines the unit your retrieval system can reason about. Good chunking preserves semantic coherence and provenance.
+
+Poor chunking creates downstream problems that look like:
+
+- irrelevant retrieval
+- weak citations
+- duplicated answers
+- missing context
+
+## What chunking is really doing
+
+You are deciding:
+
+- how much context belongs together
+- what metadata travels with it
+- what your retriever can later rank, filter, and cite
+
+So chunking is not a preprocessing footnote. It is a product decision.
+
+## What makes a good chunk
+
+A good chunk:
+
+- preserves one coherent idea
+- carries useful provenance
+- is large enough to answer a question
+- is small enough to rank precisely
+
+## Boundary choices that matter
+
+Prefer natural boundaries when possible:
+
+- headings
+- section blocks
+- paragraphs that stay on one topic
+- structured records with meaningful fields
+
+Avoid arbitrary slicing that breaks concepts mid-thought unless you also have a strong overlap strategy.
+
+## Metadata is part of chunk design
+
+A chunk without useful metadata is harder to trust later.
+
+Useful metadata often includes:
+
+- source identifier
+- title or section name
+- document date
+- content type
+- tags that matter for filtering
+
+## Decision guide
+
+Use smaller chunks when:
+
+- precision matters more than breadth
+- users ask targeted factual questions
+- citation quality matters a lot
+
+Use larger chunks when:
+
+- context is highly interdependent
+- users need broader synthesis
+- the document structure would break if sliced too aggressively
+
+## What to inspect in practice
+
+If retrieval feels weak, inspect:
+
+- top chunks for one real query
+- whether the chunk boundaries preserved meaning
+- whether adjacent chunks should have stayed together
+- whether metadata could have filtered better candidates upward
+
+## Common anti-patterns
+
+- chunking only by character count
+- forgetting metadata entirely
+- keeping chunks so large that ranking becomes fuzzy
+- keeping chunks so small that the model loses context
+
+## Practical takeaway
+
+Chunking should be reviewed the same way you review an API contract: does it preserve meaning, and does it support the later behaviors you care about?
+""",
         "source_links_json": ["https://platform.openai.com/docs"],
         "tags_json": ["rag", "chunking", "retrieval"],
     },
@@ -1076,7 +1250,78 @@ KNOWLEDGE_ARTICLES = [
         "slug": "decision-guide-prompting-rag-fine-tuning",
         "category": "concept",
         "summary": "Pick the right technique based on knowledge freshness, control needs, and operational cost.",
-        "content_md": "## Prompting vs RAG vs fine-tuning\n\nUse prompting when behavior is the main variable, RAG when knowledge changes, and fine-tuning when output behavior itself must become more reliable.",
+        "content_md": """## Prompting vs RAG vs fine-tuning
+
+Use prompting when behavior is the main variable, RAG when knowledge changes, and fine-tuning when output behavior itself must become more reliable.
+
+This decision is easier when you stop asking "Which technique is most advanced?" and start asking:
+
+- what is changing?
+- what must stay controlled?
+- what will be expensive to maintain?
+
+## Prompting
+
+Prompting is the best first move when:
+
+- the model already knows enough
+- the main need is better instructions or output structure
+- the workflow is still evolving quickly
+
+Use prompting for:
+
+- formatting
+- role framing
+- output constraints
+- lightweight behavioral steering
+
+## RAG
+
+RAG is the better move when:
+
+- the needed knowledge is external or changing
+- the answer must cite real source material
+- you need to ground outputs in specific documents
+
+Use RAG when freshness and provenance matter more than memorized behavior.
+
+## Fine-tuning
+
+Fine-tuning is worth considering when:
+
+- the same behavior needs to become consistently stronger
+- prompting alone is too brittle
+- retrieval will not solve the problem because the issue is output behavior rather than missing knowledge
+
+It is not the first answer to every weak AI feature.
+
+## Decision table
+
+Choose prompting when:
+
+- instructions are the main issue
+- you want maximum iteration speed
+
+Choose RAG when:
+
+- knowledge changes often
+- citation and grounding matter
+
+Choose fine-tuning when:
+
+- output behavior itself needs to change
+- you have enough examples to justify the maintenance cost
+
+## Common mistakes
+
+- using RAG to solve a pure formatting problem
+- trying to fine-tune around missing external knowledge
+- endlessly prompt-tuning when the real issue is retrieval quality
+
+## Practical takeaway
+
+The best choice is the one that isolates the real failure mode with the least long-term complexity.
+""",
         "source_links_json": ["https://platform.openai.com/docs"],
         "tags_json": ["prompting", "rag", "fine-tuning"],
     },
@@ -1085,7 +1330,70 @@ KNOWLEDGE_ARTICLES = [
         "slug": "evaluation-metrics-help-iteration",
         "category": "concept",
         "summary": "Use metrics that point to specific failure modes rather than one vague quality score.",
-        "content_md": "## Useful evaluation metrics\n\nSeparate retrieval quality, answer faithfulness, latency, cost, and user task success so metrics guide your next engineering move.",
+        "content_md": """## Useful evaluation metrics
+
+Separate retrieval quality, answer faithfulness, latency, cost, and user task success so metrics guide your next engineering move.
+
+The test for a useful metric is simple:
+
+If this gets worse, do I know what kind of investigation or fix to start with?
+
+If not, the metric may be decorative rather than operational.
+
+## The categories that usually matter
+
+### Retrieval quality
+
+Ask whether the system found the right evidence.
+
+### Answer faithfulness
+
+Ask whether the answer stayed supported by the evidence it was given.
+
+### Latency
+
+Ask whether the feature remains usable in the product context.
+
+### Cost
+
+Ask whether the architecture is sustainable under real usage.
+
+### User-task usefulness
+
+Ask whether the feature helped the user complete the intended job.
+
+## Why one score fails
+
+A single composite score hides too much:
+
+- a system can be fast and wrong
+- accurate but too slow
+- grounded but unhelpful
+
+Breaking metrics apart gives you engineering leverage.
+
+## What to do with a metric
+
+Every metric should support one of these actions:
+
+- investigate
+- compare versions
+- trigger review
+- prioritize work
+
+If it cannot do any of those, question whether it belongs on the dashboard.
+
+## Good metric design habits
+
+- keep benchmark sets small and trusted at first
+- annotate important edge cases
+- pair scores with notes when qualitative failure matters
+- review regressions on a schedule
+
+## Practical takeaway
+
+Use metrics that narrow the search space of failure instead of creating the illusion of certainty.
+""",
         "source_links_json": ["https://platform.openai.com/docs"],
         "tags_json": ["evaluation", "metrics", "observability"],
     },
@@ -1094,7 +1402,61 @@ KNOWLEDGE_ARTICLES = [
         "slug": "observability-for-ai-requests",
         "category": "architecture",
         "summary": "Trace context assembly, provider calls, outputs, and failures so AI bugs become debuggable engineering work.",
-        "content_md": "## AI observability\n\nFor a single request, you should be able to inspect the input, retrieved context, provider response, post-processing result, latency, and cost.",
+        "content_md": """## AI observability
+
+For a single request, you should be able to inspect the input, retrieved context, provider response, post-processing result, latency, and cost.
+
+Without that, AI failures turn into anecdotes:
+
+- "the model was weird"
+- "retrieval felt off"
+- "it timed out somehow"
+
+Observability turns those guesses into engineering work.
+
+## Minimum trace shape
+
+For one request, capture:
+
+- request identifier
+- user input or task type
+- retrieved context or documents
+- model/provider used
+- output produced
+- latency
+- token or cost estimate
+- failure or review notes
+
+## What this enables
+
+Good traces let you answer:
+
+- Did retrieval fail?
+- Did the wrong model/config get used?
+- Did post-processing break a good response?
+- Are latency spikes tied to one dependency?
+
+## Trace by layer
+
+For AI systems, observability usually needs to span:
+
+- context assembly
+- provider call
+- post-processing
+- persistence or review handoff
+
+If you only log the final answer, you lose the most valuable debugging information.
+
+## Anti-patterns
+
+- logging too little to diagnose failures
+- logging everything with no structure
+- having traces that humans cannot actually review
+
+## Practical takeaway
+
+An AI trace should help you explain both what happened and what to try next.
+""",
         "source_links_json": ["https://fastapi.tiangolo.com"],
         "tags_json": ["observability", "tracing", "production"],
     },
@@ -1103,7 +1465,38 @@ KNOWLEDGE_ARTICLES = [
         "slug": "provider-wrappers-should-be-boring",
         "category": "concept",
         "summary": "A good provider wrapper normalizes responses, centralizes retries, and makes the rest of your system simpler.",
-        "content_md": "## Provider wrappers\n\nKeep authentication, timeout, retries, and normalized outputs at the edge so the rest of your code stays stable as vendors change.",
+        "content_md": """## Provider wrappers
+
+Keep authentication, timeout, retries, and normalized outputs at the edge so the rest of your code stays stable as vendors change.
+
+The wrapper should not be where your product logic lives. It should be where vendor weirdness stops.
+
+## What a wrapper should do
+
+- accept stable internal inputs
+- translate them to vendor-specific requests
+- normalize vendor-specific responses
+- centralize timeout and retry policy
+- expose consistent errors back to the application layer
+
+## What a wrapper should not do
+
+- decide product behavior
+- own orchestration logic
+- leak vendor-specific shapes deep into your codebase
+
+## Why boring is good
+
+If wrappers stay boring:
+
+- provider swaps are easier
+- tests stay clearer
+- application services can depend on stable contracts
+
+## Practical takeaway
+
+The wrapper’s job is to make the rest of the system forget which SDK sits at the edge.
+""",
         "source_links_json": ["https://platform.openai.com/docs"],
         "tags_json": ["providers", "apis", "architecture"],
     },

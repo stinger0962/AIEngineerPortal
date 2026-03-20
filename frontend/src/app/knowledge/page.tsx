@@ -16,6 +16,12 @@ export default async function KnowledgePage() {
             <p className="text-xs uppercase tracking-[0.24em] text-ember">{article.category}</p>
             <h3 className="font-display text-2xl text-ink">{article.title}</h3>
             <p className="text-sm text-ink/70">{article.summary}</p>
+            <div className="rounded-2xl bg-cream p-4 text-sm text-ink/80">
+              <div className="font-semibold">Reference value</div>
+              <p className="mt-2 leading-6">
+                {article.tags_json.slice(0, 3).join(" / ")} / {article.source_links_json.length} source link{article.source_links_json.length === 1 ? "" : "s"}
+              </p>
+            </div>
             <Link href={`/knowledge/${article.slug}`} className="inline-flex rounded-full border border-ink/10 px-4 py-2 text-sm font-semibold">
               Read note
             </Link>

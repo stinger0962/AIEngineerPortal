@@ -115,6 +115,15 @@ def test_knowledge_search():
     assert len(response.json()) > 0
 
 
+def test_phase_four_knowledge_article_has_reference_depth():
+    article = client.get("/api/v1/knowledge/what-makes-a-rag-system-trustworthy")
+    assert article.status_code == 200
+    payload = article.json()
+    assert "## The four pillars" in payload["content_md"]
+    assert "## Practical takeaway" in payload["content_md"]
+    assert len(payload["source_links_json"]) >= 1
+
+
 def test_project_create_and_update():
     create_response = client.post(
         "/api/v1/projects",
