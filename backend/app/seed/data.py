@@ -1555,10 +1555,47 @@ PROJECTS = [
         "status": "active",
         "category": "rag-app",
         "stack_json": ["Next.js", "FastAPI", "PostgreSQL", "vector-search"],
-        "architecture_md": "Ingest domain documents, chunk them with metadata, retrieve grounded context, render sourced answers, and record evaluation traces.",
+        "architecture_md": """## Project goal
+Turn a noisy domain corpus into briefings a user can trust, with citations they can inspect and evaluation traces the team can debug.
+
+## Core workflow
+- ingest source documents with stable document ids and metadata
+- chunk content based on how the user will actually ask questions
+- retrieve top evidence with filters for source type and freshness
+- assemble a prompt that keeps source snippets and synthesis clearly separated
+- return an answer with citations, confidence notes, and retrieval traces
+
+## Architecture decisions
+### Ingestion boundary
+Keep parsing, cleaning, and metadata extraction in a dedicated ingestion step so retrieval quality can be improved without touching the answer layer.
+
+### Retrieval boundary
+Treat retrieval as its own subsystem with benchmark queries, top-k inspection, and ranking review instead of hiding it behind one helper call.
+
+### Answer boundary
+The answer renderer should only use retrieved evidence plus a narrow instruction set. This reduces "citation-shaped hallucinations."
+
+## Evaluation plan
+- benchmark retrieval quality with a small labeled query set
+- review whether cited chunks really support the answer
+- compare answer usefulness, not just lexical overlap
+
+## Interview proof
+If you demo this project well, you can explain chunking, retrieval debugging, citation design, and why trust in RAG is mostly an engineering problem, not a prompting trick.
+""",
         "repo_url": None,
         "demo_url": None,
-        "lessons_learned_md": "The quality of chunking and retrieval evaluation matters more than adding more orchestration.",
+        "lessons_learned_md": """## What this project should teach you
+- retrieval quality fails silently unless you inspect chunks directly
+- citation UX matters because users judge trust through provenance
+- benchmark queries keep iteration grounded when demos look deceptively good
+
+## What to say in interviews
+> The biggest improvement did not come from adding more model complexity. It came from tightening chunking, metadata, and retrieval review loops.
+
+## Next improvement
+Add side-by-side evaluation runs so you can compare prompt, retrieval, and answer changes without guessing which change actually helped.
+""",
         "portfolio_score": 82,
     },
     {
@@ -1568,10 +1605,48 @@ PROJECTS = [
         "status": "planned",
         "category": "agent-system",
         "stack_json": ["Python", "FastAPI", "Redis", "workflow-engine"],
-        "architecture_md": "Represent each step as an explicit state transition, capture tool invocations, and require approvals for external side effects.",
+        "architecture_md": """## Project goal
+Build an agent-like workflow that stays auditable, interruptible, and safe under production pressure.
+
+## Core workflow
+- represent each task as an explicit state transition
+- persist run state after each step
+- route tool calls through a narrow adapter layer
+- require approval before external side effects
+- log retries, dead ends, and stop conditions
+
+## Architecture decisions
+### State machine over hidden recursion
+The system should make each step visible so you can replay and inspect why a run moved forward, retried, or stopped.
+
+### Tool boundaries
+Every tool call should have structured inputs, outputs, and failure reasons. This keeps the orchestration layer boring and debuggable.
+
+### Human review points
+Insert approval gates before sending messages, mutating records, or calling expensive external systems.
+
+## Evaluation plan
+- success rate by workflow type
+- average retries before completion
+- stop-reason distribution
+- human override frequency
+
+## Interview proof
+This project lets you talk about when agents add value, where deterministic workflows are safer, and how you would keep autonomy from becoming hidden chaos.
+""",
         "repo_url": None,
         "demo_url": None,
-        "lessons_learned_md": "",
+        "lessons_learned_md": """## What this project should teach you
+- agent systems need explicit control flow, not magical loops
+- tool use becomes safer when every transition is inspectable
+- approvals are a product feature, not just a compliance afterthought
+
+## What to say in interviews
+Frame this as a reliability project: the challenge is not just making the workflow powerful, but making it traceable, interruptible, and easy to debug.
+
+## Next improvement
+Add run replay and a visual timeline so you can demonstrate how the orchestrator behaves on good runs and failure cases.
+""",
         "portfolio_score": 74,
     },
     {
@@ -1581,10 +1656,41 @@ PROJECTS = [
         "status": "active",
         "category": "eval-tooling",
         "stack_json": ["Next.js", "FastAPI", "Recharts"],
-        "architecture_md": "Store evaluation runs, compare metrics across versions, and surface regressions visually with reproducible inputs.",
+        "architecture_md": """## Project goal
+Make model and retrieval iteration measurable so the team can see regressions before users do.
+
+## Core workflow
+- define benchmark cases with stable inputs and expected review dimensions
+- store each evaluation run with model, prompt, retrieval settings, and timestamps
+- compare runs side by side across quality, latency, and cost
+- surface regressions visually with links back to the exact failing cases
+
+## Architecture decisions
+### Reproducibility first
+Every run should preserve the exact inputs and configuration needed to replay the result later.
+
+### Layered metrics
+Track retrieval quality, answer quality, latency, and cost separately so one blended number does not hide the real failure mode.
+
+### Review loop
+The dashboard should support both automated metrics and human review notes. Useful evaluation mixes both.
+
+## Interview proof
+This project is strong evidence that you understand evaluation as an engineering system rather than an after-the-fact charting exercise.
+""",
         "repo_url": None,
         "demo_url": None,
-        "lessons_learned_md": "Measurement should shape iteration cadence, not trail it.",
+        "lessons_learned_md": """## What this project should teach you
+- good metrics isolate a failure mode instead of decorating a dashboard
+- reproducibility matters more than a large number of vanity charts
+- evaluation should decide the next experiment, not summarize the last one
+
+## What to say in interviews
+> Measurement should shape iteration cadence, not trail it.
+
+## Next improvement
+Add diff views for prompt and retrieval changes so you can connect metric movement to a concrete engineering decision.
+""",
         "portfolio_score": 88,
     },
 ]
@@ -1595,7 +1701,21 @@ INTERVIEW_QUESTIONS = [
         "role_type": "ai-engineer",
         "difficulty": "intermediate",
         "question_text": "How would you structure a Python service that wraps an LLM provider and remains testable as providers change?",
-        "answer_outline_md": "Clarify provider boundaries, normalize request and response models, centralize retries and timeouts, and keep business logic independent from vendor-specific SDK details.",
+        "answer_outline_md": """## Strong answer shape
+Start with the boundary: your application code should depend on an internal provider interface, not directly on vendor SDK objects.
+
+## What to cover
+- normalize request and response models with explicit schemas
+- isolate retries, timeouts, and backoff in the adapter layer
+- keep prompts and business logic outside the provider client
+- make provider calls easy to stub in tests
+
+## Concrete example
+Say you would expose one internal method like `generate_text(request)` and keep OpenAI-, Anthropic-, or local-model details behind that contract.
+
+## Interview takeaway
+The theme is boring boundaries. Good AI backends survive provider changes because only a thin adapter knows vendor-specific details.
+""",
         "tags_json": ["python", "backend", "providers"],
     },
     {
@@ -1603,7 +1723,22 @@ INTERVIEW_QUESTIONS = [
         "role_type": "llm-engineer",
         "difficulty": "advanced",
         "question_text": "A RAG system works well in demos but produces weak answers in production. How do you debug it systematically?",
-        "answer_outline_md": "Split the problem into ingestion, chunking, ranking, prompt assembly, and answer evaluation. Use trace data and benchmark queries to isolate the weakest layer before changing the whole pipeline.",
+        "answer_outline_md": """## Strong answer shape
+Break the pipeline into ingestion, chunking, retrieval, prompt assembly, and answer evaluation. Then isolate one layer at a time.
+
+## What to cover
+- inspect whether the right documents entered the corpus
+- review chunk boundaries and metadata quality
+- inspect top retrieved chunks for benchmark queries
+- compare what the model saw against the final answer
+- separate retrieval failure from generation failure
+
+## Good interviewer signal
+Mention that you want trace data and a small benchmark set before you start tweaking prompts blindly.
+
+## Interview takeaway
+The point is disciplined diagnosis. Production RAG debugging is mostly about making hidden layers inspectable.
+""",
         "tags_json": ["rag", "debugging", "evaluation"],
     },
     {
@@ -1611,7 +1746,23 @@ INTERVIEW_QUESTIONS = [
         "role_type": "ai-engineer",
         "difficulty": "intermediate",
         "question_text": "What metrics would you put on an AI observability dashboard for a production feature?",
-        "answer_outline_md": "Include answer quality, faithfulness, latency, token cost, provider failure rate, and any user-task completion signal available.",
+        "answer_outline_md": """## Strong answer shape
+Explain that one score is never enough. Separate model quality, system reliability, and business usefulness.
+
+## What to cover
+- answer quality or task success
+- faithfulness or groundedness when retrieval is involved
+- latency and timeout rate
+- token cost and cost per successful task
+- provider failure rate and fallback usage
+- human review or user correction signals
+
+## Good interviewer signal
+Say that useful metrics should point to the next engineering move, not just decorate a dashboard.
+
+## Interview takeaway
+Strong candidates think in layers: quality, reliability, and cost should be visible independently.
+""",
         "tags_json": ["evaluation", "observability", "production"],
     },
     {
@@ -1619,7 +1770,21 @@ INTERVIEW_QUESTIONS = [
         "role_type": "applied-ai-engineer",
         "difficulty": "advanced",
         "question_text": "When does an agent architecture add value, and when is it just complexity?",
-        "answer_outline_md": "Use agents when a task genuinely needs dynamic sequencing or tool selection. Prefer deterministic workflows when the happy path is known and reliability is the priority.",
+        "answer_outline_md": """## Strong answer shape
+Open with the tradeoff: agents add value when the system must choose tools or sequence steps dynamically under uncertainty.
+
+## What to cover
+- use agents when the task path is not known in advance
+- keep workflows deterministic when the happy path is stable
+- measure whether flexibility improves outcomes enough to justify lower predictability
+- keep tool calls auditable and stop conditions explicit
+
+## Concrete example
+An internal research assistant may need dynamic retrieval and tool choice. A billing workflow usually does not.
+
+## Interview takeaway
+The strongest answer is not "agents are powerful." It is "agents are expensive complexity, so I use them only when the task truly demands it."
+""",
         "tags_json": ["agents", "architecture", "tradeoffs"],
     },
     {
@@ -1627,7 +1792,22 @@ INTERVIEW_QUESTIONS = [
         "role_type": "ai-engineer",
         "difficulty": "advanced",
         "question_text": "Design a personal AI learning portal that can grow from one private user to a multi-user SaaS later.",
-        "answer_outline_md": "Explain domain boundaries, content persistence, personalization, deployment model, and how auth and multi-tenancy could be layered in without rewriting core modules.",
+        "answer_outline_md": """## Strong answer shape
+Start with domain boundaries: content, user activity, recommendations, and external signals should be separate from auth and tenancy concerns.
+
+## What to cover
+- durable content storage for lessons, practice, knowledge, and projects
+- user activity tables for completions, attempts, saved signals, and interview reps
+- recommendation services that read activity instead of hard-coding user assumptions
+- deployment boundaries so frontend, backend, and persistence can scale independently later
+- how auth and tenant scoping can be layered in without rewriting the content model
+
+## Good interviewer signal
+Mention that designing for future SaaS does not mean premature microservices. It means keeping clean boundaries now.
+
+## Interview takeaway
+This answer should sound like product-minded architecture: start simple, preserve seams, and avoid future rewrites.
+""",
         "tags_json": ["system-design", "product", "scalability"],
     },
     {
@@ -1635,7 +1815,21 @@ INTERVIEW_QUESTIONS = [
         "role_type": "ai-engineer",
         "difficulty": "intermediate",
         "question_text": "How do you explain your transition from full-stack software engineering into AI engineering without sounding like you are starting over?",
-        "answer_outline_md": "Frame it as an expansion of strengths: product delivery, systems thinking, API design, and ownership now applied to model-powered systems and evaluation-heavy workflows.",
+        "answer_outline_md": """## Strong answer shape
+Frame the move as a continuation of engineering strengths, not a reset.
+
+## What to cover
+- product delivery and stakeholder alignment already transfer
+- backend design and API discipline still matter in AI systems
+- the new layer is handling probabilistic behavior, evaluation, and model-driven workflows
+- show proof through projects, practice, and market-aware learning
+
+## A clean narrative
+You are not leaving software engineering. You are applying strong product and systems fundamentals to a new technical surface with different failure modes.
+
+## Interview takeaway
+The goal is calm credibility: you already know how to ship complex systems, and now you are building proof that those strengths extend into AI engineering.
+""",
         "tags_json": ["behavioral", "career-transition", "narrative"],
     },
 ]

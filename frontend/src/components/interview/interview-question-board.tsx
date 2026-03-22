@@ -2,6 +2,7 @@
 
 import { startTransition, useState } from "react";
 
+import { LessonMarkdown } from "@/components/learning/lesson-markdown";
 import { portalApi } from "@/lib/api/portal";
 import type { InterviewQuestion } from "@/lib/types/portal";
 
@@ -47,7 +48,16 @@ export function InterviewQuestionBoard({ initialQuestions }: InterviewQuestionBo
             {question.average_confidence ? <span>Confidence {question.average_confidence}/5</span> : null}
           </div>
           <h3 className="mt-2 text-lg font-semibold text-ink">{question.question_text}</h3>
-          <p className="mt-2 text-sm text-ink/70">{question.answer_outline_md}</p>
+          <div className="mt-4 rounded-2xl bg-white/75 p-4">
+            <LessonMarkdown content={question.answer_outline_md} />
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {question.tags_json.map((tag) => (
+              <span key={tag} className="rounded-full border border-ink/10 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">
+                {tag}
+              </span>
+            ))}
+          </div>
           {question.last_practiced_at ? (
             <p className="mt-2 text-xs text-ink/55">Last practiced {new Date(question.last_practiced_at).toLocaleString()}</p>
           ) : null}

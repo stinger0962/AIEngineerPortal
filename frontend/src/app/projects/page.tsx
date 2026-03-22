@@ -15,11 +15,25 @@ export default async function ProjectsPage() {
         <Panel className="space-y-4">
           {projects.map((project) => (
             <Link key={project.id} href={`/projects/${project.slug}`} className="block rounded-[24px] bg-cream p-5">
-              <div className="flex items-center justify-between gap-4">
-                <h3 className="text-lg font-semibold text-ink">{project.title}</h3>
-                <span className="text-sm text-ink/60">{project.portfolio_score}</span>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-ink">{project.title}</h3>
+                  <p className="mt-2 text-xs uppercase tracking-[0.24em] text-ink/50">
+                    {project.category} · {project.status}
+                  </p>
+                </div>
+                <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-ink/70">
+                  Score {project.portfolio_score}
+                </span>
               </div>
               <p className="mt-2 text-sm text-ink/70">{project.summary}</p>
+              <div className="mt-4 rounded-2xl bg-white/70 p-4 text-sm text-ink/80">
+                <p className="text-xs uppercase tracking-[0.24em] text-rust">Blueprint value</p>
+                <p className="mt-2 line-clamp-3">
+                  {project.lessons_learned_md.split("\n").find((line) => line.trim() && !line.startsWith("##")) ??
+                    "Open the project to see the full architecture and interview story."}
+                </p>
+              </div>
             </Link>
           ))}
         </Panel>

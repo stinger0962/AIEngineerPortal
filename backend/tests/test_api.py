@@ -124,6 +124,15 @@ def test_phase_four_knowledge_article_has_reference_depth():
     assert len(payload["source_links_json"]) >= 1
 
 
+def test_phase_four_project_blueprint_has_real_depth():
+    projects = client.get("/api/v1/projects")
+    assert projects.status_code == 200
+    rag_project = next(project for project in projects.json() if project["slug"] == "rag-research-brief-assistant")
+    assert "## Project goal" in rag_project["architecture_md"]
+    assert "## Evaluation plan" in rag_project["architecture_md"]
+    assert "## What this project should teach you" in rag_project["lessons_learned_md"]
+
+
 def test_project_create_and_update():
     create_response = client.post(
         "/api/v1/projects",
@@ -230,6 +239,12 @@ def test_phase_three_interview_routes_are_personalized():
     assert skill_gaps.status_code == 200
     assert len(skill_gaps.json()) >= 1
     assert "action_path" in skill_gaps.json()[0]
+
+
+def test_phase_four_interview_question_has_answer_framework_depth():
+    question = client.get("/api/v1/interview/questions").json()[0]
+    assert "## Strong answer shape" in question["answer_outline_md"]
+    assert "## Interview takeaway" in question["answer_outline_md"]
 
 
 def test_interview_question_practice_updates_question_stats():
