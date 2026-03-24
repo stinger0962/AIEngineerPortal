@@ -12,6 +12,7 @@ import {
   mockToday,
 } from "@/lib/data/mock";
 import type {
+  AdaptiveFocus,
   Course,
   DashboardSummary,
   DashboardToday,
@@ -26,6 +27,7 @@ import type {
   JobPosting,
   KnowledgeArticle,
   LearningPath,
+  MasteryArea,
   NewsItem,
   PortfolioReadiness,
   Project,
@@ -150,6 +152,8 @@ export const portalApi = {
   getInterviewRoadmap: () => fetchJson<InterviewRoadmap>("/interview/roadmap", undefined, mockInterviewRoadmap),
   getPortfolioReadiness: () => fetchJson<PortfolioReadiness>("/interview/portfolio-readiness"),
   getInterviewSkillGaps: () => fetchJson<SkillGapInsight[]>("/interview/skill-gaps"),
+  getMasteryProfile: () => fetchJson<MasteryArea[]>("/adaptive/mastery"),
+  getAdaptiveFocus: () => fetchJson<AdaptiveFocus | null>("/adaptive/focus"),
   practiceInterviewQuestion: (questionId: number, confidence_score: number, notes: string) =>
     fetchJson<InterviewPractice>(
       `/interview/questions/${questionId}/practice`,

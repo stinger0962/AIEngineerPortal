@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Exercise, JobPosting, Lesson, LessonCompletion, NewsItem, ProgressSnapshot, Project, User, UserExerciseAttempt
+from app.services.adaptive_service import build_adaptive_focus
 from app.services.progress_service import refresh_progress_snapshot
 from app.services.learning_service import list_paths
 
@@ -57,6 +58,7 @@ def build_dashboard_summary(db: Session) -> dict:
     active_projects = db.scalars(select(Project).where(Project.status.in_(["active", "planned"])).limit(3)).all()
     top_news = _preferred_news_signal(db)
     top_job = _preferred_job_signal(db)
+    adaptive_focus = build_adaptive_focus(db)
 
     recommendation_panel = [
         {"title": "Close the Python fluency gap", "reason": "Core Python repetition is still the fastest unlock."},
@@ -113,6 +115,7 @@ def build_dashboard_summary(db: Session) -> dict:
             for project in active_projects
         ],
         "recommendation_panel": recommendation_panel[:5],
+        "adaptive_focus": adaptive_focus,
     }
 
 

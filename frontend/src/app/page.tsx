@@ -6,16 +6,18 @@ import { SectionHeading } from "@/components/ui/section-heading";
 import { portalApi } from "@/lib/api/portal";
 
 export default async function DashboardPage() {
-  const [summary, today, recommendations, newsItems, jobs] = await Promise.all([
+  const [summary, today, recommendations, newsItems, jobs, masteryProfile] = await Promise.all([
     portalApi.getDashboardSummary(),
     portalApi.getDashboardToday(),
     portalApi.getRecommendations(),
     portalApi.getNewsItems(),
     portalApi.getJobs(),
+    portalApi.getMasteryProfile(),
   ]);
 
   const topNews = newsItems[0];
   const topJob = jobs[0];
+  const weakestAreas = masteryProfile.slice(0, 3);
 
   return (
     <div className="space-y-8">
@@ -75,6 +77,51 @@ export default async function DashboardPage() {
           </div>
         </Panel>
       </div>
+
+      {summary.adaptive_focus ? (
+        <Panel className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-4">
+            <SectionHeading
+              eyebrow="Adaptive focus"
+              title={summary.adaptive_focus.title}
+              description="Phase 5 starts by identifying the weakest area in your current system and turning it into a focused sprint."
+            />
+            <div className="rounded-[24px] bg-cream p-5">
+              <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.24em] text-ink/50">
+                <span>{summary.adaptive_focus.area_title}</span>
+                <span>{summary.adaptive_focus.target_kind}</span>
+                <span>Mastery {summary.adaptive_focus.mastery_score}/100</span>
+              </div>
+              <p className="mt-3 text-sm leading-7 text-ink/75">{summary.adaptive_focus.reason}</p>
+              <Link
+                href={summary.adaptive_focus.action_path}
+                className="mt-5 inline-flex rounded-full bg-ink px-5 py-3 text-sm font-semibold text-cream"
+              >
+                {summary.adaptive_focus.action_label}
+              </Link>
+            </div>
+          </div>
+          <div className="space-y-4">
+            <SectionHeading
+              eyebrow="Mastery"
+              title="Weakest areas right now"
+              description="This view blends lesson progress, drill reps, interview reps, and signal demand."
+            />
+            {weakestAreas.map((area) => (
+              <div key={area.area_slug} className="rounded-2xl bg-mint p-4 text-sm text-ink">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="font-semibold">{area.area_title}</p>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-ink/60">
+                    {area.status}
+                  </span>
+                </div>
+                <p className="mt-2 text-ink/75">{area.gap}</p>
+                <p className="mt-2 text-xs text-ink/60">{area.evidence}</p>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-4">
         <Panel className="space-y-4">

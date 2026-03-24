@@ -1,4 +1,5 @@
 from app.schemas.portal import (
+    AdaptiveFocusOut,
     CourseOut,
     CourseProgressIn,
     DashboardSummary,
@@ -18,6 +19,7 @@ from app.schemas.portal import (
     LearningPathOut,
     LessonCompletionResponse,
     LessonOut,
+    MasteryAreaOut,
     NewsItemOut,
     PortfolioReadiness,
     ProgressSnapshotOut,

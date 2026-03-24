@@ -25,6 +25,7 @@ class DashboardSummary(BaseModel):
     recommended_exercise: Optional[Dict[str, Any]]
     active_projects: List[Dict[str, Any]]
     recommendation_panel: List[Dict[str, str]]
+    adaptive_focus: Optional[Dict[str, Any]] = None
 
 
 class DashboardToday(BaseModel):
@@ -259,6 +260,29 @@ class SkillGapInsight(BaseModel):
     urgency: str
     evidence: str
     action_path: str
+
+
+class MasteryAreaOut(BaseModel):
+    area_slug: str
+    area_title: str
+    mastery_score: int
+    status: str
+    evidence: str
+    gap: str
+    weakest_signal: str
+    next_action_path: str
+    next_action_label: str
+
+
+class AdaptiveFocusOut(BaseModel):
+    title: str
+    reason: str
+    action_path: str
+    target_kind: str
+    mastery_score: int
+    area_slug: str
+    area_title: str
+    action_label: str
 
 
 class RecommendationOut(BaseModel):

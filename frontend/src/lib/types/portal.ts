@@ -7,6 +7,7 @@ export type DashboardSummary = {
   recommended_exercise: { id: number; title: string; category: string; difficulty: string } | null;
   active_projects: { id: number; title: string; status: string; portfolio_score: number }[];
   recommendation_panel: { title: string; reason: string }[];
+  adaptive_focus?: AdaptiveFocus | null;
 };
 
 export type DashboardToday = {
@@ -209,6 +210,29 @@ export type SkillGapInsight = {
   urgency: string;
   evidence: string;
   action_path: string;
+};
+
+export type MasteryArea = {
+  area_slug: string;
+  area_title: string;
+  mastery_score: number;
+  status: string;
+  evidence: string;
+  gap: string;
+  weakest_signal: string;
+  next_action_path: string;
+  next_action_label: string;
+};
+
+export type AdaptiveFocus = {
+  title: string;
+  reason: string;
+  action_path: string;
+  target_kind: string;
+  mastery_score: number;
+  area_slug: string;
+  area_title: string;
+  action_label: string;
 };
 
 export type InterviewPractice = {

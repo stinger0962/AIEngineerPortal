@@ -247,6 +247,22 @@ def test_phase_four_interview_question_has_answer_framework_depth():
     assert "## Interview takeaway" in question["answer_outline_md"]
 
 
+def test_phase_five_mastery_profile_and_focus_exist():
+    mastery = client.get("/api/v1/adaptive/mastery")
+    assert mastery.status_code == 200
+    payload = mastery.json()
+    assert len(payload) >= 3
+    assert "mastery_score" in payload[0]
+    assert "gap" in payload[0]
+    assert "next_action_path" in payload[0]
+
+    focus = client.get("/api/v1/adaptive/focus")
+    assert focus.status_code == 200
+    focus_payload = focus.json()
+    assert focus_payload["title"].startswith("Adaptive sprint:")
+    assert focus_payload["mastery_score"] <= payload[-1]["mastery_score"] or focus_payload["mastery_score"] == payload[0]["mastery_score"]
+
+
 def test_interview_question_practice_updates_question_stats():
     question = client.get("/api/v1/interview/questions").json()[0]
     response = client.post(
@@ -335,6 +351,15 @@ def test_dashboard_summary_adapts_to_completed_lessons_and_practice_history():
 
     next_summary = client.get("/api/v1/dashboard/summary").json()
     assert next_summary["recommended_exercise"]["id"] != first_recommended_id
+
+
+def test_dashboard_summary_exposes_adaptive_focus():
+    summary = client.get("/api/v1/dashboard/summary")
+    assert summary.status_code == 200
+    payload = summary.json()
+    assert payload["adaptive_focus"] is not None
+    assert payload["adaptive_focus"]["mastery_score"] >= 0
+    assert payload["adaptive_focus"]["action_path"].startswith("/")
 
 
 def test_recommendations_prefer_interview_when_project_proof_exists():
