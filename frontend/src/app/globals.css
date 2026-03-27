@@ -24,3 +24,26 @@ a {
 pre {
   white-space: pre-wrap;
 }
+
+/* Memory card 3D flip */
+.perspective-\[1200px\] {
+  perspective: 1200px;
+}
+
+.memory-card-inner {
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.memory-card-flipped {
+  transform: rotateY(180deg);
+}
+
+.memory-card-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.memory-card-back {
+  transform: rotateY(180deg);
+}

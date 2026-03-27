@@ -6,6 +6,7 @@ import {
   mockExercises,
   mockInterviewQuestions,
   mockInterviewRoadmap,
+  mockMemoryCards,
   mockPaths,
   mockProjects,
   mockRecommendations,
@@ -28,6 +29,8 @@ import type {
   KnowledgeArticle,
   LearningPath,
   MasteryArea,
+  MemoryCard,
+  MemoryCardReview,
   NewsItem,
   PortfolioReadiness,
   Project,
@@ -169,4 +172,19 @@ export const portalApi = {
       },
     ),
   getRecommendations: () => fetchJson<Recommendation[]>("/recommendations/next-actions", undefined, mockRecommendations),
+
+  getMemoryCards: () => fetchJson<MemoryCard[]>("/memory/cards", undefined, mockMemoryCards),
+  reviewMemoryCard: (cardId: number, confidence: number) =>
+    fetchJson<MemoryCardReview>(
+      `/memory/cards/${cardId}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify({ confidence }),
+      },
+      {
+        card_id: cardId,
+        confidence,
+        reviewed_at: new Date().toISOString(),
+      },
+    ),
 };

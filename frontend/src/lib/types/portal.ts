@@ -267,3 +267,32 @@ export type FeedRefreshMeta = {
   refresh_window_hours: number;
   auto_refresh_enabled: boolean;
 };
+
+export type MemoryCard = {
+  id: number;
+  front_md: string;
+  back_md: string;
+  category: string;
+  source_kind: "lesson" | "exercise" | "interview" | "knowledge";
+  source_title: string;
+  difficulty: "beginner" | "intermediate" | "advanced";
+  tags_json: string[];
+  review_count: number;
+  last_reviewed_at: string | null;
+  confidence: number | null;
+  next_review_at: string | null;
+};
+
+export type MemoryCardReview = {
+  card_id: number;
+  confidence: number;
+  reviewed_at: string;
+};
+
+export type ReviewSessionSummary = {
+  total_cards: number;
+  reviewed: number;
+  avg_confidence: number;
+  strongest_category: string;
+  weakest_category: string;
+};

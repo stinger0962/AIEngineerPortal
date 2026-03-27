@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { BookOpen, Briefcase, Gauge, GraduationCap, Newspaper, Settings, Sparkles, SquareTerminal } from "lucide-react";
+import { BookOpen, Brain, Briefcase, Gauge, GraduationCap, Newspaper, Settings, Sparkles, SquareTerminal } from "lucide-react";
 
 const items = [
   { href: "/", label: "Dashboard", icon: Gauge },
   { href: "/learn", label: "Learning", icon: GraduationCap },
   { href: "/courses", label: "Courses", icon: BookOpen },
   { href: "/practice/python", label: "Practice", icon: SquareTerminal },
+  { href: "/review", label: "Review", icon: Brain },
   { href: "/knowledge", label: "Knowledge", icon: Sparkles },
   { href: "/projects", label: "Projects", icon: Briefcase },
   { href: "/interview", label: "Interview", icon: BookOpen },
