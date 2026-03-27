@@ -53,4 +53,13 @@ jobs:
       - name: Verify public health
         shell: bash
         run: |
-          curl --fail --silent --show-error https://${{ secrets.APP_DOMAIN }}/health >/dev/null
+          for i in 1 2 3 4 5; do
+            if curl --fail --silent --show-error --max-time 10 https://${{ secrets.APP_DOMAIN }}/health >/dev/null 2>&1; then
+              echo "Health check passed on attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i failed, waiting 15s..."
+            sleep 15
+          done
+          echo "Health check failed after 5 attempts"
+          exit 1
