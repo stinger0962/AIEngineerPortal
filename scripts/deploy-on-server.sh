@@ -29,6 +29,11 @@ fi
 # These expire immediately and block git fetch on public repos.
 git config --unset-all http.https://github.com/.extraheader 2>/dev/null || true
 
+# Clean working tree before checkout to prevent conflicts from
+# line-ending changes (CRLF→LF) or untracked files.
+git checkout -- . 2>/dev/null || true
+git clean -fd 2>/dev/null || true
+
 git fetch --all --tags --prune
 git checkout "$DEPLOY_REF"
 git reset --hard "$DEPLOY_REF"
