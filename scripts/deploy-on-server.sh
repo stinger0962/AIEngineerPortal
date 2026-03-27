@@ -25,6 +25,10 @@ if [ ! -f "$ENV_FILE" ] && [ -f "$ENV_BACKUP" ]; then
   cp "$ENV_BACKUP" "$ENV_FILE"
 fi
 
+# Remove any stale GitHub Actions tokens injected by actions/checkout.
+# These expire immediately and block git fetch on public repos.
+git config --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+
 git fetch --all --tags --prune
 git checkout "$DEPLOY_REF"
 git reset --hard "$DEPLOY_REF"
