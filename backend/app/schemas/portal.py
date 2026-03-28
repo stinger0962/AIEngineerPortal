@@ -380,3 +380,21 @@ class PinVariationResponse(BaseModel):
     id: int
     slug: str
     title: str
+
+
+class DeepDiveRequest(BaseModel):
+    """Request body for lesson deep-dive."""
+    question: str
+
+
+class DeepDiveResponse(BaseModel):
+    """Response from AI deep-dive generation."""
+    id: int
+    question: str
+    answer_md: str
+    related_concepts: List[str]
+    model: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    latency_ms: Optional[int] = None
+    created_at: Optional[str] = None

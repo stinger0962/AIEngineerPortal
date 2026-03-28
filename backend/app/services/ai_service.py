@@ -173,11 +173,99 @@ class AIService:
             "prompt_template": prompt["system"],
         }
 
-    # --- Future stubs ---
+    # --- Deep dive ---
 
-    def generate_deep_dive(self, topic: str, lesson_context: str) -> str:
-        """[Future] Generate an on-demand deep-dive explanation."""
-        raise NotImplementedError("Deep dive generation coming in next iteration")
+    def _build_deep_dive_prompt(
+        self,
+        question: str,
+        lesson_context: Dict[str, Any],
+    ) -> Dict[str, str]:
+        """Build prompt for answering a deep-dive question about a lesson."""
+        system = (
+            "You are a senior AI engineering mentor answering a deep-dive question from a learner.\n\n"
+            "## Who you are helping\n"
+            "A senior full-stack engineer transitioning to AI engineering on the APPLICATION side — "
+            "they build production systems with LLMs and agents, not ML research. They already know "
+            "Python, APIs, and system design. They are learning: tool design, agent orchestration, "
+            "RAG patterns, evaluation, prompt engineering, cost optimization, and production reliability.\n\n"
+            "## Lesson context\n"
+            f"**Learning path:** {lesson_context.get('path_name', 'AI Engineering')}\n"
+            f"**Lesson title:** {lesson_context.get('title', '')}\n\n"
+            f"### Full lesson content\n{lesson_context.get('content_md', '')}\n\n"
+            "## How to answer\n"
+            "Answer the learner's specific question with:\n"
+            "1. **Clear explanation** — connect directly to what the lesson already taught; "
+            "build on the learner's existing mental model, don't repeat the lesson verbatim\n"
+            "2. **Working Python code examples** — where relevant, show runnable code with "
+            "type hints, docstrings, and real imports; prefer concrete examples over pseudocode\n"
+            "3. **Production context** — explain how this applies in real AI/agent systems, "
+            "what can go wrong at scale, and what experienced engineers watch out for\n"
+            "4. **Common misconceptions** — call out the traps that trip up developers new to "
+            "AI engineering; explain why the naive approach fails\n\n"
+            "## Output format\n"
+            "Respond with ONLY valid JSON (no markdown fences, no commentary):\n"
+            '{"answer_md": "your full answer in markdown with code blocks", '
+            '"related_concepts": ["concept1", "concept2", "concept3"]}\n\n'
+            "Keep related_concepts to 3-5 items — specific, actionable topics the learner should "
+            "explore next given this question. Not generic advice."
+        )
+
+        user = f"## Question\n{question}"
+
+        return {"system": system, "user": user}
+
+    def _parse_deep_dive_response(self, raw: str) -> Optional[Dict[str, Any]]:
+        """Parse Claude's JSON response into deep-dive answer dict. Returns None on failure."""
+        try:
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.split("\n")
+                cleaned = "\n".join(lines[1:-1])
+            data = json.loads(cleaned)
+            answer_md = data.get("answer_md", "")
+            related_concepts = data.get("related_concepts", [])
+            if not answer_md:
+                return None
+            return {
+                "answer_md": answer_md,
+                "related_concepts": related_concepts if isinstance(related_concepts, list) else [],
+            }
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def generate_deep_dive(
+        self,
+        question: str,
+        lesson_context: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Generate a deep-dive answer for a lesson question using Claude. Returns dict or None."""
+        prompt = self._build_deep_dive_prompt(question, lesson_context)
+        start = time.time()
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=2000,
+                system=prompt["system"],
+                messages=[{"role": "user", "content": prompt["user"]}],
+            )
+        except (anthropic.APITimeoutError, anthropic.APIConnectionError):
+            return None
+
+        latency_ms = int((time.time() - start) * 1000)
+        raw_text = response.content[0].text
+        parsed = self._parse_deep_dive_response(raw_text)
+
+        if parsed:
+            parsed["_meta"] = {
+                "model": self.model,
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "latency_ms": latency_ms,
+                "prompt_template": prompt["system"],
+            }
+
+        return parsed
 
     def _build_variation_prompt(
         self,
