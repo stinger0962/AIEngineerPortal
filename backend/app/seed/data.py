@@ -4663,6 +4663,680 @@ The wrapper’s job is to make the rest of the system forget which SDK sits at t
         "source_links_json": ["https://platform.openai.com/docs"],
         "tags_json": ["providers", "apis", "architecture"],
     },
+    {
+        "title": "Agent architecture patterns compared",
+        "slug": "agent-architecture-patterns-compared",
+        "category": "agents",
+        "summary": "A practical comparison of ReAct, Plan-Execute, and Tree-of-Thought agent architectures with a decision matrix covering latency, token cost, reliability, and complexity trade-offs.",
+        "content_md": """## Agent architecture patterns compared
+
+Three patterns dominate production agent design today: ReAct, Plan-Execute, and Tree-of-Thought. Each solves a different problem. Picking the wrong one costs you in latency, money, or reliability before you understand why.
+
+This article gives you a practical comparison so you can make the call fast when designing a new agent.
+
+---
+
+## ReAct
+
+**ReAct** (Reasoning + Acting) interleaves thought steps with tool calls in a single loop. The model reasons about what to do, calls a tool, observes the result, reasons again, calls another tool, and eventually produces a final answer.
+
+```
+Thought: I need to look up the user's account status
+Action: get_account(user_id="u_123")
+Observation: {"status": "active", "plan": "pro"}
+Thought: Now I need to check their recent invoices
+Action: list_invoices(user_id="u_123", limit=3)
+Observation: [{"id": "inv_1", "amount": 49, "status": "paid"}, ...]
+Thought: I have enough to answer
+Final Answer: Your account is active on the Pro plan. Your last invoice was $49 and has been paid.
+```
+
+**When it works well:**
+- Short-horizon tasks (2–6 tool calls)
+- Unpredictable branching where the next action depends on the previous result
+- Conversational agents where the user can steer mid-loop
+- Exploratory tasks where you do not know the path ahead of time
+
+**When it breaks:**
+- Long-horizon tasks with many steps — the context window fills with intermediate traces
+- Tasks that require parallel work — ReAct is inherently sequential
+- Production systems where every intermediate step costs tokens you do not need
+
+**Token cost:** High relative to the work done, because every thought and observation stays in the context window.
+
+**Latency:** Directly proportional to the number of tool calls. Each call waits for the previous result.
+
+**Reliability:** Good when the task is short. Degrades as chain length grows — each step is another chance for the model to reason incorrectly.
+
+**Complexity:** Low. You can implement a working ReAct loop in under 100 lines of Python using any provider SDK.
+
+---
+
+## Plan-Execute
+
+**Plan-Execute** separates planning from execution. The model first produces a structured plan (a list of steps), then a separate executor runs those steps, optionally with a different model or set of tools.
+
+```python
+# Phase 1: Planner
+plan = planner_llm.complete(
+    "Create a step-by-step plan to process this support ticket: {ticket}"
+)
+# Returns:
+# [
+#   {"step": 1, "action": "classify_ticket", "input": "..."},
+#   {"step": 2, "action": "lookup_customer", "input": "..."},
+#   {"step": 3, "action": "draft_response", "input": "..."},
+# ]
+
+# Phase 2: Executor
+for step in plan.steps:
+    result = executor.run(step)
+    plan.record(step, result)
+```
+
+**When it works well:**
+- Tasks where the path is mostly predictable from the starting state
+- Long multi-step workflows where you want to audit or modify the plan before execution
+- Systems that need a human-in-the-loop review point between planning and acting
+- Workflows where some steps can run in parallel (the executor can parallelize)
+
+**When it breaks:**
+- Tasks with high environmental uncertainty — the plan becomes stale after the first unexpected result
+- Short tasks where the planning overhead outweighs the benefit
+- Dynamic environments where step outputs change what subsequent steps should do
+
+**Token cost:** Moderate. Planning is a single LLM call. Execution calls are focused and carry less context than ReAct traces.
+
+**Latency:** Planning adds upfront latency. Execution can be fast if steps run in parallel.
+
+**Reliability:** Higher than ReAct for predictable workflows. Lower for adaptive ones — the executor does not replan when it hits unexpected results unless you add a replanning loop.
+
+**Complexity:** Medium. You need a plan schema, a planner prompt, an executor loop, and a decision about when to replan.
+
+---
+
+## Tree-of-Thought
+
+**Tree-of-Thought (ToT)** generates multiple reasoning branches and evaluates them before committing to a path. Instead of a single linear chain, the model explores several options, scores each, and picks the best continuation.
+
+```python
+# Generate candidate next steps
+candidates = [
+    llm.complete(f"{state}\nOption A:"),
+    llm.complete(f"{state}\nOption B:"),
+    llm.complete(f"{state}\nOption C:"),
+]
+
+# Score each candidate
+scores = [evaluator.score(c) for c in candidates]
+
+# Pick the best and continue from there
+best = candidates[scores.index(max(scores))]
+```
+
+**When it works well:**
+- Tasks that resemble search problems — writing, code generation, mathematical reasoning
+- Cases where local optima are a real risk (picking the first plausible path leads to dead ends)
+- Offline batch tasks where you can afford multiple LLM calls per decision point
+- Quality-critical work where you are willing to pay for better outputs
+
+**When it breaks:**
+- Latency-sensitive applications — branching multiplies your LLM calls
+- Tasks without a clear scoring function — you need a way to evaluate candidates
+- Most real-time conversational agents
+
+**Token cost:** High. You are paying for multiple completions at each branch point.
+
+**Latency:** High. Multiple LLM calls per step. Not suitable for interactive use.
+
+**Reliability:** High for the task types it fits. The branching and evaluation naturally finds better paths.
+
+**Complexity:** High. You need candidate generation, a scoring/evaluation mechanism, and a search strategy (breadth-first, depth-first, beam search).
+
+---
+
+## Decision matrix
+
+| Dimension | ReAct | Plan-Execute | Tree-of-Thought |
+|---|---|---|---|
+| Latency | Medium (sequential) | Low-Medium (parallel exec) | High (multiple branches) |
+| Token cost per task | High | Medium | Very high |
+| Reliability (short tasks) | High | High | High |
+| Reliability (long tasks) | Degrades | Good | Good |
+| Parallelism support | No | Yes | Yes (per branch) |
+| Human review point | Hard | Natural | Hard |
+| Implementation effort | Low | Medium | High |
+| Good for real-time | Yes | Yes | No |
+| Good for quality-critical offline work | No | Sometimes | Yes |
+
+---
+
+## How to choose
+
+**Start with ReAct** if:
+- The task has 6 or fewer tool calls
+- The path depends heavily on intermediate results
+- You are prototyping and want something running fast
+
+**Use Plan-Execute** if:
+- The task is well-defined and the steps are mostly predictable
+- You want a human review point before execution
+- You need parallel step execution
+- Long-horizon multi-step tasks are the norm
+
+**Use Tree-of-Thought** if:
+- Output quality is more important than latency or cost
+- The task resembles a search problem (many local optima)
+- You are running offline batch work
+- You have a reliable scoring function
+
+**Hybrid patterns** are common in production. A Plan-Execute outer loop with a ReAct inner executor for individual steps is a practical middle ground. The planner breaks the task into chunks; each chunk runs a short ReAct loop.
+
+---
+
+## Practical notes for production
+
+- **Instrument every pattern the same way.** Log the full trace — thoughts, tool calls, observations, scores — regardless of pattern. The patterns differ in structure but share the same debugging needs.
+- **Token cost adds up faster than you expect.** A Plan-Execute agent with a 10-step plan and 3 tool calls per step is 30+ LLM calls before counting retries. Model your cost before committing.
+- **Reliability degrades with context window pressure.** For ReAct especially, prune intermediate results or summarize early observations before they crowd out later reasoning.
+- **The executor in Plan-Execute does not need to be the same model as the planner.** Use a cheaper, faster model for execution steps that just need tool routing. Save your best model for planning and synthesis.
+""",
+        "source_links_json": ["https://arxiv.org/abs/2210.03629", "https://arxiv.org/abs/2305.10601"],
+        "tags_json": ["agents", "architecture", "react", "planning", "patterns"],
+    },
+    {
+        "title": "Tool design best practices for production agents",
+        "slug": "tool-design-best-practices",
+        "category": "agents",
+        "summary": "How to design reliable, testable agent tools using JSON Schema, structured error contracts, idempotency, isolation testing, and versioning strategies.",
+        "content_md": """## Tool design best practices for production agents
+
+Tools are the action surface of an agent. The quality of your tool design determines whether your agent is reliable or fragile in production.
+
+A poorly designed tool is invisible in demos and catastrophic in production. The model calls it with unexpected inputs. It raises an unhandled exception. The agent retries with the same bad call. You burn tokens, produce wrong results, and cannot debug it.
+
+Good tool design is boring, explicit, and defensive.
+
+---
+
+## Schema design with JSON Schema
+
+Every tool should have a machine-readable schema that constrains the model's inputs. Provider SDKs (OpenAI, Anthropic) accept JSON Schema for function definitions.
+
+```python
+get_invoice_tool = {
+    "name": "get_invoice",
+    "description": "Retrieve a single invoice by ID. Returns the invoice record or an error object if not found.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "invoice_id": {
+                "type": "string",
+                "description": "The invoice ID. Format: inv_ followed by alphanumeric characters.",
+                "pattern": "^inv_[a-zA-Z0-9]+$"
+            },
+            "include_line_items": {
+                "type": "boolean",
+                "description": "Whether to include individual line items in the response. Defaults to false.",
+                "default": False
+            }
+        },
+        "required": ["invoice_id"],
+        "additionalProperties": False
+    }
+}
+```
+
+**Design rules:**
+
+- **Be specific in descriptions.** The model uses the description to decide when and how to call the tool. Vague descriptions produce wrong calls. Describe the tool's purpose, inputs, and what success looks like in 1–3 sentences.
+- **Include format hints in descriptions.** If an ID has a prefix format, say so. If a date expects ISO 8601, say so. The model will follow these hints.
+- **Use `additionalProperties: false`.** This prevents the model from inventing fields that do not exist in your schema.
+- **Set `required` explicitly.** Do not rely on the model knowing which fields are optional.
+- **Prefer enums over open strings for constrained values.** If a `status` field accepts only `"open"`, `"closed"`, `"pending"`, use an enum. This eliminates a class of invalid inputs.
+
+---
+
+## Structured error contracts
+
+The worst tool contract is one that raises an unhandled exception. The agent's executor crashes, the loop breaks, and you have no actionable information.
+
+Better: return a typed error object the model can reason about.
+
+```python
+from typing import TypedDict, Literal, Union
+
+class InvoiceResult(TypedDict):
+    invoice_id: str
+    amount: float
+    status: str
+    line_items: list
+
+class ToolError(TypedDict):
+    error: bool
+    error_code: Literal["not_found", "permission_denied", "invalid_input", "upstream_failure"]
+    message: str
+    retryable: bool
+
+def get_invoice(invoice_id: str, include_line_items: bool = False) -> Union[InvoiceResult, ToolError]:
+    if not invoice_id.startswith("inv_"):
+        return {
+            "error": True,
+            "error_code": "invalid_input",
+            "message": f"Invoice ID must start with 'inv_'. Received: {invoice_id}",
+            "retryable": False
+        }
+
+    invoice = db.invoices.get(invoice_id)
+    if invoice is None:
+        return {
+            "error": True,
+            "error_code": "not_found",
+            "message": f"No invoice found with ID {invoice_id}",
+            "retryable": False
+        }
+
+    result = {"invoice_id": invoice.id, "amount": invoice.amount, "status": invoice.status}
+    if include_line_items:
+        result["line_items"] = invoice.line_items
+    return result
+```
+
+**Error contract design rules:**
+
+- **Never raise raw exceptions from tools.** Catch all exceptions at the tool boundary and return an error object.
+- **Include `retryable`.** The model or executor can use this to decide whether to try again or surface the failure.
+- **Include `error_code` as an enum string, not a freeform message.** The model can reason about structured codes. It cannot reliably pattern-match error messages.
+- **Include enough context in `message` to debug without logs.** What was the input? What was expected?
+- **Keep the shape consistent.** An error from `get_invoice` and an error from `list_orders` should have the same envelope. The executor can handle them uniformly.
+
+---
+
+## Idempotency
+
+Production agents retry. Network calls fail. The model sometimes calls the same tool twice. If your tools are not idempotent, retries cause double-writes, duplicate charges, or inconsistent state.
+
+**Read operations are naturally idempotent.** Focus your effort on write operations.
+
+```python
+def create_invoice(
+    customer_id: str,
+    amount: float,
+    idempotency_key: str  # Caller-supplied key — agent generates UUID per logical operation
+) -> Union[InvoiceResult, ToolError]:
+    existing = db.invoices.find_by_idempotency_key(idempotency_key)
+    if existing:
+        # Return the existing result, same as if we created it now
+        return {"invoice_id": existing.id, "amount": existing.amount, "status": existing.status}
+
+    invoice = db.invoices.create(
+        customer_id=customer_id,
+        amount=amount,
+        idempotency_key=idempotency_key
+    )
+    return {"invoice_id": invoice.id, "amount": invoice.amount, "status": invoice.status}
+```
+
+**Idempotency design rules:**
+
+- **Include an `idempotency_key` parameter on all write tools.** The agent generates a UUID at the start of each logical operation. Retries reuse the same key.
+- **Store the key with the record.** Look it up before writing.
+- **Return the original result on duplicate calls.** Do not signal an error for idempotent duplicates — the model should not need to know.
+
+---
+
+## Testing tools in isolation
+
+Tools must be testable without running the full agent loop. If you can only test a tool inside a live agent session, you cannot iterate quickly and you cannot catch regressions.
+
+```python
+# test_tools.py
+import pytest
+from app.tools.invoices import get_invoice, create_invoice
+
+class TestGetInvoice:
+    def test_valid_id_returns_invoice(self, db_with_fixture):
+        result = get_invoice("inv_abc123")
+        assert result["invoice_id"] == "inv_abc123"
+        assert result["amount"] == 49.0
+
+    def test_invalid_id_format_returns_structured_error(self):
+        result = get_invoice("abc123")  # Missing inv_ prefix
+        assert result["error"] is True
+        assert result["error_code"] == "invalid_input"
+        assert result["retryable"] is False
+
+    def test_nonexistent_id_returns_not_found(self, db_empty):
+        result = get_invoice("inv_missing")
+        assert result["error"] is True
+        assert result["error_code"] == "not_found"
+
+class TestCreateInvoice:
+    def test_idempotent_on_duplicate_key(self, db_with_fixture):
+        key = "idem-key-001"
+        first = create_invoice("cust_1", 49.0, key)
+        second = create_invoice("cust_1", 49.0, key)
+        assert first["invoice_id"] == second["invoice_id"]
+        assert db_with_fixture.invoices.count() == 1  # Not duplicated
+```
+
+**Testing rules:**
+
+- **Test happy path, invalid input, not-found, and permission denied for every tool.**
+- **Test idempotency explicitly** — call the tool twice with the same key and assert the record count.
+- **Use the structured error envelope in assertions**, not exception checks.
+- **Keep fixtures minimal.** A tool test should need at most a handful of rows.
+
+---
+
+## Versioning
+
+Tools evolve. The model's cached schema may differ from the deployed tool. Field renames break agents silently.
+
+```python
+# Version in the tool name when breaking changes are necessary
+list_orders_v2 = {
+    "name": "list_orders_v2",  # Explicit version suffix
+    "description": "...",
+    ...
+}
+
+# Or version in a wrapper with deprecation handling
+def get_customer(customer_id: str, _version: str = "v1") -> dict:
+    if _version == "v1":
+        return _get_customer_v1(customer_id)
+    elif _version == "v2":
+        return _get_customer_v2(customer_id)
+    else:
+        return {"error": True, "error_code": "invalid_input", "message": f"Unknown version: {_version}"}
+```
+
+**Versioning rules:**
+
+- **Additive changes (new optional fields) are safe.** Just add them.
+- **Renaming fields, removing fields, or changing types requires a new version.**
+- **Keep old versions alive until all agents using them are redeployed.**
+- **Log which tool version each agent call used.** This makes rollback decisions tractable.
+
+---
+
+## Summary checklist
+
+When designing a new tool, ask:
+
+- Does the JSON Schema description tell the model when, why, and how to call this tool?
+- Does `additionalProperties: false` prevent the model from inventing inputs?
+- Do all error paths return a structured error object, never a raw exception?
+- Do write operations accept an idempotency key?
+- Is the tool testable in isolation without a live agent session?
+- Are breaking changes handled with versioning?
+
+If all six are yes, the tool is production-ready. If any are no, you have a known failure mode waiting for load.
+""",
+        "source_links_json": ["https://platform.openai.com/docs/guides/function-calling", "https://docs.anthropic.com/en/docs/build-with-claude/tool-use"],
+        "tags_json": ["agents", "tools", "schema", "testing", "production"],
+    },
+    {
+        "title": "Measuring agent effectiveness",
+        "slug": "measuring-agent-effectiveness",
+        "category": "agents",
+        "summary": "Practical evaluation approaches for production agents covering task completion rates, cost efficiency, reliability metrics, A/B testing, and offline eval harnesses.",
+        "content_md": """## Measuring agent effectiveness
+
+Most agent projects fail not because the agent produces wrong answers, but because the team cannot tell whether it is working.
+
+"It seemed fine in testing" is not a measurement. You need metrics that tell you what the agent is doing, how much it costs, where it fails, and whether a change made things better or worse.
+
+This article covers five evaluation layers with practical implementation guidance.
+
+---
+
+## Layer 1: Task completion rate
+
+Task completion rate is the fraction of tasks the agent completes successfully versus fails, times out, or produces an unacceptable result.
+
+```python
+from dataclasses import dataclass
+from enum import Enum
+
+class TaskOutcome(Enum):
+    SUCCESS = "success"
+    PARTIAL = "partial"          # Completed but with degraded quality
+    TOOL_FAILURE = "tool_failure"
+    LOOP_LIMIT = "loop_limit"    # Hit max iterations without finishing
+    TIMEOUT = "timeout"
+    MODEL_ERROR = "model_error"
+
+@dataclass
+class TaskTrace:
+    task_id: str
+    input: str
+    outcome: TaskOutcome
+    steps_taken: int
+    final_output: str | None
+    error: str | None
+    duration_ms: int
+    total_tokens: int
+```
+
+**How to define success:** Write a success definition before you start measuring. "The agent answered the question" is not a definition. "The agent returned a structured response that includes a valid invoice ID and a non-zero amount" is.
+
+```python
+def evaluate_invoice_task(trace: TaskTrace, expected: dict) -> bool:
+    if trace.outcome != TaskOutcome.SUCCESS:
+        return False
+    output = parse_agent_output(trace.final_output)
+    return (
+        output.get("invoice_id", "").startswith("inv_") and
+        output.get("amount", 0) > 0 and
+        output.get("status") in ("paid", "pending", "overdue")
+    )
+```
+
+**Useful breakdowns:**
+- Completion rate by task category
+- Completion rate by task complexity (steps required)
+- Completion rate over time (catch regressions after deploys)
+
+A task completion rate below 85% on your target task type usually means either tool reliability problems or task definition is too open-ended for the current agent design.
+
+---
+
+## Layer 2: Cost efficiency (tokens per task)
+
+Total tokens per completed task is the single most useful cost metric. It combines prompt tokens, completion tokens, and retries in one number.
+
+```python
+def compute_cost_metrics(traces: list[TaskTrace]) -> dict:
+    successful = [t for t in traces if t.outcome == TaskOutcome.SUCCESS]
+    failed = [t for t in traces if t.outcome != TaskOutcome.SUCCESS]
+
+    return {
+        "total_tasks": len(traces),
+        "completion_rate": len(successful) / len(traces) if traces else 0,
+        "avg_tokens_per_completed_task": (
+            sum(t.total_tokens for t in successful) / len(successful)
+            if successful else 0
+        ),
+        "avg_tokens_per_failed_task": (
+            sum(t.total_tokens for t in failed) / len(failed)
+            if failed else 0
+        ),
+        "avg_steps_per_completed_task": (
+            sum(t.steps_taken for t in successful) / len(successful)
+            if successful else 0
+        ),
+    }
+```
+
+**Cost efficiency benchmarks to track:**
+- Tokens per completed task (lower is better, track trend not absolute)
+- Tokens burned on failed tasks (pure waste — reduce failures to reduce this)
+- Steps per task (a proxy for latency and model call count)
+
+**Practical targets:** If average tokens per task are growing week-over-week without a corresponding improvement in quality, the agent is becoming less efficient. Common causes: longer prompts from accumulated system prompt edits, more tool calls per task due to retrieval degradation, or increased retry rates.
+
+---
+
+## Layer 3: Reliability (retry and failure rates)
+
+Reliability measures how often the agent needs to retry a tool call and how often retries help versus hurt.
+
+```python
+@dataclass
+class ToolCallRecord:
+    tool_name: str
+    attempt_number: int    # 1-indexed; 2+ means retry
+    success: bool
+    error_code: str | None
+    duration_ms: int
+    input_hash: str        # Hash of inputs, for detecting identical retries
+
+def compute_reliability_metrics(tool_calls: list[ToolCallRecord]) -> dict:
+    by_tool = {}
+    for call in tool_calls:
+        name = call.tool_name
+        if name not in by_tool:
+            by_tool[name] = {"total": 0, "retries": 0, "failures": 0}
+        by_tool[name]["total"] += 1
+        if call.attempt_number > 1:
+            by_tool[name]["retries"] += 1
+        if not call.success:
+            by_tool[name]["failures"] += 1
+
+    return {
+        tool: {
+            "retry_rate": stats["retries"] / stats["total"],
+            "failure_rate": stats["failures"] / stats["total"],
+        }
+        for tool, stats in by_tool.items()
+    }
+```
+
+**Thresholds to watch:**
+- **Retry rate > 10% on any tool** — The tool schema is probably too loose, or the tool is fragile. Investigate.
+- **Failure rate > 5%** — The tool has a reliability problem. Check error codes to determine whether it is invalid inputs (schema issue), upstream failures (external service), or logic errors.
+- **Identical retries** — Same input hash retried twice means the agent is not learning from the first failure. Add error context to the observation before retrying.
+
+---
+
+## Layer 4: A/B testing agents
+
+A/B testing compares two agent configurations against the same task set and picks the winner on your chosen metric.
+
+```python
+import random
+
+def run_ab_test(
+    tasks: list[dict],
+    agent_a,
+    agent_b,
+    split: float = 0.5,
+    metric_fn = None
+) -> dict:
+    results_a, results_b = [], []
+
+    for task in tasks:
+        if random.random() < split:
+            trace = agent_a.run(task)
+            results_a.append(trace)
+        else:
+            trace = agent_b.run(task)
+            results_b.append(trace)
+
+    metrics_a = compute_cost_metrics(results_a)
+    metrics_b = compute_cost_metrics(results_b)
+
+    return {
+        "agent_a": metrics_a,
+        "agent_b": metrics_b,
+        "winner": "a" if metrics_a["completion_rate"] > metrics_b["completion_rate"] else "b",
+        "delta_completion_rate": metrics_a["completion_rate"] - metrics_b["completion_rate"],
+        "delta_avg_tokens": metrics_a["avg_tokens_per_completed_task"] - metrics_b["avg_tokens_per_completed_task"],
+    }
+```
+
+**A/B testing discipline:**
+- **Use the same task set for both agents.** Random assignment is fine if the set is large enough.
+- **Run at minimum 50 tasks per arm before drawing conclusions.** Smaller samples produce noise, not signal.
+- **Define your primary metric before running the test.** Completion rate is usually the primary metric; token cost is secondary. If you optimize for cost first, you often degrade quality.
+- **Test one change at a time.** Model swap, prompt change, and tool schema change all in one A/B is impossible to interpret.
+
+---
+
+## Layer 5: Offline eval harnesses
+
+An offline eval harness runs your agent against a fixed task dataset on demand, without production traffic. It is the foundation of regression testing.
+
+```python
+# eval/run_harness.py
+import json
+from pathlib import Path
+from app.agent import build_agent
+
+EVAL_TASKS_PATH = Path("eval/tasks/invoice_tasks.jsonl")
+
+def load_tasks() -> list[dict]:
+    with EVAL_TASKS_PATH.open() as f:
+        return [json.loads(line) for line in f]
+
+def run_harness(agent_config: dict) -> dict:
+    agent = build_agent(**agent_config)
+    tasks = load_tasks()
+    traces = []
+
+    for task in tasks:
+        trace = agent.run(task["input"])
+        success = evaluate_task(trace, task["expected"])
+        traces.append({
+            "task_id": task["id"],
+            "success": success,
+            "tokens": trace.total_tokens,
+            "steps": trace.steps_taken,
+            "outcome": trace.outcome.value,
+        })
+
+    completion_rate = sum(1 for t in traces if t["success"]) / len(traces)
+    return {
+        "completion_rate": completion_rate,
+        "avg_tokens": sum(t["tokens"] for t in traces) / len(traces),
+        "traces": traces,
+    }
+
+if __name__ == "__main__":
+    results = run_harness({"model": "claude-3-5-sonnet-20241022", "max_steps": 10})
+    print(f"Completion rate: {results['completion_rate']:.1%}")
+    print(f"Avg tokens per task: {results['avg_tokens']:.0f}")
+```
+
+**Eval dataset rules:**
+- **Start with 20–30 hand-curated tasks.** Larger is not better if the tasks are vague. Quality over quantity.
+- **Cover failure modes explicitly.** Include tasks with missing data, ambiguous inputs, and edge cases — not just happy paths.
+- **Never add tasks that were used to tune the prompt.** This inflates your eval score. Keep tuning tasks and eval tasks separate.
+- **Run the harness before every significant change.** Model swap, prompt edit, tool schema change — run it every time.
+
+---
+
+## Putting it together: a weekly eval ritual
+
+A practical weekly cadence for a production agent team:
+
+1. **Check dashboards (5 min):** Completion rate, avg tokens, retry rates — any week-over-week change above 5% triggers investigation.
+2. **Run offline harness (automated, on every PR):** Gate deploys on completion rate not dropping more than 2 percentage points.
+3. **Sample 10 failed traces (15 min):** Read the full trace, identify failure category (tool failure, model error, bad schema, loop limit). Add one new eval task if you found a new failure pattern.
+4. **Check cost trend (5 min):** Tokens per task trending up? Find the source before it doubles.
+
+---
+
+## The question to keep asking
+
+The right question is not "did the agent succeed?" The right question is "do I understand why it succeeds when it does, and why it fails when it does?"
+
+You have that understanding when you can point to a metric, a trace, and a cause for every significant change in agent behavior. Until then, keep adding instrumentation.
+""",
+        "source_links_json": ["https://docs.anthropic.com/en/docs/build-with-claude/tool-use", "https://platform.openai.com/docs/guides/evals"],
+        "tags_json": ["agents", "evaluation", "metrics", "testing", "observability"],
+    },
 ]
 
 ARTICLE_NOTES = [
