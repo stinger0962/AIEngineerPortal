@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./backend/test.db"
     redis_url: str = "redis://localhost:6379/0"
     cors_origins: str = Field(default="http://localhost:3000")
+    anthropic_api_key: str = ""
+    ai_model: str = "claude-sonnet-4-20250514"
+    ai_daily_token_budget: int = 100_000
 
     @property
     def cors_origins_list(self) -> List[str]:
