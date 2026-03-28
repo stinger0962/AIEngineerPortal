@@ -300,6 +300,18 @@ export type ReviewSessionSummary = {
   weakest_category: string;
 };
 
+export interface DeepDiveEntry {
+  id: number;
+  question: string;
+  answer_md: string;
+  related_concepts: string[];
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  latency_ms?: number;
+  created_at?: string;
+}
+
 export interface AIFeedbackResponse {
   id: number;
   feature: string;

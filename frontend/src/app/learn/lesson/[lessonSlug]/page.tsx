@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { LessonMarkdown } from "@/components/learning/lesson-markdown";
 import { LessonCompleteButton } from "@/components/forms/lesson-complete-button";
+import { DeepDiveSection } from "@/components/learning/deep-dive-section";
 import { Panel } from "@/components/ui/panel";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { portalApi } from "@/lib/api/portal";
@@ -42,6 +43,7 @@ export default async function LessonPage({ params }: { params: Promise<{ lessonS
           <LessonMarkdown content={lesson.content_md} />
         </article>
         <LessonCompleteButton lessonId={lesson.id} />
+        <DeepDiveSection lessonId={lesson.id} />
       </Panel>
     </div>
   );

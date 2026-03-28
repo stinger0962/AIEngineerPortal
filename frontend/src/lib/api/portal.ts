@@ -16,6 +16,7 @@ import type {
   AdaptiveFocus,
   AIFeedbackResponse,
   Course,
+  DeepDiveEntry,
   DashboardSummary,
   DashboardToday,
   Exercise,
@@ -243,6 +244,28 @@ export const portalApi = {
       const err = await res.json().catch(() => ({ detail: "Pin failed" }));
       throw new Error(err.detail || `Pin failed (${res.status})`);
     }
+    return res.json();
+  },
+
+  async askDeepDive(lessonId: number, question: string): Promise<DeepDiveEntry> {
+    const res = await fetch(
+      `${API_BASE}/learning/lessons/${lessonId}/deep-dive`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Deep dive failed" }));
+      throw new Error(err.detail || `Deep dive failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async getDeepDives(lessonId: number): Promise<DeepDiveEntry[]> {
+    const res = await fetch(`${API_BASE}/learning/lessons/${lessonId}/deep-dives`);
+    if (!res.ok) return [];
     return res.json();
   },
 };
