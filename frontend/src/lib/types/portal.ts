@@ -296,3 +296,20 @@ export type ReviewSessionSummary = {
   strongest_category: string;
   weakest_category: string;
 };
+
+export interface AIFeedbackResponse {
+  id: number;
+  feature: string;
+  reference_id: number;
+  cached: boolean;
+  strengths: string[];
+  issues: string[];
+  suggestions: string[];
+  example_fixes: string;
+  score: number;
+  should_retry: boolean;
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  latency_ms?: number;
+}

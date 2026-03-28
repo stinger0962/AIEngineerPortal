@@ -14,6 +14,7 @@ import {
 } from "@/lib/data/mock";
 import type {
   AdaptiveFocus,
+  AIFeedbackResponse,
   Course,
   DashboardSummary,
   DashboardToday,
@@ -187,4 +188,19 @@ export const portalApi = {
         reviewed_at: new Date().toISOString(),
       },
     ),
+  async submitForAIFeedback(exerciseId: number, code: string): Promise<AIFeedbackResponse> {
+    const res = await fetch(
+      `${API_BASE}/exercises/${exerciseId}/ai-feedback`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "AI feedback unavailable" }));
+      throw new Error(err.detail || `AI feedback failed (${res.status})`);
+    }
+    return res.json();
+  },
 };
