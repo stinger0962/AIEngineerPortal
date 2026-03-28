@@ -164,9 +164,103 @@ class AIService:
         """[Future] Generate an on-demand deep-dive explanation."""
         raise NotImplementedError("Deep dive generation coming in next iteration")
 
-    def generate_exercise_variation(self, seed_exercise: Dict) -> Dict:
-        """[Future] Generate a new exercise variation from a seed exercise."""
-        raise NotImplementedError("Exercise variation generation coming in next iteration")
+    def _build_variation_prompt(
+        self,
+        seed_exercise: Dict[str, Any],
+        variation_type: str,
+    ) -> Dict[str, str]:
+        """Build prompt for generating an exercise variation."""
+        type_instructions = {
+            "scenario": (
+                "Generate a variation with a DIFFERENT domain/scenario but the SAME learning objective. "
+                "For example, if the original uses a database, use a weather API instead. "
+                "Keep the same difficulty and the same core pattern being taught."
+            ),
+            "concept": (
+                "Generate a DIFFERENT exercise within the same category. "
+                "Teach a different pattern or concept, but keep the same difficulty level. "
+                "The exercise should feel fresh, not like a rephrasing."
+            ),
+            "harder": (
+                "Generate a HARDER version of this exercise. Add constraints, edge cases, "
+                "or require more sophisticated patterns. The core topic stays the same "
+                "but the implementation demands more engineering skill."
+            ),
+        }
+
+        system = (
+            "You are a senior AI engineer creating practice exercises for a full-stack engineer "
+            "learning AI agent patterns. Generate a high-quality exercise variation.\n\n"
+            f"{type_instructions.get(variation_type, type_instructions['scenario'])}\n\n"
+            "Respond with valid JSON matching this schema:\n"
+            '{"title": "short descriptive title", '
+            '"prompt_md": "200+ word problem statement in markdown", '
+            '"starter_code": "Python starter with TODOs and type hints", '
+            '"solution_code": "complete working Python solution", '
+            '"explanation_md": "300+ word explanation with key decisions"}\n\n'
+            "The exercise must feel like real engineering work, not a toy problem."
+        )
+
+        user = (
+            f"## Seed Exercise: {seed_exercise.get('title', '')}\n"
+            f"Category: {seed_exercise.get('category', '')}\n"
+            f"Difficulty: {seed_exercise.get('difficulty', '')}\n\n"
+            f"### Problem\n{seed_exercise.get('prompt_md', '')}\n\n"
+            f"### Starter Code\n```python\n{seed_exercise.get('starter_code', '')}\n```\n\n"
+            f"### Solution\n```python\n{seed_exercise.get('solution_code', '')}\n```\n\n"
+            f"### Explanation\n{seed_exercise.get('explanation_md', '')}"
+        )
+
+        return {"system": system, "user": user}
+
+    def _parse_variation_response(self, raw: str) -> Optional[Dict[str, Any]]:
+        """Parse Claude's JSON response into a variation dict. Returns None on failure."""
+        try:
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.split("\n")
+                cleaned = "\n".join(lines[1:-1])
+            data = json.loads(cleaned)
+            required = ["title", "prompt_md", "starter_code", "solution_code", "explanation_md"]
+            if not all(k in data and data[k] for k in required):
+                return None
+            return {k: data[k] for k in required}
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def generate_exercise_variation(
+        self,
+        seed_exercise: Dict[str, Any],
+        variation_type: str = "scenario",
+    ) -> Optional[Dict[str, Any]]:
+        """Generate an exercise variation using Claude. Returns variation dict or None."""
+        prompt = self._build_variation_prompt(seed_exercise, variation_type)
+        start = time.time()
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=4000,
+                system=prompt["system"],
+                messages=[{"role": "user", "content": prompt["user"]}],
+            )
+        except (anthropic.APITimeoutError, anthropic.APIConnectionError):
+            return None
+
+        latency_ms = int((time.time() - start) * 1000)
+        raw_text = response.content[0].text
+        parsed = self._parse_variation_response(raw_text)
+
+        if parsed:
+            parsed["_meta"] = {
+                "model": self.model,
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "latency_ms": latency_ms,
+                "prompt_template": prompt["system"],
+            }
+
+        return parsed
 
     def coach_interview_answer(self, question: str, user_answer: str) -> Dict:
         """[Future] Coach a user on their interview answer."""
