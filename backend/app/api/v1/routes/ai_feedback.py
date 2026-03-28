@@ -116,7 +116,7 @@ def ai_feedback(
         "id": exercise.id,
         "title": exercise.title,
         "prompt_md": exercise.prompt_md,
-        "solution_code": exercise.solution_code,
+        "solution_code": payload.reference_solution or exercise.solution_code,
         "explanation_md": exercise.explanation_md,
     }
 
