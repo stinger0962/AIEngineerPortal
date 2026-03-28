@@ -1,11 +1,14 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { BookOpen, Brain, Briefcase, Gauge, GraduationCap, Newspaper, Settings, Sparkles, SquareTerminal } from "lucide-react";
 
 const items = [
   { href: "/", label: "Dashboard", icon: Gauge },
   { href: "/learn", label: "Learning", icon: GraduationCap },
   { href: "/courses", label: "Courses", icon: BookOpen },
-  { href: "/practice/python", label: "Practice", icon: SquareTerminal },
+  { href: "/practice", label: "Practice", icon: SquareTerminal },
   { href: "/review", label: "Review", icon: Brain },
   { href: "/knowledge", label: "Knowledge", icon: Sparkles },
   { href: "/projects", label: "Projects", icon: Briefcase },
@@ -16,6 +19,8 @@ const items = [
 ];
 
 export function SidebarNav() {
+  const pathname = usePathname();
+
   return (
     <aside className="sticky top-0 hidden h-screen w-72 flex-col justify-between border-r border-white/40 bg-ink px-6 py-8 text-cream lg:flex">
       <div className="space-y-8">
@@ -24,16 +29,26 @@ export function SidebarNav() {
           <h1 className="font-display text-3xl leading-tight">Career transition, organized like a product.</h1>
         </div>
         <nav className="space-y-2">
-          {items.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="flex items-center gap-3 rounded-2xl px-4 py-3 text-sm text-cream/80 transition hover:bg-white/10 hover:text-white"
-            >
-              <Icon size={18} />
-              {label}
-            </Link>
-          ))}
+          {items.map(({ href, label, icon: Icon }) => {
+            const isActive =
+              href === "/"
+                ? pathname === "/"
+                : pathname === href || pathname.startsWith(href + "/");
+            return (
+              <Link
+                key={href}
+                href={href === "/practice" ? "/practice/python" : href}
+                className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition ${
+                  isActive
+                    ? "bg-ember/20 text-ember font-medium"
+                    : "text-cream/80 hover:bg-white/10 hover:text-white"
+                }`}
+              >
+                <Icon size={18} />
+                {label}
+              </Link>
+            );
+          })}
         </nav>
       </div>
       <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm text-cream/75">
