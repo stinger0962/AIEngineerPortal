@@ -94,11 +94,32 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
           description={detail.review_prompt ?? "Use notes to make weaknesses explicit and repeatable."}
         />
         {detail.attempts.length ? (
-          detail.attempts.map((attempt) => (
-            <div key={attempt.id} className="rounded-2xl bg-cream p-4 text-sm text-ink">
-              {attempt.status} / score {attempt.score} / {attempt.notes || "No notes"}
-            </div>
-          ))
+          detail.attempts.map((attempt) => {
+            const scoreBadge =
+              attempt.score >= 85
+                ? "bg-green-100 text-green-700"
+                : attempt.score >= 70
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-red-100 text-red-700";
+            return (
+              <div key={attempt.id} className="rounded-2xl bg-cream p-4 text-sm text-ink flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium capitalize">{attempt.status}</span>
+                    {attempt.ai_feedback_id && (
+                      <span className="rounded-full bg-ember/10 px-2 py-0.5 text-xs font-medium text-ember">
+                        AI graded
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-ink/60">{attempt.notes || "No notes"}</p>
+                </div>
+                <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${scoreBadge}`}>
+                  {attempt.score}/100
+                </span>
+              </div>
+            );
+          })
         ) : (
           <p className="text-sm text-ink/70">No attempts yet.</p>
         )}

@@ -99,6 +99,7 @@ export type ExerciseAttempt = {
   status: string;
   score: number;
   attempted_at: string;
+  ai_feedback_id?: number | null;
 };
 
 export type ExerciseDetail = {
