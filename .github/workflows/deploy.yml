@@ -44,6 +44,10 @@ jobs:
               cp "$ENV_BACKUP" /opt/ai-engineer-portal/infra/.env.production
               rm -f "$ENV_BACKUP"
             fi
+            # Ensure ANTHROPIC_API_KEY is in .env.production
+            if ! grep -q "ANTHROPIC_API_KEY" /opt/ai-engineer-portal/infra/.env.production 2>/dev/null; then
+              echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> /opt/ai-engineer-portal/infra/.env.production
+            fi
             chmod +x /opt/ai-engineer-portal/scripts/deploy-on-server.sh
             bash /opt/ai-engineer-portal/scripts/deploy-on-server.sh
             cd /opt/ai-engineer-portal
