@@ -1836,6 +1836,2326 @@ EXERCISES = [
         "explanation_md": "Strong AI engineering distinguishes answer quality from grounding and traceability.",
         "tags_json": ["evaluation", "metrics", "faithfulness"],
     },
+    # ── Agent exercises ──────────────────────────────────────────────
+    {
+        "title": "Build a tool registry with schema validation",
+        "slug": "build-tool-registry",
+        "category": "agents",
+        "difficulty": "intermediate",
+        "prompt_md": """\
+## Build a Tool Registry with Schema Validation
+
+In any agent system, the model needs to know which tools are available, what arguments each tool expects, and how to call them safely. A **tool registry** is the foundational data structure that makes this possible. Without one, agent code devolves into a tangle of if-else branches and string matching.
+
+### What you are building
+
+Create a `ToolRegistry` class that:
+
+1. **Registers tools** — each tool has a unique name, a callable, and a JSON Schema describing its parameters.
+2. **Validates schemas on registration** — reject tools whose parameter schemas are not valid JSON Schema objects (must have `type`, `properties`, etc.).
+3. **Prevents duplicate names** — raise a clear error if a tool with the same name is already registered.
+4. **Looks up tools by name** — return the tool definition or raise `KeyError` with a helpful message listing available tools.
+5. **Lists all tools** — return a list of tool definitions suitable for passing to an LLM as the `tools` parameter.
+
+### Why this matters
+
+Every major agent framework (LangChain, CrewAI, OpenAI function calling) relies on a registry pattern internally. Understanding how it works means you can debug tool-not-found errors, extend the registry with middleware (logging, auth, cost tracking), and build custom agent loops without depending on a heavy framework.
+
+### Constraints
+
+- Use only the Python standard library plus `jsonschema` for validation.
+- Type-hint every method.
+- Raise domain-specific exceptions (`DuplicateToolError`, `InvalidSchemaError`) rather than generic ones.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import json
+from typing import Any, Callable
+
+
+class DuplicateToolError(Exception):
+    \"\"\"Raised when a tool with the same name is already registered.\"\"\"
+
+
+class InvalidSchemaError(Exception):
+    \"\"\"Raised when a tool's parameter schema is not valid JSON Schema.\"\"\"
+
+
+class ToolDefinition:
+    \"\"\"Immutable record for a registered tool.\"\"\"
+
+    def __init__(self, name: str, description: str, fn: Callable, parameters_schema: dict):
+        self.name = name
+        self.description = description
+        self.fn = fn
+        self.parameters_schema = parameters_schema
+
+    def to_llm_format(self) -> dict:
+        \"\"\"Return the tool in OpenAI function-calling format.\"\"\"
+        # TODO: return {"type": "function", "function": {...}}
+        raise NotImplementedError
+
+
+class ToolRegistry:
+    \"\"\"Central registry of tools available to an agent.\"\"\"
+
+    def __init__(self) -> None:
+        self._tools: dict[str, ToolDefinition] = {}
+
+    def register(
+        self,
+        name: str,
+        description: str,
+        fn: Callable,
+        parameters_schema: dict[str, Any],
+    ) -> None:
+        \"\"\"Register a tool with schema validation.\"\"\"
+        # TODO: validate parameters_schema is a valid JSON Schema object
+        # TODO: check for duplicate names
+        # TODO: store the tool definition
+        raise NotImplementedError
+
+    def get(self, name: str) -> ToolDefinition:
+        \"\"\"Look up a tool by name. Raise KeyError with available tools if not found.\"\"\"
+        # TODO: implement lookup with helpful error message
+        raise NotImplementedError
+
+    def list_tools(self) -> list[dict]:
+        \"\"\"Return all tools in LLM-ready format.\"\"\"
+        # TODO: return [tool.to_llm_format() for tool in self._tools.values()]
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import json
+from typing import Any, Callable
+
+import jsonschema
+
+
+class DuplicateToolError(Exception):
+    pass
+
+
+class InvalidSchemaError(Exception):
+    pass
+
+
+class ToolDefinition:
+    def __init__(self, name: str, description: str, fn: Callable, parameters_schema: dict):
+        self.name = name
+        self.description = description
+        self.fn = fn
+        self.parameters_schema = parameters_schema
+
+    def to_llm_format(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters_schema,
+            },
+        }
+
+
+class ToolRegistry:
+    def __init__(self) -> None:
+        self._tools: dict[str, ToolDefinition] = {}
+
+    def register(
+        self,
+        name: str,
+        description: str,
+        fn: Callable,
+        parameters_schema: dict[str, Any],
+    ) -> None:
+        if name in self._tools:
+            raise DuplicateToolError(f"Tool '{name}' is already registered")
+        # Validate the schema itself using the meta-schema
+        try:
+            jsonschema.Draft7Validator.check_schema(parameters_schema)
+        except jsonschema.SchemaError as exc:
+            raise InvalidSchemaError(
+                f"Invalid schema for tool '{name}': {exc.message}"
+            ) from exc
+        if parameters_schema.get("type") != "object":
+            raise InvalidSchemaError(
+                f"Tool '{name}' schema must have type 'object' at the top level"
+            )
+        self._tools[name] = ToolDefinition(name, description, fn, parameters_schema)
+
+    def get(self, name: str) -> ToolDefinition:
+        if name not in self._tools:
+            available = ", ".join(sorted(self._tools.keys())) or "(none)"
+            raise KeyError(
+                f"Tool '{name}' not found. Available tools: {available}"
+            )
+        return self._tools[name]
+
+    def list_tools(self) -> list[dict]:
+        return [tool.to_llm_format() for tool in self._tools.values()]
+""",
+        "explanation_md": """\
+## Walkthrough: Tool Registry with Schema Validation
+
+### The core design decision
+
+The registry stores `ToolDefinition` objects rather than raw dicts. This gives you a single place to add behavior later (middleware hooks, call counting, deprecation warnings) without changing every call site.
+
+### Schema validation strategy
+
+We use `jsonschema.Draft7Validator.check_schema()` to validate the schema against the JSON Schema meta-schema. This catches structural problems like missing `type` fields or invalid `$ref` pointers at registration time rather than at call time.
+
+We also enforce that the top-level type is `"object"` because LLM function-calling parameters are always objects with named properties:
+
+```python
+if parameters_schema.get("type") != "object":
+    raise InvalidSchemaError(
+        f"Tool '{name}' schema must have type 'object' at the top level"
+    )
+```
+
+### Why domain-specific exceptions matter
+
+`DuplicateToolError` and `InvalidSchemaError` let callers distinguish between "I misconfigured a tool" and "I made a typo in a tool name." Generic `ValueError` would force callers to parse error messages.
+
+### The `to_llm_format` method
+
+This returns the exact shape OpenAI and other providers expect. Keeping this on `ToolDefinition` rather than in the registry means you can serialize one tool at a time for selective exposure:
+
+```python
+def to_llm_format(self) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters_schema,
+        },
+    }
+```
+
+### The helpful KeyError pattern
+
+When a tool is not found, the error message lists all available tools. This is a small quality-of-life detail that saves minutes of debugging when a model hallucinates a tool name:
+
+```python
+available = ", ".join(sorted(self._tools.keys())) or "(none)"
+raise KeyError(f"Tool '{name}' not found. Available tools: {available}")
+```
+
+### Trade-offs and extensions
+
+- **Thread safety**: This implementation is not thread-safe. In a production agent, you would use a `threading.Lock` around `_tools`.
+- **Decorator registration**: You could add a `@registry.tool(name, schema)` decorator for convenience.
+- **Runtime argument validation**: You could validate incoming arguments against the schema before calling the function, adding another safety layer.
+""",
+        "tags_json": ["agents", "tools", "schema-validation", "registry-pattern"],
+    },
+    {
+        "title": "Implement a ReAct reasoning loop",
+        "slug": "implement-react-loop",
+        "category": "agents",
+        "difficulty": "intermediate",
+        "prompt_md": """\
+## Implement a ReAct Reasoning Loop
+
+The ReAct (Reasoning + Acting) pattern is the most widely used agent loop in production. The model alternates between **thinking** (reasoning about what to do next), **acting** (calling a tool), and **observing** (reading the tool result) until it can produce a final answer.
+
+### What you are building
+
+Create a `react_loop` function that:
+
+1. Takes a user question and a dict of available tools.
+2. Sends the question to a (simulated) LLM that returns structured steps.
+3. Parses each step as either a **Thought**, a **Tool Call**, or a **Final Answer**.
+4. Executes tool calls and feeds observations back into the next iteration.
+5. Terminates when the model produces a Final Answer or an **iteration cap** is reached.
+6. Returns a structured trace of all reasoning steps plus the final answer.
+
+### Why this matters
+
+Understanding the ReAct loop from scratch means you can debug agent stalls (infinite loops), optimize token usage (trimming intermediate context), and add features like step-level logging or human-in-the-loop approval. Every agent framework wraps this pattern; knowing the internals makes you dangerous.
+
+### Constraints
+
+- Simulate the LLM with a provided `mock_llm` callable so the exercise is self-contained.
+- The iteration cap should default to 10 and be configurable.
+- Each trace entry should include: step number, type (thought/action/observation/answer), and content.
+- If the cap is reached without a final answer, return the trace with a timeout indicator.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+
+@dataclass
+class TraceEntry:
+    \"\"\"One step in the ReAct trace.\"\"\"
+    step: int
+    entry_type: str  # "thought", "action", "observation", "answer"
+    content: str
+
+
+@dataclass
+class ReactResult:
+    \"\"\"Final output of a ReAct loop run.\"\"\"
+    answer: str | None
+    timed_out: bool
+    trace: list[TraceEntry] = field(default_factory=list)
+
+
+def react_loop(
+    question: str,
+    tools: dict[str, Callable[..., str]],
+    llm: Callable[[list[dict]], dict],
+    max_iterations: int = 10,
+) -> ReactResult:
+    \"\"\"
+    Run a ReAct loop: Thought -> Action -> Observation -> ... -> Answer.
+
+    Args:
+        question: The user's question to answer.
+        tools: Mapping of tool name -> callable that returns a string result.
+        llm: A callable that takes conversation messages and returns a dict
+             with keys 'type' ('thought', 'action', 'answer') and 'content'.
+             For 'action' type, also includes 'tool_name' and 'tool_args'.
+        max_iterations: Safety cap on loop iterations.
+
+    Returns:
+        ReactResult with the answer, timeout flag, and full trace.
+    \"\"\"
+    trace: list[TraceEntry] = []
+    step = 0
+
+    # TODO: Build initial messages list with the question
+    # TODO: Loop up to max_iterations:
+    #   1. Call llm(messages) to get next step
+    #   2. If thought -> record it, add to messages, continue
+    #   3. If action -> execute tool, record action + observation
+    #   4. If answer -> record it, return ReactResult
+    # TODO: If loop exhausts, return ReactResult with timed_out=True
+
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+
+@dataclass
+class TraceEntry:
+    step: int
+    entry_type: str
+    content: str
+
+
+@dataclass
+class ReactResult:
+    answer: str | None
+    timed_out: bool
+    trace: list[TraceEntry] = field(default_factory=list)
+
+
+def react_loop(
+    question: str,
+    tools: dict[str, Callable[..., str]],
+    llm: Callable[[list[dict]], dict],
+    max_iterations: int = 10,
+) -> ReactResult:
+    trace: list[TraceEntry] = []
+    messages: list[dict] = [
+        {"role": "system", "content": (
+            "You are a ReAct agent. For each step, respond with a JSON object. "
+            "Use type='thought' to reason, type='action' with tool_name and tool_args "
+            "to call a tool, or type='answer' with content to give the final answer."
+        )},
+        {"role": "user", "content": question},
+    ]
+    step = 0
+
+    for iteration in range(max_iterations):
+        response = llm(messages)
+        step_type = response.get("type", "thought")
+
+        if step_type == "thought":
+            content = response["content"]
+            trace.append(TraceEntry(step=step, entry_type="thought", content=content))
+            messages.append({"role": "assistant", "content": f"Thought: {content}"})
+            step += 1
+
+        elif step_type == "action":
+            tool_name = response["tool_name"]
+            tool_args = response.get("tool_args", {})
+            action_desc = f"{tool_name}({tool_args})"
+            trace.append(TraceEntry(step=step, entry_type="action", content=action_desc))
+            step += 1
+
+            # Execute the tool
+            if tool_name in tools:
+                try:
+                    observation = tools[tool_name](**tool_args)
+                except Exception as exc:
+                    observation = f"Error: {exc}"
+            else:
+                observation = f"Error: tool '{tool_name}' not found"
+
+            trace.append(TraceEntry(step=step, entry_type="observation", content=observation))
+            messages.append({"role": "assistant", "content": f"Action: {action_desc}"})
+            messages.append({"role": "user", "content": f"Observation: {observation}"})
+            step += 1
+
+        elif step_type == "answer":
+            content = response["content"]
+            trace.append(TraceEntry(step=step, entry_type="answer", content=content))
+            return ReactResult(answer=content, timed_out=False, trace=trace)
+
+    return ReactResult(answer=None, timed_out=True, trace=trace)
+""",
+        "explanation_md": """\
+## Walkthrough: ReAct Reasoning Loop
+
+### The loop structure
+
+The ReAct pattern is fundamentally a state machine with three states: **Thought**, **Action/Observation**, and **Answer**. The loop alternates between calling the LLM and executing tools until the model decides it has enough information to answer.
+
+```
+Question -> [Thought -> Action -> Observation]* -> Answer
+```
+
+### Message accumulation
+
+Each iteration appends to the `messages` list, building up context. This is how the agent "remembers" previous reasoning and observations:
+
+```python
+messages.append({"role": "assistant", "content": f"Thought: {content}"})
+```
+
+This mirrors how real agent frameworks work with the Chat Completions API. The conversation history IS the agent's working memory.
+
+### Tool execution safety
+
+We wrap tool calls in a try/except and handle missing tools gracefully. In a real agent, you would also add:
+- Timeout per tool call
+- Argument validation against the tool's schema
+- Cost tracking per tool invocation
+
+```python
+if tool_name in tools:
+    try:
+        observation = tools[tool_name](**tool_args)
+    except Exception as exc:
+        observation = f"Error: {exc}"
+else:
+    observation = f"Error: tool '{tool_name}' not found"
+```
+
+### The iteration cap
+
+Without `max_iterations`, a confused model could loop forever (or until you run out of tokens and money). The cap is a hard safety boundary. When hit, we return `timed_out=True` so the caller can decide what to do: retry with a different prompt, escalate to a human, or return a partial answer.
+
+### The trace
+
+Returning a structured trace rather than just the final answer is critical for debugging and evaluation. You can inspect exactly where the agent went wrong, which tools it called, and whether it wasted steps. This trace format maps directly to what you would store in an observability system.
+
+### Trade-offs
+
+- **Context window growth**: Each iteration adds tokens to the message list. For long-running agents, you need to summarize or truncate intermediate steps.
+- **Single-threaded**: This loop calls one tool at a time. Real agents may want parallel tool execution.
+- **No memory management**: The full trace stays in memory. For production, you would stream trace entries to storage.
+""",
+        "tags_json": ["agents", "react", "reasoning-loop", "tool-use"],
+    },
+    {
+        "title": "Add retry and fallback logic to tool calls",
+        "slug": "tool-retry-fallback",
+        "category": "agents",
+        "difficulty": "intermediate",
+        "prompt_md": """\
+## Add Retry and Fallback Logic to Tool Calls
+
+In production agent systems, tool calls fail. APIs time out, rate limits hit, services go down. A resilient agent does not crash on the first failure — it retries with backoff, respects timeouts, and falls back to alternative tools when the primary is unavailable.
+
+### What you are building
+
+Create a `ResilientToolExecutor` class that wraps tool execution with:
+
+1. **Exponential backoff retry** — retry transient failures (network errors, 429s, 5xx) up to a configurable number of attempts, with exponential delay between retries.
+2. **Per-call timeout** — if a single tool call exceeds the timeout, cancel it and count it as a failure.
+3. **Fallback tools** — when all retries on the primary tool are exhausted, try a list of fallback tools in order.
+4. **Structured result** — return a result object that includes which tool actually succeeded (or that all failed), the number of attempts, total latency, and any error messages.
+
+### Why this matters
+
+Agent reliability is not about making individual tools perfect — it is about making the orchestration layer resilient. A web search tool might fail, but a cached search or a different search provider can substitute. This pattern is used in every production agent deployment and is the difference between a demo and a product.
+
+### Constraints
+
+- Use `asyncio` for timeout handling.
+- Backoff formula: `min(base_delay * 2^attempt, max_delay)` with configurable base and max.
+- The executor should be reusable across different tools, not hardcoded to one.
+- Include a `is_retryable(error)` predicate that callers can customize.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable, Awaitable
+
+
+class ToolCallError(Exception):
+    \"\"\"Wraps errors from tool execution with metadata.\"\"\"
+    def __init__(self, tool_name: str, message: str, retryable: bool = True):
+        super().__init__(message)
+        self.tool_name = tool_name
+        self.retryable = retryable
+
+
+@dataclass
+class ToolCallResult:
+    \"\"\"Outcome of a resilient tool call.\"\"\"
+    success: bool
+    tool_used: str | None = None
+    result: Any = None
+    attempts: int = 0
+    total_latency_ms: float = 0.0
+    errors: list[str] = field(default_factory=list)
+
+
+class ResilientToolExecutor:
+    \"\"\"Wraps tool calls with retry, timeout, and fallback logic.\"\"\"
+
+    def __init__(
+        self,
+        max_retries: int = 3,
+        base_delay: float = 0.5,
+        max_delay: float = 8.0,
+        timeout: float = 10.0,
+        is_retryable: Callable[[Exception], bool] | None = None,
+    ) -> None:
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.timeout = timeout
+        self.is_retryable = is_retryable or self._default_retryable
+
+    @staticmethod
+    def _default_retryable(error: Exception) -> bool:
+        \"\"\"Default predicate: retry ToolCallErrors marked retryable.\"\"\"
+        # TODO: implement
+        raise NotImplementedError
+
+    async def _call_with_timeout(
+        self, fn: Callable[..., Awaitable[Any]], **kwargs: Any
+    ) -> Any:
+        \"\"\"Call an async tool function with a timeout.\"\"\"
+        # TODO: use asyncio.wait_for with self.timeout
+        raise NotImplementedError
+
+    async def _attempt_tool(
+        self, tool_name: str, fn: Callable[..., Awaitable[Any]], **kwargs: Any
+    ) -> ToolCallResult:
+        \"\"\"Try calling a single tool with retries and backoff.\"\"\"
+        # TODO: loop up to max_retries
+        #   - call _call_with_timeout
+        #   - on success, return ToolCallResult
+        #   - on retryable failure, sleep with exponential backoff
+        #   - on non-retryable failure, break immediately
+        raise NotImplementedError
+
+    async def execute(
+        self,
+        primary: tuple[str, Callable[..., Awaitable[Any]]],
+        fallbacks: list[tuple[str, Callable[..., Awaitable[Any]]]] | None = None,
+        **kwargs: Any,
+    ) -> ToolCallResult:
+        \"\"\"Execute primary tool with fallbacks.\"\"\"
+        # TODO: try primary first via _attempt_tool
+        # TODO: if primary fails, try each fallback in order
+        # TODO: if all fail, return aggregate failure result
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable, Awaitable
+
+
+class ToolCallError(Exception):
+    def __init__(self, tool_name: str, message: str, retryable: bool = True):
+        super().__init__(message)
+        self.tool_name = tool_name
+        self.retryable = retryable
+
+
+@dataclass
+class ToolCallResult:
+    success: bool
+    tool_used: str | None = None
+    result: Any = None
+    attempts: int = 0
+    total_latency_ms: float = 0.0
+    errors: list[str] = field(default_factory=list)
+
+
+class ResilientToolExecutor:
+    def __init__(
+        self,
+        max_retries: int = 3,
+        base_delay: float = 0.5,
+        max_delay: float = 8.0,
+        timeout: float = 10.0,
+        is_retryable: Callable[[Exception], bool] | None = None,
+    ) -> None:
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.timeout = timeout
+        self.is_retryable = is_retryable or self._default_retryable
+
+    @staticmethod
+    def _default_retryable(error: Exception) -> bool:
+        if isinstance(error, ToolCallError):
+            return error.retryable
+        if isinstance(error, (asyncio.TimeoutError, ConnectionError, OSError)):
+            return True
+        return False
+
+    async def _call_with_timeout(
+        self, fn: Callable[..., Awaitable[Any]], **kwargs: Any
+    ) -> Any:
+        return await asyncio.wait_for(fn(**kwargs), timeout=self.timeout)
+
+    async def _attempt_tool(
+        self, tool_name: str, fn: Callable[..., Awaitable[Any]], **kwargs: Any
+    ) -> ToolCallResult:
+        errors: list[str] = []
+        start = time.monotonic()
+        for attempt in range(self.max_retries):
+            try:
+                result = await self._call_with_timeout(fn, **kwargs)
+                elapsed = (time.monotonic() - start) * 1000
+                return ToolCallResult(
+                    success=True,
+                    tool_used=tool_name,
+                    result=result,
+                    attempts=attempt + 1,
+                    total_latency_ms=elapsed,
+                    errors=errors,
+                )
+            except Exception as exc:
+                errors.append(f"{tool_name} attempt {attempt + 1}: {exc}")
+                if not self.is_retryable(exc):
+                    break
+                if attempt < self.max_retries - 1:
+                    delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+                    await asyncio.sleep(delay)
+
+        elapsed = (time.monotonic() - start) * 1000
+        return ToolCallResult(
+            success=False,
+            tool_used=tool_name,
+            attempts=len(errors),
+            total_latency_ms=elapsed,
+            errors=errors,
+        )
+
+    async def execute(
+        self,
+        primary: tuple[str, Callable[..., Awaitable[Any]]],
+        fallbacks: list[tuple[str, Callable[..., Awaitable[Any]]]] | None = None,
+        **kwargs: Any,
+    ) -> ToolCallResult:
+        name, fn = primary
+        result = await self._attempt_tool(name, fn, **kwargs)
+        if result.success:
+            return result
+
+        all_errors = list(result.errors)
+
+        for fb_name, fb_fn in (fallbacks or []):
+            fb_result = await self._attempt_tool(fb_name, fb_fn, **kwargs)
+            all_errors.extend(fb_result.errors)
+            if fb_result.success:
+                fb_result.errors = all_errors
+                return fb_result
+
+        return ToolCallResult(
+            success=False,
+            tool_used=None,
+            attempts=result.attempts + sum(1 for _ in (fallbacks or [])),
+            total_latency_ms=result.total_latency_ms,
+            errors=all_errors,
+        )
+""",
+        "explanation_md": """\
+## Walkthrough: Retry and Fallback Logic for Tool Calls
+
+### Layered resilience
+
+The design has three layers, each handling a different failure mode:
+
+1. **Timeout** (`_call_with_timeout`): Prevents a single call from hanging forever. Uses `asyncio.wait_for` which cancels the coroutine on timeout.
+2. **Retry** (`_attempt_tool`): Handles transient failures by retrying with exponential backoff.
+3. **Fallback** (`execute`): Handles persistent failures by trying alternative tools.
+
+### Exponential backoff
+
+The backoff formula `min(base_delay * 2^attempt, max_delay)` prevents both hammering a recovering service and waiting excessively:
+
+```python
+delay = min(self.base_delay * (2 ** attempt), self.max_delay)
+await asyncio.sleep(delay)
+```
+
+With defaults (base=0.5s, max=8s), the delays are: 0.5s, 1s, 2s, 4s, 8s, 8s... This is the standard pattern used by AWS SDKs and Google Cloud client libraries.
+
+### The retryable predicate
+
+Not all errors should be retried. A 404 or a validation error will fail every time. The `is_retryable` predicate lets callers customize this:
+
+```python
+@staticmethod
+def _default_retryable(error: Exception) -> bool:
+    if isinstance(error, ToolCallError):
+        return error.retryable
+    if isinstance(error, (asyncio.TimeoutError, ConnectionError, OSError)):
+        return True
+    return False
+```
+
+This separates the retry policy from the tool implementation — a key design principle in production systems.
+
+### Structured results
+
+The `ToolCallResult` dataclass captures everything needed for debugging and observability: which tool succeeded, how many attempts were made, total latency, and all error messages. This is far more useful than a bare exception.
+
+### Fallback ordering
+
+Fallbacks are tried in order, which lets you express preference: try the fast cache first, then the primary API, then the slow backup. The accumulated errors from all attempts are preserved so you can see the full failure chain.
+
+### Trade-offs
+
+- **No jitter**: Production systems add random jitter to backoff to avoid thundering herd. You could add `random.uniform(0, delay * 0.1)`.
+- **Sequential fallbacks**: For independent fallbacks, you could race them with `asyncio.gather` and take the first success.
+- **No circuit breaker**: Repeated failures to the same tool could be short-circuited with a circuit breaker pattern.
+""",
+        "tags_json": ["agents", "resilience", "retry", "fallback", "async"],
+    },
+    {
+        "title": "Parse structured outputs with error recovery",
+        "slug": "structured-output-parsing",
+        "category": "agents",
+        "difficulty": "intermediate",
+        "prompt_md": """\
+## Parse Structured Outputs with Error Recovery
+
+LLMs are asked to produce JSON constantly — tool call arguments, structured answers, classification labels, extraction results. But LLM output is unreliable: it might be wrapped in markdown code fences, contain trailing commas, include explanatory text before or after the JSON, or be truncated mid-object.
+
+### What you are building
+
+Create a `parse_structured_output` function and supporting utilities that:
+
+1. **Extract JSON from markdown** — strip ` ```json ... ``` ` fences and other common wrappers.
+2. **Handle partial/truncated JSON** — attempt to close unclosed braces and brackets to salvage partial responses.
+3. **Validate against a schema** — check the parsed object against a provided JSON Schema and return clear validation errors.
+4. **Apply defaults** — fill in missing optional fields with schema-defined defaults.
+5. **Return a structured result** — include the parsed data, whether recovery was needed, and any warnings.
+
+### Why this matters
+
+In agent systems, every tool call argument and every structured response passes through a parsing step. If that step is fragile, your agent breaks on edge cases that are actually common in practice: the model wraps JSON in markdown 30% of the time, truncation happens when hitting token limits, and extra text before JSON is routine with weaker models.
+
+Robust parsing is not a nice-to-have — it is what separates agents that work in demos from agents that work in production.
+
+### Constraints
+
+- Do not use an LLM to fix the output — this must be deterministic.
+- Handle at least: markdown fences, leading/trailing text, single trailing comma, unclosed braces/brackets (up to 3 levels).
+- Return warnings for every recovery action taken so callers can log and monitor parse quality.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class ParseResult:
+    \"\"\"Result of parsing structured LLM output.\"\"\"
+    success: bool
+    data: Any = None
+    recovered: bool = False
+    warnings: list[str] = field(default_factory=list)
+    error: str | None = None
+
+
+def strip_markdown_fences(text: str) -> str:
+    \"\"\"Remove markdown code fences from around JSON content.\"\"\"
+    # TODO: handle ```json ... ```, ```... ```, and plain ``` fences
+    raise NotImplementedError
+
+
+def extract_json_substring(text: str) -> str:
+    \"\"\"Find the first JSON object or array in a string with surrounding text.\"\"\"
+    # TODO: find the first { or [ and its matching closer
+    raise NotImplementedError
+
+
+def repair_truncated_json(text: str) -> tuple[str, list[str]]:
+    \"\"\"Attempt to close unclosed braces and brackets. Return repaired text and warnings.\"\"\"
+    # TODO: count open/close braces and brackets, append closers
+    # TODO: handle trailing commas before closers
+    raise NotImplementedError
+
+
+def parse_structured_output(
+    raw: str,
+    schema: dict[str, Any] | None = None,
+) -> ParseResult:
+    \"\"\"
+    Parse structured JSON from raw LLM output with recovery.
+
+    Steps:
+    1. Strip markdown fences
+    2. Extract JSON substring
+    3. Try parsing; if it fails, attempt repair
+    4. Validate against schema if provided
+    5. Apply defaults from schema
+    \"\"\"
+    # TODO: implement the pipeline above
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class ParseResult:
+    success: bool
+    data: Any = None
+    recovered: bool = False
+    warnings: list[str] = field(default_factory=list)
+    error: str | None = None
+
+
+def strip_markdown_fences(text: str) -> str:
+    text = text.strip()
+    pattern = r"```(?:json|JSON)?\\s*\\n?(.*?)\\n?\\s*```"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text
+
+
+def extract_json_substring(text: str) -> str:
+    # Find first { or [
+    start = -1
+    open_char = None
+    for i, ch in enumerate(text):
+        if ch in ('{', '['):
+            start = i
+            open_char = ch
+            break
+    if start == -1:
+        return text.strip()
+
+    close_char = '}' if open_char == '{' else ']'
+    depth = 0
+    in_string = False
+    escape_next = False
+    end = len(text)
+
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\\\':
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == open_char:
+            depth += 1
+        elif ch == close_char:
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+
+    return text[start:end]
+
+
+def repair_truncated_json(text: str) -> tuple[str, list[str]]:
+    warnings: list[str] = []
+    # Remove trailing commas before } or ]
+    repaired = re.sub(r",\\s*([}\\]])", r"\\1", text)
+    if repaired != text:
+        warnings.append("Removed trailing comma(s)")
+        text = repaired
+
+    # Count unclosed braces and brackets
+    opens = {'brace': 0, 'bracket': 0}
+    in_string = False
+    escape_next = False
+    for ch in text:
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\\\':
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            opens['brace'] += 1
+        elif ch == '}':
+            opens['brace'] -= 1
+        elif ch == '[':
+            opens['bracket'] += 1
+        elif ch == ']':
+            opens['bracket'] -= 1
+
+    closers = ''
+    if opens['bracket'] > 0:
+        closers += ']' * opens['bracket']
+        warnings.append(f"Closed {opens['bracket']} unclosed bracket(s)")
+    if opens['brace'] > 0:
+        closers += '}' * opens['brace']
+        warnings.append(f"Closed {opens['brace']} unclosed brace(s)")
+
+    # Remove trailing comma before adding closers
+    text = text.rstrip()
+    if text.endswith(','):
+        text = text[:-1]
+        if "Removed trailing comma(s)" not in warnings:
+            warnings.append("Removed trailing comma(s)")
+
+    return text + closers, warnings
+
+
+def _apply_defaults(data: dict, schema: dict) -> dict:
+    props = schema.get("properties", {})
+    for key, prop_schema in props.items():
+        if key not in data and "default" in prop_schema:
+            data[key] = prop_schema["default"]
+    return data
+
+
+def parse_structured_output(
+    raw: str,
+    schema: dict[str, Any] | None = None,
+) -> ParseResult:
+    warnings: list[str] = []
+    recovered = False
+
+    # Step 1: strip markdown
+    text = strip_markdown_fences(raw)
+    if text != raw.strip():
+        warnings.append("Stripped markdown code fences")
+
+    # Step 2: extract JSON substring
+    text = extract_json_substring(text)
+
+    # Step 3: try parsing
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # Attempt repair
+        repaired, repair_warnings = repair_truncated_json(text)
+        warnings.extend(repair_warnings)
+        try:
+            data = json.loads(repaired)
+            recovered = True
+        except json.JSONDecodeError as exc:
+            return ParseResult(
+                success=False,
+                error=f"Failed to parse JSON even after repair: {exc}",
+                warnings=warnings,
+            )
+
+    # Step 4: validate against schema
+    if schema is not None:
+        required = schema.get("required", [])
+        properties = schema.get("properties", {})
+        for req_field in required:
+            if req_field not in data:
+                return ParseResult(
+                    success=False,
+                    data=data,
+                    recovered=recovered,
+                    error=f"Missing required field: {req_field}",
+                    warnings=warnings,
+                )
+        # Step 5: apply defaults
+        if isinstance(data, dict):
+            data = _apply_defaults(data, schema)
+
+    return ParseResult(
+        success=True, data=data, recovered=recovered, warnings=warnings
+    )
+""",
+        "explanation_md": """\
+## Walkthrough: Structured Output Parsing with Error Recovery
+
+### The parsing pipeline
+
+The function follows a strict pipeline: strip fences, extract JSON, parse, repair if needed, validate, apply defaults. Each step is a separate function, making the pipeline testable and extensible.
+
+### Markdown fence stripping
+
+LLMs frequently wrap JSON in markdown code fences. The regex handles `json`, `JSON`, and bare fences:
+
+```python
+pattern = r"```(?:json|JSON)?\\s*\\n?(.*?)\\n?\\s*```"
+```
+
+This is the single most common parse failure in agent systems, and the fix is trivial once you handle it.
+
+### JSON substring extraction
+
+When an LLM produces "Here is the result: {...} Let me know if..." we need to find just the JSON. The extractor tracks depth and handles strings (so braces inside string values do not confuse the parser):
+
+```python
+for i in range(start, len(text)):
+    if ch == '"':
+        in_string = not in_string
+```
+
+### Truncation repair
+
+When the LLM hits a token limit mid-output, the JSON is truncated. We count unclosed braces and brackets and append closers. This is an imperfect heuristic — it cannot recover lost data — but it salvages the structure so that fields already emitted are usable.
+
+The order matters: close brackets before braces, because arrays are typically nested inside objects in LLM output.
+
+### Schema validation and defaults
+
+Rather than pulling in a full JSON Schema validator, we do lightweight validation of required fields and apply defaults from the schema's `properties.*.default` values. This covers the 90% case without adding a dependency.
+
+### The warnings list
+
+Every recovery action produces a warning. This is essential for monitoring: if 40% of your parses need repair, your prompt needs work. Without tracking this, you would never know.
+
+### Trade-offs
+
+- **No nested default application**: We only apply defaults at the top level. A production version would recurse.
+- **Limited repair**: We handle trailing commas and unclosed brackets but not missing quotes or malformed strings.
+- **No streaming support**: For streaming LLM output, you would want an incremental parser that emits partial results.
+- **Deterministic only**: We deliberately avoid calling an LLM to fix output, keeping the parser fast and predictable.
+""",
+        "tags_json": ["agents", "parsing", "structured-output", "error-recovery", "json"],
+    },
+    {
+        "title": "Conversation memory manager with token budgeting",
+        "slug": "memory-manager-token-budget",
+        "category": "agents",
+        "difficulty": "advanced",
+        "prompt_md": """\
+## Conversation Memory Manager with Token Budgeting
+
+Agents that run multi-turn conversations or long-running tasks quickly blow through context windows. A memory manager solves this by keeping the most important context within a token budget, using a combination of sliding window (keep recent messages) and summary compression (condense older messages into a summary).
+
+### What you are building
+
+Create a `MemoryManager` class that:
+
+1. **Tracks conversation history** — stores messages with role, content, and token counts.
+2. **Enforces a token budget** — when adding a message would exceed the budget, compress older messages.
+3. **Uses sliding window** — always keeps the N most recent messages verbatim.
+4. **Compresses with summaries** — when messages are evicted from the window, they are compressed into a running summary using a provided summarizer function.
+5. **Preserves system messages** — the system prompt is never evicted or compressed.
+6. **Provides a `get_messages` method** — returns the current conversation formatted for an LLM API call: system message + summary (if any) + recent window.
+
+### Why this matters
+
+Token management is one of the most important and least glamorous parts of agent engineering. Without it, agents either crash with context-too-long errors or silently lose important context. The sliding window + summary pattern is used by virtually every production agent that handles multi-turn conversations.
+
+Understanding token budgeting also helps you reason about cost: if your agent uses 100K tokens per conversation, that is real money at scale.
+
+### Constraints
+
+- Use a provided `count_tokens(text) -> int` function (simulated as `len(text.split())` for this exercise).
+- Use a provided `summarize(messages) -> str` function for compression.
+- The system message budget is separate from the conversation budget.
+- When the summary itself exceeds 25% of the budget, re-summarize it (recursive compression).
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class Message:
+    \"\"\"A single conversation message with token count.\"\"\"
+    role: str  # "system", "user", "assistant"
+    content: str
+    token_count: int = 0
+
+
+class MemoryManager:
+    \"\"\"Manages conversation history within a token budget.\"\"\"
+
+    def __init__(
+        self,
+        token_budget: int,
+        window_size: int = 10,
+        count_tokens: Callable[[str], int] | None = None,
+        summarize: Callable[[list[Message]], str] | None = None,
+    ) -> None:
+        self.token_budget = token_budget
+        self.window_size = window_size
+        self.count_tokens = count_tokens or (lambda text: len(text.split()))
+        self.summarize = summarize or self._default_summarize
+        self._system_message: Message | None = None
+        self._messages: list[Message] = []
+        self._summary: str | None = None
+        self._summary_tokens: int = 0
+
+    @staticmethod
+    def _default_summarize(messages: list[Message]) -> str:
+        # TODO: simple concatenation-based summary
+        raise NotImplementedError
+
+    def set_system_message(self, content: str) -> None:
+        \"\"\"Set the system message (never evicted).\"\"\"
+        # TODO: store with token count
+        raise NotImplementedError
+
+    def add_message(self, role: str, content: str) -> None:
+        \"\"\"Add a message, triggering compression if budget exceeded.\"\"\"
+        # TODO: create Message with token count
+        # TODO: append to _messages
+        # TODO: check if total tokens exceed budget
+        # TODO: if over budget, compress oldest messages outside the window
+        raise NotImplementedError
+
+    def _compress(self) -> None:
+        \"\"\"Move messages outside the window into the summary.\"\"\"
+        # TODO: identify messages to compress (outside window)
+        # TODO: summarize them and update _summary
+        # TODO: if summary itself is too large (>25% budget), re-summarize
+        raise NotImplementedError
+
+    def _total_tokens(self) -> int:
+        \"\"\"Calculate total token usage across all components.\"\"\"
+        # TODO: sum system + summary + message tokens
+        raise NotImplementedError
+
+    def get_messages(self) -> list[dict[str, str]]:
+        \"\"\"Return messages formatted for an LLM API call.\"\"\"
+        # TODO: return [system, summary-as-user-msg, ...recent messages]
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class Message:
+    role: str
+    content: str
+    token_count: int = 0
+
+
+class MemoryManager:
+    def __init__(
+        self,
+        token_budget: int,
+        window_size: int = 10,
+        count_tokens: Callable[[str], int] | None = None,
+        summarize: Callable[[list[Message]], str] | None = None,
+    ) -> None:
+        self.token_budget = token_budget
+        self.window_size = window_size
+        self.count_tokens = count_tokens or (lambda text: len(text.split()))
+        self.summarize = summarize or self._default_summarize
+        self._system_message: Message | None = None
+        self._messages: list[Message] = []
+        self._summary: str | None = None
+        self._summary_tokens: int = 0
+
+    @staticmethod
+    def _default_summarize(messages: list[Message]) -> str:
+        parts = []
+        for msg in messages:
+            parts.append(f"{msg.role}: {msg.content[:100]}")
+        return "Summary of earlier conversation: " + " | ".join(parts)
+
+    def set_system_message(self, content: str) -> None:
+        tokens = self.count_tokens(content)
+        self._system_message = Message(role="system", content=content, token_count=tokens)
+
+    def add_message(self, role: str, content: str) -> None:
+        tokens = self.count_tokens(content)
+        msg = Message(role=role, content=content, token_count=tokens)
+        self._messages.append(msg)
+
+        while self._total_tokens() > self.token_budget and len(self._messages) > self.window_size:
+            self._compress()
+
+    def _compress(self) -> None:
+        if len(self._messages) <= self.window_size:
+            return
+
+        # Messages outside the window (oldest ones)
+        overflow_count = len(self._messages) - self.window_size
+        to_compress = self._messages[:overflow_count]
+        self._messages = self._messages[overflow_count:]
+
+        # Build new summary from existing summary + compressed messages
+        if self._summary:
+            summary_msg = Message(role="system", content=self._summary, token_count=self._summary_tokens)
+            to_compress = [summary_msg] + to_compress
+
+        self._summary = self.summarize(to_compress)
+        self._summary_tokens = self.count_tokens(self._summary)
+
+        # Recursive compression if summary is too large
+        max_summary_tokens = int(self.token_budget * 0.25)
+        if self._summary_tokens > max_summary_tokens:
+            condensed = self.summarize([
+                Message(role="system", content=self._summary, token_count=self._summary_tokens)
+            ])
+            self._summary = condensed
+            self._summary_tokens = self.count_tokens(condensed)
+
+    def _total_tokens(self) -> int:
+        total = 0
+        if self._system_message:
+            total += self._system_message.token_count
+        total += self._summary_tokens
+        for msg in self._messages:
+            total += msg.token_count
+        return total
+
+    def get_messages(self) -> list[dict[str, str]]:
+        result: list[dict[str, str]] = []
+
+        if self._system_message:
+            result.append({"role": "system", "content": self._system_message.content})
+
+        if self._summary:
+            result.append({
+                "role": "user",
+                "content": f"[Context from earlier in the conversation]\\n{self._summary}",
+            })
+
+        for msg in self._messages:
+            result.append({"role": msg.role, "content": msg.content})
+
+        return result
+""",
+        "explanation_md": """\
+## Walkthrough: Conversation Memory Manager with Token Budgeting
+
+### The two-tier memory architecture
+
+The memory manager maintains two tiers of context:
+
+1. **Verbatim window**: The N most recent messages, kept exactly as-is.
+2. **Compressed summary**: Everything older, condensed into a running summary.
+
+This mirrors how human conversation works: you remember recent exchanges in detail but have a compressed gist of what happened earlier.
+
+### Token budget enforcement
+
+The budget check happens on every `add_message` call using a while loop:
+
+```python
+while self._total_tokens() > self.token_budget and len(self._messages) > self.window_size:
+    self._compress()
+```
+
+The while loop (not if) is important: a single compression pass might not free enough tokens if the new message is very large or the summary grew.
+
+### Compression strategy
+
+When compressing, we take all messages outside the sliding window and merge them with the existing summary:
+
+```python
+if self._summary:
+    summary_msg = Message(role="system", content=self._summary)
+    to_compress = [summary_msg] + to_compress
+```
+
+This ensures the new summary incorporates the old one rather than replacing it. Information degrades gracefully rather than being lost in chunks.
+
+### Recursive compression
+
+If the summary itself grows beyond 25% of the budget (common in very long conversations), we re-summarize it. This is a simple form of hierarchical memory:
+
+```python
+max_summary_tokens = int(self.token_budget * 0.25)
+if self._summary_tokens > max_summary_tokens:
+    condensed = self.summarize([...])
+```
+
+### The system message exception
+
+The system message is never evicted because it contains the agent's instructions. Its tokens count against the total but it is architecturally separate from conversation history.
+
+### Formatting for the API
+
+The `get_messages` method outputs a clean message list: system message first, then the summary (injected as a user message with a clear label), then recent messages. The label `[Context from earlier in the conversation]` helps the model understand the summary is background, not a new user turn.
+
+### Trade-offs and production extensions
+
+- **Importance-based eviction**: Instead of pure recency, you could score messages by importance (e.g., messages containing tool results might be more important than small talk).
+- **Semantic chunking**: Rather than compressing by message count, you could group messages by topic.
+- **Token counting accuracy**: In production, use `tiktoken` for exact token counts rather than word splitting.
+- **Streaming support**: For streaming responses, you need to update the token count as content arrives.
+""",
+        "tags_json": ["agents", "memory", "token-management", "context-window", "compression"],
+    },
+    {
+        "title": "Multi-agent handoff protocol",
+        "slug": "multi-agent-handoff",
+        "category": "agents",
+        "difficulty": "advanced",
+        "prompt_md": """\
+## Multi-Agent Handoff Protocol
+
+As agent systems grow, a single monolithic agent becomes unwieldy. The multi-agent pattern splits work among specialist agents (e.g., a researcher, a coder, a reviewer) with a coordinator that routes tasks and aggregates results. The critical engineering challenge is the **handoff protocol**: how agents pass context to each other cleanly.
+
+### What you are building
+
+Create a multi-agent handoff system with:
+
+1. **Agent base class** — each agent has a name, a description of its capabilities, and a `handle(task)` method.
+2. **HandoffContext** — a structured object that carries the task description, conversation history, intermediate results, and metadata between agents.
+3. **Coordinator** — routes tasks to the appropriate specialist based on task type, collects results, and handles failures (retry, skip, or escalate).
+4. **Handoff protocol** — when an agent cannot complete a task, it returns a `HandoffRequest` indicating which specialist should take over and what context to pass.
+5. **Result aggregation** — the coordinator collects results from multiple agents and produces a unified response.
+
+### Why this matters
+
+Multi-agent architectures are how production AI systems handle complex workflows: customer support (triage agent -> specialist agent -> quality review agent), code generation (planner -> coder -> tester), research (search agent -> analysis agent -> writing agent). The handoff protocol is where most multi-agent systems break — context gets lost, errors cascade, and the coordinator loses track of state.
+
+### Constraints
+
+- Each agent must be independently testable with mock inputs.
+- The coordinator must handle agent failures without crashing the entire workflow.
+- HandoffContext must be serializable (to dict) for logging and debugging.
+- Support a maximum depth for handoff chains to prevent infinite delegation.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Callable
+from enum import Enum
+
+
+class TaskStatus(Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    HANDED_OFF = "handed_off"
+
+
+@dataclass
+class HandoffContext:
+    \"\"\"Context passed between agents during handoffs.\"\"\"
+    task_description: str
+    conversation_history: list[dict[str, str]] = field(default_factory=list)
+    intermediate_results: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    handoff_chain: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        \"\"\"Serialize for logging.\"\"\"
+        # TODO: return serializable dict
+        raise NotImplementedError
+
+
+@dataclass
+class AgentResult:
+    \"\"\"Result from an agent's work on a task.\"\"\"
+    status: TaskStatus
+    output: Any = None
+    error: str | None = None
+    handoff_request: HandoffRequest | None = None
+
+
+@dataclass
+class HandoffRequest:
+    \"\"\"Request to hand off work to another agent.\"\"\"
+    target_agent: str
+    reason: str
+    context_updates: dict[str, Any] = field(default_factory=dict)
+
+
+class BaseAgent:
+    \"\"\"Base class for specialist agents.\"\"\"
+
+    def __init__(self, name: str, capabilities: list[str]) -> None:
+        self.name = name
+        self.capabilities = capabilities
+
+    def can_handle(self, task_type: str) -> bool:
+        \"\"\"Check if this agent can handle the given task type.\"\"\"
+        # TODO: check against capabilities
+        raise NotImplementedError
+
+    def handle(self, context: HandoffContext) -> AgentResult:
+        \"\"\"Process a task. Override in subclasses.\"\"\"
+        raise NotImplementedError
+
+
+class Coordinator:
+    \"\"\"Routes tasks to specialist agents and aggregates results.\"\"\"
+
+    def __init__(self, agents: list[BaseAgent], max_handoff_depth: int = 5) -> None:
+        self.agents = {agent.name: agent for agent in agents}
+        self.max_handoff_depth = max_handoff_depth
+
+    def route(self, task_type: str) -> BaseAgent | None:
+        \"\"\"Find the best agent for a task type.\"\"\"
+        # TODO: match task_type against agent capabilities
+        raise NotImplementedError
+
+    def execute(self, task_description: str, task_type: str) -> AgentResult:
+        \"\"\"Execute a task through the agent network.\"\"\"
+        # TODO: create HandoffContext
+        # TODO: route to initial agent
+        # TODO: handle handoff chain up to max_handoff_depth
+        # TODO: aggregate results
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+from enum import Enum
+
+
+class TaskStatus(Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    HANDED_OFF = "handed_off"
+
+
+@dataclass
+class HandoffContext:
+    task_description: str
+    conversation_history: list[dict[str, str]] = field(default_factory=list)
+    intermediate_results: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    handoff_chain: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "task_description": self.task_description,
+            "conversation_history": list(self.conversation_history),
+            "intermediate_results": dict(self.intermediate_results),
+            "metadata": dict(self.metadata),
+            "handoff_chain": list(self.handoff_chain),
+        }
+
+
+@dataclass
+class HandoffRequest:
+    target_agent: str
+    reason: str
+    context_updates: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class AgentResult:
+    status: TaskStatus
+    output: Any = None
+    error: str | None = None
+    handoff_request: HandoffRequest | None = None
+
+
+class BaseAgent:
+    def __init__(self, name: str, capabilities: list[str]) -> None:
+        self.name = name
+        self.capabilities = capabilities
+
+    def can_handle(self, task_type: str) -> bool:
+        return task_type in self.capabilities
+
+    def handle(self, context: HandoffContext) -> AgentResult:
+        raise NotImplementedError
+
+
+class Coordinator:
+    def __init__(self, agents: list[BaseAgent], max_handoff_depth: int = 5) -> None:
+        self.agents = {agent.name: agent for agent in agents}
+        self.max_handoff_depth = max_handoff_depth
+
+    def route(self, task_type: str) -> BaseAgent | None:
+        for agent in self.agents.values():
+            if agent.can_handle(task_type):
+                return agent
+        return None
+
+    def execute(self, task_description: str, task_type: str) -> AgentResult:
+        context = HandoffContext(task_description=task_description)
+
+        agent = self.route(task_type)
+        if agent is None:
+            return AgentResult(
+                status=TaskStatus.FAILED,
+                error=f"No agent can handle task type '{task_type}'",
+            )
+
+        for depth in range(self.max_handoff_depth):
+            context.handoff_chain.append(agent.name)
+
+            try:
+                result = agent.handle(context)
+            except Exception as exc:
+                return AgentResult(
+                    status=TaskStatus.FAILED,
+                    error=f"Agent '{agent.name}' raised an exception: {exc}",
+                )
+
+            if result.status == TaskStatus.COMPLETED:
+                context.intermediate_results[agent.name] = result.output
+                return AgentResult(
+                    status=TaskStatus.COMPLETED,
+                    output={
+                        "final_result": result.output,
+                        "handoff_chain": list(context.handoff_chain),
+                        "intermediate_results": dict(context.intermediate_results),
+                    },
+                )
+
+            if result.status == TaskStatus.FAILED:
+                return result
+
+            if result.handoff_request is not None:
+                handoff = result.handoff_request
+                # Store intermediate result before handing off
+                if result.output is not None:
+                    context.intermediate_results[agent.name] = result.output
+                # Apply context updates from the handoff request
+                context.intermediate_results.update(handoff.context_updates)
+                context.metadata["last_handoff_reason"] = handoff.reason
+
+                next_agent = self.agents.get(handoff.target_agent)
+                if next_agent is None:
+                    return AgentResult(
+                        status=TaskStatus.FAILED,
+                        error=f"Handoff target '{handoff.target_agent}' not found",
+                    )
+                agent = next_agent
+            else:
+                return AgentResult(
+                    status=TaskStatus.FAILED,
+                    error=f"Agent '{agent.name}' returned status {result.status} with no handoff",
+                )
+
+        return AgentResult(
+            status=TaskStatus.FAILED,
+            error=f"Max handoff depth ({self.max_handoff_depth}) exceeded. Chain: {context.handoff_chain}",
+        )
+""",
+        "explanation_md": """\
+## Walkthrough: Multi-Agent Handoff Protocol
+
+### The coordination loop
+
+The coordinator runs a simple loop bounded by `max_handoff_depth`. Each iteration either completes the task, fails, or hands off to the next agent. This bounded loop prevents infinite delegation chains where agents keep passing work to each other.
+
+```python
+for depth in range(self.max_handoff_depth):
+    context.handoff_chain.append(agent.name)
+    result = agent.handle(context)
+```
+
+### Context as the contract
+
+`HandoffContext` is the most important type in the system. It is the contract between agents — everything an agent needs to do its work must be in the context. The key fields:
+
+- `task_description`: The original task (never modified).
+- `intermediate_results`: A dict keyed by agent name, accumulating partial work.
+- `handoff_chain`: An audit trail of which agents have touched this task.
+- `metadata`: Flexible bag for handoff-specific data (e.g., reason for handoff).
+
+Making the context serializable (`to_dict`) is essential for debugging. When a multi-agent workflow fails, the first thing you inspect is the context at each handoff point.
+
+### The handoff request pattern
+
+When an agent cannot complete a task, it does not just fail — it returns a `HandoffRequest` naming the target agent and explaining why:
+
+```python
+return AgentResult(
+    status=TaskStatus.HANDED_OFF,
+    output=partial_result,
+    handoff_request=HandoffRequest(
+        target_agent="reviewer",
+        reason="Code generated, needs review",
+        context_updates={"draft_code": code},
+    ),
+)
+```
+
+This is structurally richer than raising an exception. It preserves partial work and gives the coordinator information to make routing decisions.
+
+### Error handling strategy
+
+The coordinator handles three failure modes:
+1. **Agent exception**: Caught and wrapped in a failed result.
+2. **Missing handoff target**: Returns a clear error rather than crashing.
+3. **Depth exceeded**: Returns the full handoff chain so you can diagnose the delegation loop.
+
+### Trade-offs and extensions
+
+- **Parallel execution**: This implementation is sequential. For independent subtasks, you could fan out to multiple agents concurrently.
+- **Priority routing**: `route` picks the first capable agent. A smarter version would score agents by load, cost, or specialization depth.
+- **State persistence**: For long-running workflows, you would persist the context to a database so the workflow survives process restarts.
+- **Human-in-the-loop**: You could add a special agent type that pauses execution and waits for human input before continuing.
+""",
+        "tags_json": ["agents", "multi-agent", "handoff", "coordination", "orchestration"],
+    },
+    {
+        "title": "Agent evaluation harness",
+        "slug": "agent-eval-harness",
+        "category": "agents",
+        "difficulty": "advanced",
+        "prompt_md": """\
+## Agent Evaluation Harness
+
+Building an agent is one thing; knowing whether it actually works is another. An **evaluation harness** runs an agent against a suite of test cases and scores it on multiple dimensions: correctness (did it get the right answer?), efficiency (how many steps did it take?), and cost (how many tokens did it use?).
+
+### What you are building
+
+Create an `EvalHarness` class that:
+
+1. **Defines test cases** — each case has an input, expected output, and optional metadata (max steps, category).
+2. **Runs the agent** — executes the agent function for each test case, capturing the result, step trace, and token usage.
+3. **Scores correctness** — uses a configurable scoring function (exact match, fuzzy match, or LLM-as-judge).
+4. **Scores efficiency** — compares actual steps taken against a baseline or maximum.
+5. **Scores cost** — tracks total tokens and computes cost based on a pricing table.
+6. **Produces a report** — aggregate scores by category, overall pass rate, and per-case details.
+
+### Why this matters
+
+Without systematic evaluation, agent development is guesswork. You change a prompt and hope it helps. An eval harness turns agent development into engineering: make a change, run the suite, see exactly what improved and what regressed. This is the single most important infrastructure investment in any agent project.
+
+Every serious AI engineering team has an eval harness. The patterns here apply whether you are using a framework or building from scratch.
+
+### Constraints
+
+- Test cases are defined as dicts/dataclasses, not hardcoded.
+- The harness must be agent-agnostic — it accepts any callable with the right signature.
+- Scoring functions are pluggable (passed in, not hardcoded).
+- The report must include both aggregate and per-case results.
+- Support timeout per test case.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+
+@dataclass
+class TestCase:
+    \"\"\"A single evaluation test case.\"\"\"
+    case_id: str
+    input_data: Any
+    expected_output: Any
+    max_steps: int | None = None
+    category: str = "default"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CaseResult:
+    \"\"\"Result from running one test case.\"\"\"
+    case_id: str
+    passed: bool
+    correctness_score: float  # 0.0 to 1.0
+    actual_output: Any = None
+    steps_taken: int = 0
+    tokens_used: int = 0
+    latency_ms: float = 0.0
+    error: str | None = None
+
+
+@dataclass
+class EvalReport:
+    \"\"\"Aggregate evaluation report.\"\"\"
+    total_cases: int
+    passed: int
+    failed: int
+    overall_pass_rate: float
+    avg_correctness: float
+    avg_steps: float
+    total_tokens: int
+    total_cost_usd: float
+    by_category: dict[str, dict] = field(default_factory=dict)
+    case_results: list[CaseResult] = field(default_factory=list)
+
+
+@dataclass
+class AgentOutput:
+    \"\"\"Standard output format from an agent under evaluation.\"\"\"
+    result: Any
+    steps: int = 0
+    tokens: int = 0
+
+
+class EvalHarness:
+    \"\"\"Runs an agent against test cases and produces a scored report.\"\"\"
+
+    def __init__(
+        self,
+        agent_fn: Callable[[Any], AgentOutput],
+        scorer: Callable[[Any, Any], float],
+        pricing: dict[str, float] | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+        self.agent_fn = agent_fn
+        self.scorer = scorer
+        self.pricing = pricing or {"input": 0.01, "output": 0.03}  # per 1K tokens
+        self.timeout = timeout
+
+    def run_case(self, case: TestCase) -> CaseResult:
+        \"\"\"Run a single test case and score it.\"\"\"
+        # TODO: call agent_fn with case.input_data
+        # TODO: measure latency
+        # TODO: score correctness using self.scorer
+        # TODO: handle timeout and exceptions
+        raise NotImplementedError
+
+    def run_suite(self, cases: list[TestCase]) -> EvalReport:
+        \"\"\"Run all test cases and produce an aggregate report.\"\"\"
+        # TODO: run each case
+        # TODO: aggregate scores by category
+        # TODO: compute overall metrics
+        # TODO: calculate cost from token usage
+        raise NotImplementedError
+
+    def _compute_cost(self, tokens: int) -> float:
+        \"\"\"Compute cost from token usage.\"\"\"
+        # TODO: apply pricing
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable
+from collections import defaultdict
+
+
+@dataclass
+class TestCase:
+    case_id: str
+    input_data: Any
+    expected_output: Any
+    max_steps: int | None = None
+    category: str = "default"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CaseResult:
+    case_id: str
+    passed: bool
+    correctness_score: float
+    actual_output: Any = None
+    steps_taken: int = 0
+    tokens_used: int = 0
+    latency_ms: float = 0.0
+    error: str | None = None
+
+
+@dataclass
+class EvalReport:
+    total_cases: int
+    passed: int
+    failed: int
+    overall_pass_rate: float
+    avg_correctness: float
+    avg_steps: float
+    total_tokens: int
+    total_cost_usd: float
+    by_category: dict[str, dict] = field(default_factory=dict)
+    case_results: list[CaseResult] = field(default_factory=list)
+
+
+@dataclass
+class AgentOutput:
+    result: Any
+    steps: int = 0
+    tokens: int = 0
+
+
+class EvalHarness:
+    def __init__(
+        self,
+        agent_fn: Callable[[Any], AgentOutput],
+        scorer: Callable[[Any, Any], float],
+        pricing: dict[str, float] | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+        self.agent_fn = agent_fn
+        self.scorer = scorer
+        self.pricing = pricing or {"input": 0.01, "output": 0.03}
+        self.timeout = timeout
+
+    def run_case(self, case: TestCase) -> CaseResult:
+        start = time.monotonic()
+        try:
+            output = self.agent_fn(case.input_data)
+            elapsed = (time.monotonic() - start) * 1000
+
+            correctness = self.scorer(output.result, case.expected_output)
+            passed = correctness >= 0.99  # threshold for pass
+
+            # Check step efficiency
+            if case.max_steps is not None and output.steps > case.max_steps:
+                passed = False
+
+            return CaseResult(
+                case_id=case.case_id,
+                passed=passed,
+                correctness_score=correctness,
+                actual_output=output.result,
+                steps_taken=output.steps,
+                tokens_used=output.tokens,
+                latency_ms=elapsed,
+            )
+        except TimeoutError:
+            elapsed = (time.monotonic() - start) * 1000
+            return CaseResult(
+                case_id=case.case_id,
+                passed=False,
+                correctness_score=0.0,
+                latency_ms=elapsed,
+                error="Timeout exceeded",
+            )
+        except Exception as exc:
+            elapsed = (time.monotonic() - start) * 1000
+            return CaseResult(
+                case_id=case.case_id,
+                passed=False,
+                correctness_score=0.0,
+                latency_ms=elapsed,
+                error=str(exc),
+            )
+
+    def run_suite(self, cases: list[TestCase]) -> EvalReport:
+        results: list[CaseResult] = []
+        for case in cases:
+            result = self.run_case(case)
+            results.append(result)
+
+        passed = sum(1 for r in results if r.passed)
+        failed = len(results) - passed
+        total_tokens = sum(r.tokens_used for r in results)
+
+        correctness_scores = [r.correctness_score for r in results]
+        avg_correctness = sum(correctness_scores) / len(correctness_scores) if correctness_scores else 0.0
+
+        steps = [r.steps_taken for r in results]
+        avg_steps = sum(steps) / len(steps) if steps else 0.0
+
+        # Aggregate by category
+        by_category: dict[str, dict] = {}
+        cat_groups: dict[str, list[CaseResult]] = defaultdict(list)
+        for case, result in zip(cases, results):
+            cat_groups[case.category].append(result)
+
+        for cat, cat_results in cat_groups.items():
+            cat_passed = sum(1 for r in cat_results if r.passed)
+            cat_scores = [r.correctness_score for r in cat_results]
+            by_category[cat] = {
+                "total": len(cat_results),
+                "passed": cat_passed,
+                "pass_rate": cat_passed / len(cat_results) if cat_results else 0.0,
+                "avg_correctness": sum(cat_scores) / len(cat_scores) if cat_scores else 0.0,
+            }
+
+        return EvalReport(
+            total_cases=len(results),
+            passed=passed,
+            failed=failed,
+            overall_pass_rate=passed / len(results) if results else 0.0,
+            avg_correctness=avg_correctness,
+            avg_steps=avg_steps,
+            total_tokens=total_tokens,
+            total_cost_usd=self._compute_cost(total_tokens),
+            by_category=by_category,
+            case_results=results,
+        )
+
+    def _compute_cost(self, tokens: int) -> float:
+        # Simplified: split tokens evenly between input and output
+        per_1k_input = self.pricing.get("input", 0.01)
+        per_1k_output = self.pricing.get("output", 0.03)
+        input_tokens = tokens * 0.6  # assume 60/40 split
+        output_tokens = tokens * 0.4
+        return (input_tokens / 1000 * per_1k_input) + (output_tokens / 1000 * per_1k_output)
+""",
+        "explanation_md": """\
+## Walkthrough: Agent Evaluation Harness
+
+### The three scoring dimensions
+
+Production agent evaluation needs more than pass/fail. We score three dimensions independently:
+
+1. **Correctness**: Does the agent produce the right answer? The pluggable `scorer` function handles this, supporting exact match, fuzzy match, or LLM-as-judge patterns.
+2. **Efficiency**: How many steps did the agent take? Fewer steps means less latency and cost. We compare against `max_steps` from the test case.
+3. **Cost**: How many tokens were consumed? This translates directly to dollars.
+
+### The pluggable scorer
+
+```python
+correctness = self.scorer(output.result, case.expected_output)
+passed = correctness >= 0.99
+```
+
+The scorer returns a float between 0 and 1, not a boolean. This lets you track partial credit and measure improvement over time. A scorer that returns 0.7 tells you something useful even when the answer is not perfect.
+
+Common scorer implementations:
+- **Exact match**: `lambda actual, expected: 1.0 if actual == expected else 0.0`
+- **Fuzzy string**: Normalize and compare with Levenshtein distance.
+- **LLM-as-judge**: Call a model to evaluate semantic equivalence.
+
+### Error isolation
+
+Each test case runs in its own try/except block. A failing case never crashes the suite:
+
+```python
+except Exception as exc:
+    return CaseResult(
+        case_id=case.case_id, passed=False,
+        correctness_score=0.0, error=str(exc),
+    )
+```
+
+This is critical because agents are unpredictable. One edge case should not prevent you from getting scores on the other 99 cases.
+
+### Category-level aggregation
+
+Grouping results by category reveals patterns that overall metrics hide. If your agent scores 90% overall but 40% on "multi-hop reasoning" cases, you know exactly where to focus.
+
+```python
+by_category[cat] = {
+    "total": len(cat_results),
+    "passed": cat_passed,
+    "pass_rate": cat_passed / len(cat_results),
+}
+```
+
+### Cost estimation
+
+The cost model uses a simplified 60/40 input/output token split. In production, you would track input and output tokens separately. The key insight is that cost is a first-class evaluation metric, not an afterthought:
+
+```python
+total_cost_usd=self._compute_cost(total_tokens)
+```
+
+### Trade-offs and extensions
+
+- **Parallelism**: Running cases sequentially is simple but slow. For large suites, use `asyncio.gather` or multiprocessing.
+- **Regression detection**: Compare reports across runs to flag regressions automatically.
+- **Flakiness detection**: Run cases multiple times and flag unstable results.
+- **Caching**: Cache agent outputs by input hash so you can re-score without re-running.
+""",
+        "tags_json": ["agents", "evaluation", "testing", "harness", "metrics"],
+    },
+    {
+        "title": "Cost-tracking middleware for agent tool calls",
+        "slug": "agent-cost-tracker",
+        "category": "agents",
+        "difficulty": "intermediate",
+        "prompt_md": """\
+## Cost-Tracking Middleware for Agent Tool Calls
+
+Agent systems can burn through API budgets fast. Every LLM call, every tool invocation, every retry costs tokens and time. Without cost tracking, you discover overspending after the invoice arrives. **Cost-tracking middleware** wraps every tool call to record token usage, latency, and estimated cost in real time, with optional budget enforcement that stops the agent before it exceeds a limit.
+
+### What you are building
+
+Create a `CostTracker` middleware class that:
+
+1. **Wraps tool calls** — intercepts every tool invocation to measure and record metrics before and after execution.
+2. **Tracks per-call metrics** — token usage (input + output), latency in milliseconds, estimated cost in USD.
+3. **Maintains running totals** — cumulative tokens, cost, and call count, grouped by tool name.
+4. **Enforces budgets** — if a configurable budget (in USD or tokens) would be exceeded by the next call, raise a `BudgetExceededError` instead of executing.
+5. **Provides a summary** — return a structured cost report with per-tool and aggregate breakdowns.
+
+### Why this matters
+
+In production, cost visibility is not optional. A runaway agent loop that calls GPT-4 in a retry spiral can burn hundreds of dollars in minutes. Cost tracking middleware is the standard pattern for: (1) real-time budget enforcement, (2) per-request cost attribution for billing, (3) identifying expensive tool calls for optimization, and (4) comparing agent configurations by cost efficiency.
+
+This is the kind of infrastructure every AI team builds early and never removes.
+
+### Constraints
+
+- The middleware must work with both sync and async tool functions.
+- Token counts come from the tool's return value (assume tools return a dict with an optional `usage` field).
+- The pricing table maps model/tool names to per-1K-token rates.
+- Budget enforcement must check BEFORE executing, not after (to prevent overspend).
+- All tracking data must be thread-safe for concurrent agent execution.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable
+from collections import defaultdict
+
+
+class BudgetExceededError(Exception):
+    \"\"\"Raised when a tool call would exceed the configured budget.\"\"\"
+    def __init__(self, budget: float, current_cost: float, estimated_cost: float):
+        self.budget = budget
+        self.current_cost = current_cost
+        self.estimated_cost = estimated_cost
+        super().__init__(
+            f"Budget ${budget:.4f} would be exceeded: "
+            f"current=${current_cost:.4f}, estimated next=${estimated_cost:.4f}"
+        )
+
+
+@dataclass
+class CallRecord:
+    \"\"\"Record of a single tool call.\"\"\"
+    tool_name: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: float
+    cost_usd: float
+    timestamp: float
+
+
+@dataclass
+class ToolStats:
+    \"\"\"Aggregate stats for a single tool.\"\"\"
+    call_count: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cost_usd: float = 0.0
+    total_latency_ms: float = 0.0
+    avg_latency_ms: float = 0.0
+
+
+@dataclass
+class CostReport:
+    \"\"\"Complete cost report.\"\"\"
+    total_calls: int = 0
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    by_tool: dict[str, ToolStats] = field(default_factory=dict)
+    budget_remaining: float | None = None
+
+
+class CostTracker:
+    \"\"\"Middleware that wraps tool calls to track cost and enforce budgets.\"\"\"
+
+    def __init__(
+        self,
+        pricing: dict[str, dict[str, float]] | None = None,
+        budget_usd: float | None = None,
+        budget_tokens: int | None = None,
+    ) -> None:
+        # pricing: {"tool_name": {"input": rate_per_1k, "output": rate_per_1k}}
+        self.pricing = pricing or {}
+        self.budget_usd = budget_usd
+        self.budget_tokens = budget_tokens
+        self._records: list[CallRecord] = []
+        self._lock = threading.Lock()
+
+    def _estimate_cost(self, tool_name: str, input_tokens: int, output_tokens: int) -> float:
+        \"\"\"Estimate cost for a tool call based on pricing table.\"\"\"
+        # TODO: look up pricing for tool_name, compute cost
+        raise NotImplementedError
+
+    def _check_budget(self, estimated_cost: float, estimated_tokens: int) -> None:
+        \"\"\"Raise BudgetExceededError if budget would be exceeded.\"\"\"
+        # TODO: check USD and token budgets
+        raise NotImplementedError
+
+    def wrap(self, tool_name: str, fn: Callable) -> Callable:
+        \"\"\"Return a wrapped version of fn that tracks costs.\"\"\"
+        # TODO: create wrapper that:
+        #   1. Estimates cost and checks budget BEFORE calling
+        #   2. Calls the function and measures latency
+        #   3. Extracts usage from result
+        #   4. Records the call
+        raise NotImplementedError
+
+    def get_report(self) -> CostReport:
+        \"\"\"Generate a cost report.\"\"\"
+        # TODO: aggregate records into a CostReport
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable
+from collections import defaultdict
+
+
+class BudgetExceededError(Exception):
+    def __init__(self, budget: float, current_cost: float, estimated_cost: float):
+        self.budget = budget
+        self.current_cost = current_cost
+        self.estimated_cost = estimated_cost
+        super().__init__(
+            f"Budget ${budget:.4f} would be exceeded: "
+            f"current=${current_cost:.4f}, estimated next=${estimated_cost:.4f}"
+        )
+
+
+@dataclass
+class CallRecord:
+    tool_name: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: float
+    cost_usd: float
+    timestamp: float
+
+
+@dataclass
+class ToolStats:
+    call_count: int = 0
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cost_usd: float = 0.0
+    total_latency_ms: float = 0.0
+    avg_latency_ms: float = 0.0
+
+
+@dataclass
+class CostReport:
+    total_calls: int = 0
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    by_tool: dict[str, ToolStats] = field(default_factory=dict)
+    budget_remaining: float | None = None
+
+
+class CostTracker:
+    def __init__(
+        self,
+        pricing: dict[str, dict[str, float]] | None = None,
+        budget_usd: float | None = None,
+        budget_tokens: int | None = None,
+    ) -> None:
+        self.pricing = pricing or {}
+        self.budget_usd = budget_usd
+        self.budget_tokens = budget_tokens
+        self._records: list[CallRecord] = []
+        self._lock = threading.Lock()
+
+    def _estimate_cost(self, tool_name: str, input_tokens: int, output_tokens: int) -> float:
+        rates = self.pricing.get(tool_name, {"input": 0.01, "output": 0.03})
+        input_cost = (input_tokens / 1000) * rates.get("input", 0.01)
+        output_cost = (output_tokens / 1000) * rates.get("output", 0.03)
+        return input_cost + output_cost
+
+    def _current_totals(self) -> tuple[float, int]:
+        total_cost = sum(r.cost_usd for r in self._records)
+        total_tokens = sum(r.input_tokens + r.output_tokens for r in self._records)
+        return total_cost, total_tokens
+
+    def _check_budget(self, estimated_cost: float, estimated_tokens: int) -> None:
+        current_cost, current_tokens = self._current_totals()
+        if self.budget_usd is not None:
+            if current_cost + estimated_cost > self.budget_usd:
+                raise BudgetExceededError(self.budget_usd, current_cost, estimated_cost)
+        if self.budget_tokens is not None:
+            if current_tokens + estimated_tokens > self.budget_tokens:
+                raise BudgetExceededError(
+                    float(self.budget_tokens), float(current_tokens), float(estimated_tokens)
+                )
+
+    def wrap(self, tool_name: str, fn: Callable) -> Callable:
+        tracker = self
+
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Estimate cost before execution (use average from past calls or default)
+            with tracker._lock:
+                past_calls = [r for r in tracker._records if r.tool_name == tool_name]
+                if past_calls:
+                    avg_input = sum(r.input_tokens for r in past_calls) // len(past_calls)
+                    avg_output = sum(r.output_tokens for r in past_calls) // len(past_calls)
+                else:
+                    avg_input, avg_output = 500, 500  # conservative default
+
+                estimated_cost = tracker._estimate_cost(tool_name, avg_input, avg_output)
+                tracker._check_budget(estimated_cost, avg_input + avg_output)
+
+            start = time.monotonic()
+            result = fn(*args, **kwargs)
+            elapsed = (time.monotonic() - start) * 1000
+
+            # Extract usage from result if available
+            input_tokens = 0
+            output_tokens = 0
+            if isinstance(result, dict) and "usage" in result:
+                usage = result["usage"]
+                input_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0))
+                output_tokens = usage.get("output_tokens", usage.get("completion_tokens", 0))
+
+            actual_cost = tracker._estimate_cost(tool_name, input_tokens, output_tokens)
+
+            record = CallRecord(
+                tool_name=tool_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=elapsed,
+                cost_usd=actual_cost,
+                timestamp=time.time(),
+            )
+
+            with tracker._lock:
+                tracker._records.append(record)
+
+            return result
+
+        return wrapper
+
+    def get_report(self) -> CostReport:
+        with self._lock:
+            records = list(self._records)
+
+        by_tool: dict[str, ToolStats] = {}
+        tool_groups: dict[str, list[CallRecord]] = defaultdict(list)
+        for record in records:
+            tool_groups[record.tool_name].append(record)
+
+        for name, group in tool_groups.items():
+            total_latency = sum(r.latency_ms for r in group)
+            stats = ToolStats(
+                call_count=len(group),
+                total_input_tokens=sum(r.input_tokens for r in group),
+                total_output_tokens=sum(r.output_tokens for r in group),
+                total_cost_usd=sum(r.cost_usd for r in group),
+                total_latency_ms=total_latency,
+                avg_latency_ms=total_latency / len(group) if group else 0.0,
+            )
+            by_tool[name] = stats
+
+        total_cost = sum(r.cost_usd for r in records)
+        total_tokens = sum(r.input_tokens + r.output_tokens for r in records)
+
+        budget_remaining = None
+        if self.budget_usd is not None:
+            budget_remaining = self.budget_usd - total_cost
+
+        return CostReport(
+            total_calls=len(records),
+            total_tokens=total_tokens,
+            total_cost_usd=total_cost,
+            by_tool=by_tool,
+            budget_remaining=budget_remaining,
+        )
+""",
+        "explanation_md": """\
+## Walkthrough: Cost-Tracking Middleware for Agent Tool Calls
+
+### The middleware pattern
+
+The `wrap` method returns a new function that behaves identically to the original but adds measurement around it. This is the classic middleware/decorator pattern, and it is how you add cross-cutting concerns (logging, auth, cost tracking) without modifying tool implementations:
+
+```python
+tracked_search = tracker.wrap("web_search", search_fn)
+result = tracked_search(query="...")  # same interface, now tracked
+```
+
+### Pre-execution budget check
+
+The budget check happens BEFORE the tool call, not after. This prevents overspend:
+
+```python
+tracker._check_budget(estimated_cost, avg_input + avg_output)
+# Only if budget check passes:
+result = fn(*args, **kwargs)
+```
+
+For cost estimation before execution, we use the average of past calls for the same tool. If there are no past calls, we use a conservative default. This heuristic improves over time as the tracker accumulates data.
+
+### Thread safety
+
+All access to `_records` is protected by a `threading.Lock`. This matters because production agents often execute tool calls concurrently:
+
+```python
+with tracker._lock:
+    tracker._records.append(record)
+```
+
+The lock is held for minimal time: just the append or read, not during the actual tool execution.
+
+### Usage extraction
+
+Tools are expected to return a dict with an optional `usage` field, matching the pattern used by OpenAI and Anthropic APIs:
+
+```python
+if isinstance(result, dict) and "usage" in result:
+    usage = result["usage"]
+    input_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0))
+```
+
+We check both `input_tokens` (Anthropic style) and `prompt_tokens` (OpenAI style) for compatibility.
+
+### The cost report
+
+The report aggregates per-tool and provides budget remaining. This is what you would expose in an admin dashboard or log at the end of each agent run.
+
+### Trade-offs and extensions
+
+- **Async support**: The current `wrap` returns a sync wrapper. For async tools, you would need an async wrapper variant.
+- **Sliding window budgets**: Instead of a lifetime budget, you might want per-minute or per-hour rate limits.
+- **Cost alerts**: Trigger a callback at 80% budget usage rather than hard-failing at 100%.
+- **Persistent storage**: Write records to a database for historical cost analysis across runs.
+- **Token estimation models**: Use `tiktoken` to estimate tokens from the input before the call, rather than relying on historical averages.
+""",
+        "tags_json": ["agents", "cost-tracking", "middleware", "observability", "budget"],
+    },
 ]
 
 EXERCISE_DRILLS = [
