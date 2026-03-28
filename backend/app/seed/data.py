@@ -5607,22 +5607,303 @@ Strong candidates think in layers: quality, reliability, and cost should be visi
         "role_type": "applied-ai-engineer",
         "difficulty": "advanced",
         "question_text": "When does an agent architecture add value, and when is it just complexity?",
-        "answer_outline_md": """## Strong answer shape
-Open with the tradeoff: agents add value when the system must choose tools or sequence steps dynamically under uncertainty.
+        "answer_outline_md": """## What this question is really asking
+The interviewer wants to see whether you have actually shipped agents or just read about them. Strong candidates have felt the pain of runaway loops, hard-to-debug tool calls, and unexplained outputs — and have drawn a lesson from that pain.
 
-## What to cover
-- use agents when the task path is not known in advance
-- keep workflows deterministic when the happy path is stable
-- measure whether flexibility improves outcomes enough to justify lower predictability
-- keep tool calls auditable and stop conditions explicit
+## Core distinction to anchor your answer
+An agent earns its place when three things are true simultaneously: the task path cannot be enumerated in advance, the system must choose between tools or strategies based on intermediate results, and flexibility provides measurable value worth the reliability cost. If any of those three conditions fails, a deterministic workflow is almost always better.
 
-## Concrete example
-An internal research assistant may need dynamic retrieval and tool choice. A billing workflow usually does not.
+## When agents genuinely add value
+- Research and synthesis tasks where the next step depends on what prior steps returned
+- Open-ended user requests where clarification or multi-step retrieval is needed before an answer exists
+- Autonomous monitoring or triage tasks that need to decide whether to escalate, retry, or resolve
+- Situations where a human-in-the-loop approval gate is possible but you want the agent to handle the prep work
+
+## When agents are just complexity
+- Billing pipelines, scheduled reports, or rule-based transformations — the path is known, so bake it into code
+- Any task where errors must be explainable after the fact and an LLM decision chain makes that hard
+- Workflows where latency and cost are tightly constrained, since agents typically use more tokens per task
+- Early-stage products where the scope is still changing — deterministic flows are easier to modify safely
+
+## The cost you are accepting
+Every agent loop introduces: non-determinism (same input may produce different tool sequences), harder observability (you must trace multi-step plans, not just single calls), and compounding errors (a bad tool result in step 2 poisons steps 3 and 4). These are real costs, not theoretical ones.
+
+## Concrete example to give in the interview
+An internal document research assistant justifies an agent because a user question like "what did we decide about vendor X last quarter?" may require searching multiple indices, resolving naming ambiguity, and combining excerpts. A billing-confirmation email workflow does not justify an agent because every step is deterministic and auditable.
+
+## Common follow-up: how do you decide in practice?
+Draw the happy-path flowchart. If you can draw it without conditional branches driven by model decisions, you probably do not need an agent. If the flowchart requires a box labeled "model decides what to do next," you might.
+
+## Self-study prompts
+- Look at a workflow you built recently. Which steps were genuinely dynamic versus just sequential?
+- Read Anthropic's guidance on when to use multi-step tool loops versus single-shot tool use.
+- Explore LangGraph or similar frameworks to understand the overhead they introduce before you need them.
 
 ## Interview takeaway
-The strongest answer is not "agents are powerful." It is "agents are expensive complexity, so I use them only when the task truly demands it."
+The strongest answer is not "agents are powerful." It is "agents are expensive complexity, so I use them only when the task truly demands it, and I know exactly which criteria I am checking before I introduce one."
 """,
         "tags_json": ["agents", "architecture", "tradeoffs"],
+    },
+    {
+        "category": "agents",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How would you design a tool schema for an LLM agent?",
+        "answer_outline_md": """## What this question tests
+Tool schemas are the contract between an LLM and the external world. A poorly designed schema causes misuse, ambiguous calls, or parameter hallucination. A good schema is self-documenting enough that the model uses it correctly without needing extra prompt coaching.
+
+## The structure of a tool schema
+Most providers use a JSON Schema-based format. The key components are: the tool name (short, action-verb-first), a top-level description explaining when to call this tool and when NOT to, a parameters object with typed fields, and required versus optional field lists. The description field does the most work — treat it like documentation for a colleague who cannot ask clarifying questions.
+
+## What makes a description useful
+Bad: "searches the database." Good: "Searches the internal knowledge base for documents related to a user query. Use this when the user asks about company policy, past decisions, or technical documentation. Do not use for real-time pricing or live inventory." That specificity tells the model both when to call and what it does, which reduces spurious calls.
+
+## Parameter design principles
+- Use the most specific types available: prefer `enum` over `string` when values are bounded
+- Add a `description` to every parameter, not just the parent tool
+- Avoid generic parameters like `query: string` without explaining what a good query looks like
+- Keep required fields minimal — optional fields with defaults reduce call failures
+- If a parameter accepts complex nested input, consider whether that complexity belongs in the tool or in pre-processing
+
+## Handling ambiguity
+When a model can call a tool with a partial or ambiguous set of parameters, it will often hallucinate plausible-sounding values. Guard against this by: making required fields explicit, listing example values in descriptions, and adding validation server-side so bad calls fail fast with useful error messages that the agent can learn from.
+
+## Real-world example
+A calendar booking tool might have parameters: `date` (ISO 8601 string), `duration_minutes` (integer, default 30), `attendee_emails` (array of strings), and `title` (string). Each gets a description. The top-level description notes that if the user has not confirmed a date, you should ask before calling.
+
+## Common mistakes to avoid
+- Overloaded tools that do two different things based on a flag parameter — split them instead
+- Vague tool names like `do_action` or `process_data`
+- Missing enum constraints on fields that have known valid values
+- No guidance on error handling — what should the agent do if the tool returns an error?
+
+## Common follow-up: how do you test a schema?
+Run it against a panel of realistic user queries. For each query, inspect what parameters the model produces without giving it any context beyond the schema. If it hallucinates, clarify the description. If it calls the wrong tool, adjust the boundary descriptions.
+
+## Self-study prompts
+- Read the OpenAI function calling or Anthropic tool use documentation and implement a simple two-tool agent.
+- Write a schema for a tool you use every day, then ask a colleague if the descriptions are clear without explanation.
+- Explore how JSON Schema validation can be used to catch bad tool calls before execution.
+
+## Interview takeaway
+Tool schemas are an interface design problem, not a configuration detail. The discipline is the same as API design: clear contracts reduce misuse, and the documentation inside the schema is load-bearing.
+""",
+        "tags_json": ["agents", "tools", "schema-design"],
+    },
+    {
+        "category": "agents",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "Explain the ReAct pattern and when to use it",
+        "answer_outline_md": """## What ReAct is
+ReAct (Reasoning and Acting) is a prompting and control pattern where a model interleaves explicit reasoning traces with action calls. In a ReAct loop, the model outputs a Thought (what it is figuring out), an Action (which tool to call and with what arguments), an Observation (what the tool returned), and then loops back to a new Thought. This continues until the model produces a final Answer.
+
+## Why it matters
+Before ReAct and similar patterns, models either generated an answer directly or called a tool in a single step. ReAct introduced the idea that making the reasoning visible improves both accuracy and debuggability. The model shows its work, which means you can inspect whether the plan was sensible before the action happened — and you can catch errors earlier.
+
+## The loop structure in practice
+A typical trace looks like: Thought (I need to find the current price of the API tier), Action (search_docs with query "API pricing tier current"), Observation (the Pro tier costs $49/month as of January 2025), Thought (I have the price, I can now answer), Answer (the Pro tier is $49 per month). Each iteration the model updates its internal state based on what it just learned.
+
+## When to use ReAct
+- Multi-hop questions where the answer to step 2 depends on what step 1 returned
+- Tasks with ambiguous starting state where the model needs to probe before committing
+- Debugging or investigation tasks where the reasoning trace helps the human supervising the agent
+- Workflows where you want the model to self-correct when an action returns an unexpected result
+
+## When NOT to use ReAct
+- Simple, single-tool tasks where the overhead of a reasoning loop adds latency and tokens without benefit
+- Highly deterministic pipelines where the steps are known — orchestrate them in code instead
+- Real-time or latency-sensitive features where every extra round-trip matters
+
+## Key limitations
+ReAct loops can get stuck: if a tool consistently returns unhelpful results, the model may keep retrying with slight variations rather than giving up. You need explicit stop conditions (max iterations, confidence threshold) to prevent runaway loops. The reasoning trace is also only as reliable as the model — it can produce fluent but incorrect reasoning steps.
+
+## Modern variants and successors
+ReAct was influential but has largely been absorbed into broader agent frameworks. LangGraph, the Anthropic tool-use loop, and OpenAI's function calling all implement variants of the same idea. The underlying insight — interleave planning and acting, keep the reasoning visible — remains valid even when the exact prompt format has evolved.
+
+## Common follow-up: how do you trace a ReAct loop in production?
+Capture each Thought, Action, and Observation as a structured event with timestamps, token counts, and tool response metadata. This lets you replay the session, measure where time was spent, and identify which tool call caused a reasoning derailment.
+
+## Self-study prompts
+- Implement a minimal ReAct loop from scratch with two tools: a search and a calculator.
+- Read the original ReAct paper (Yao et al., 2022) — it is short and practical.
+- Explore how LangGraph's state machine model relates to the ReAct loop structure.
+
+## Interview takeaway
+ReAct is not a magic pattern — it is a discipline for making model reasoning visible so that multi-step tool use becomes debuggable and improvable. Know both why it works and when it adds cost without benefit.
+""",
+        "tags_json": ["agents", "react", "reasoning", "tool-use"],
+    },
+    {
+        "category": "agents",
+        "role_type": "applied-ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How do you manage agent memory to stay within context limits?",
+        "answer_outline_md": """## Why this is a hard problem
+An agent running a long task accumulates context: the original user request, every tool call and its result, every reasoning step, and potentially retrieved documents. Context windows, while growing, are not infinite — and even when size is not the constraint, cost and latency often are. Memory management is the discipline of deciding what to keep, what to compress, and what to discard.
+
+## The four types of agent memory to reason about
+In-context (working) memory is the live conversation window — fast but bounded. Everything here is directly available to the model on the next step. External retrieval memory is a vector store or database you query with embeddings — scales to millions of documents but requires you to decide what to retrieve and when. Persistent structured memory is a database of facts, user preferences, or past decisions that you load selectively — good for long-lived agents that need to remember state across sessions. Episodic or compressed summaries are digests of past conversation turns that replace verbose raw logs to reduce token usage while preserving key facts.
+
+## Concrete strategies for staying within limits
+Sliding window truncation keeps only the last N turns in context. Simple, but you lose early context that may still be relevant. Good for conversational agents with short task horizons.
+
+Summarization on overflow: when the context approaches a budget threshold, call the model to summarize the oldest N turns into a compact digest, then replace those turns with the summary.
+
+Tool result trimming: many tool responses are verbose (full JSON from an API, long documents). Truncate or summarize tool results before appending them to context. A search result with a 2000-word document can often be reduced to 200 words without losing the relevant fact.
+
+Selective memory retrieval: instead of keeping all past context in-window, store completed tool results and summaries in a vector store and retrieve only what is relevant to the current step.
+
+Token budgeting: set a hard token budget for each component of the context (system prompt, conversation history, tool results, retrieved documents) and enforce it programmatically before each LLM call.
+
+## Trade-offs to acknowledge
+Every compression strategy risks losing information. Summarization discards detail. Truncation loses early context. Retrieval depends on embedding quality. Strong candidates name what they are trading away, not just what the strategy achieves.
+
+## What to monitor in production
+Track context length per agent call as a metric. Alert when sessions consistently hit near-limit. Log which turns were dropped or summarized so you can audit whether information loss caused task failures. Token cost per session is a proxy for memory efficiency.
+
+## Common follow-up: how do you test memory strategies?
+Build a benchmark of multi-turn tasks that require facts from early in the session. Run the agent with and without each memory strategy. Measure task success rate, not just context length. A strategy that reduces tokens but drops task success is not worth it.
+
+## Self-study prompts
+- Implement a simple summarizing memory manager in Python: track conversation history, detect when it exceeds a token threshold, and compress it.
+- Read the LangGraph memory documentation to understand how they separate short-term and long-term memory.
+- Explore tiktoken (OpenAI) or the Anthropic token counting API to instrument context length measurement.
+
+## Interview takeaway
+Memory management for agents is a systems design problem layered on top of a language problem. The goal is not to maximize context size — it is to keep the most decision-relevant information available at each step while controlling cost and latency. Show that you think about this proactively, not as an afterthought when the context overflow error appears.
+""",
+        "tags_json": ["agents", "memory", "context-management", "production"],
+    },
+    {
+        "category": "agents",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "What is MCP (Model Context Protocol) and why does it matter?",
+        "answer_outline_md": """## What MCP is
+Model Context Protocol (MCP) is an open standard introduced by Anthropic in late 2024 that defines a uniform way for LLMs (via a host application) to connect to external tools, data sources, and services. Instead of each AI application building its own one-off integrations, MCP provides a shared client-server architecture: an MCP server exposes capabilities (tools, resources, prompts), and an MCP client (the AI application) connects to those servers and calls their capabilities in a standardized way.
+
+## The core problem it solves
+Before MCP, every AI application had to write custom integration code for every external service: a custom Slack integration, a custom file system reader, a custom database connector. This created an M times N problem — M models times N tools means M times N integrations to build and maintain. MCP aims to reduce this to M plus N: each model implements the MCP client protocol once, each tool implements the MCP server protocol once, and they interoperate without custom glue code.
+
+## Key concepts in the protocol
+Tools are callable functions that an LLM can invoke, analogous to function calling but described in the MCP schema format. Resources are structured data sources the model can read (files, database rows, API responses). Prompts are reusable prompt templates that a server can expose to the client. Sampling is a mechanism allowing servers to request that the client LLM generate text, enabling more complex server-side workflows.
+
+## Why it matters for AI engineers
+If MCP achieves wide adoption, the tooling ecosystem becomes reusable. A file system MCP server written once works with any MCP-compliant host — Claude Desktop, a custom agent, a VS Code plugin. For engineers building agents, it means: standard schemas for describing tools, a growing library of pre-built servers to connect to, and a more predictable integration surface than bespoke function calling implementations.
+
+## Current state (as of early 2026)
+MCP launched with Claude Desktop support and has since attracted integrations from major developer tools (GitHub, Postgres, Brave Search, and others). The specification is evolving, and the ecosystem is still early — expect API changes and rough edges. The important signal is that other providers and frameworks are engaging with the standard, which suggests it may become infrastructure rather than an Anthropic-specific feature.
+
+## Limitations to acknowledge
+MCP is not a silver bullet: it standardizes the transport and schema, not the quality of the tool implementation. A badly designed tool exposed via MCP is still a badly designed tool. Discoverability, versioning, and security (especially for remote MCP servers over HTTP) are still being worked out in the specification. For production use, you still need to evaluate MCP server implementations carefully.
+
+## How to use it practically
+Build or adopt MCP servers for tools your agents need, then connect them via an MCP client library (Anthropic provides official SDKs in Python and TypeScript). For local development, MCP servers run as processes; for production, the transport layer can be HTTP with server-sent events.
+
+## Common follow-up: when would you NOT use MCP?
+When you need extremely low latency, a tightly coupled custom integration may outperform the protocol overhead. When security requirements prohibit external server processes. When the tool is simple enough that a single function call is clearer than a full MCP server setup.
+
+## Self-study prompts
+- Read the official MCP specification at modelcontextprotocol.io.
+- Build a minimal MCP server exposing one tool, connect it to Claude Desktop, and observe how tool calls flow.
+- Explore the growing list of open-source MCP servers to understand what the ecosystem looks like now.
+
+## Interview takeaway
+MCP matters because standardization in AI tooling is still rare. Knowing it signals that you follow the ecosystem closely and understand why protocol design at the infrastructure level affects how fast teams can build agents. You do not need to be an expert, but you should be able to explain what problem it solves and where it is in its maturity curve.
+""",
+        "tags_json": ["agents", "mcp", "tooling", "protocols"],
+    },
+    {
+        "category": "agents",
+        "role_type": "applied-ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How would you evaluate an agent's performance in production?",
+        "answer_outline_md": """## Why this is harder than evaluating a single LLM call
+A single LLM call has one input and one output. An agent has a task, a variable number of steps, tool calls with external side effects, and a final outcome. Evaluation must cover: whether the agent completed the task, whether it took a reasonable path, whether it used resources efficiently, and whether it behaved safely when things went wrong.
+
+## The evaluation hierarchy
+Task success (outcome-level) is whether the agent accomplished the goal. This is the most important signal but also the hardest to measure automatically. For well-defined tasks (booking a meeting, generating a report), success criteria can be automated. For open-ended tasks, you need human evaluation or an LLM judge with a rubric.
+
+Step quality (process-level) asks: even if the agent succeeded, did it take a sensible path? Watch for redundant tool calls, reasoning steps that contradict each other, unnecessary clarification requests, and loops that resolved by luck. Process evaluation catches agents that succeed but are fragile.
+
+Efficiency (resource-level) measures how many steps, tokens, and wall-clock seconds the task required. Compare against a baseline (human, simpler workflow, or prior agent version). Rising step counts without rising success rates indicate degradation.
+
+Safety and boundary respect (risk-level) asks: did the agent stay within its granted permissions? Did it attempt actions it should not have? Did it fail gracefully when a tool returned an error? For high-stakes agents, this level of evaluation is non-negotiable.
+
+## Practical implementation
+Trace logging: capture every thought, action, observation, and decision point as a structured event. Without traces, you cannot diagnose failures. Use a tool like LangSmith, Langfuse, or a custom event store.
+
+Benchmark task suites: maintain a set of representative tasks with known expected outcomes. Run the agent against these on every deploy. Track pass rate over time. Include edge cases and failure modes you have already seen in production.
+
+LLM-as-judge: for tasks where outcome evaluation is expensive, use a second LLM call to rate the agent's response against a rubric. Be explicit about what the judge is measuring. Validate the judge against human labels on a sample.
+
+Human review sampling: even with automated evaluation, sample real production sessions for human review. Automated metrics miss subtle failures.
+
+Regression alerting: track key metrics per deployment. Alert on drops in task success rate, spikes in step count, or increases in tool error rates.
+
+## Common failure modes to build tests for
+- Tool call with malformed parameters (schema validation failures)
+- Infinite loop detection (max iterations exceeded)
+- Hallucinated tool results treated as real (the agent invents an observation)
+- Over-cautious refusals on legitimate tasks
+- Under-cautious execution of risky actions
+
+## Self-study prompts
+- Explore Langfuse or LangSmith to understand what production agent tracing looks like in practice.
+- Design a five-task benchmark for an agent you are building. Write success criteria that could be automated.
+- Read about G-Eval and other LLM-as-judge frameworks to understand how automated evaluation rubrics are designed.
+
+## Interview takeaway
+Agent evaluation is not a single metric — it is a monitoring discipline. Strong candidates describe the layers (outcome, process, efficiency, safety), name the tooling they use or would build, and treat evaluation as a first-class engineering concern that exists before production launch, not after the first incident.
+""",
+        "tags_json": ["agents", "evaluation", "production", "observability"],
+    },
+    {
+        "category": "agents",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "Compare supervisor vs peer-to-peer multi-agent architectures",
+        "answer_outline_md": """## The two patterns at a glance
+In a supervisor architecture, one agent (the orchestrator or planner) delegates tasks to specialized subagents and coordinates their outputs. The supervisor owns the plan; subagents own execution. In a peer-to-peer architecture, agents communicate directly with each other without a central coordinator, passing tasks or messages based on routing logic or shared state.
+
+## Supervisor architecture: how it works
+The supervisor receives the user request, decomposes it into subtasks, dispatches each to the most appropriate subagent, collects results, and synthesizes a final response. Think of it like a project manager assigning work to specialists. The supervisor may also do quality checks on subagent outputs before accepting them.
+
+Strengths: clear ownership — a single agent is responsible for the plan, so failures are easier to trace. Simpler reasoning for subagents — each one has a focused, narrow task. Easier to implement guardrails at the supervisor level before risky actions reach subagents. Coordination logic lives in one place, which makes it easier to update.
+
+Weaknesses: the supervisor is a single point of failure — if it makes a bad decomposition, subagents cannot fix it. Latency accumulates: the supervisor must wait for each dispatched task before synthesizing. Bottleneck under high parallelism. Supervisor complexity grows as the number of subagents and task types increases.
+
+## Peer-to-peer architecture: how it works
+Agents route tasks to each other based on capability declarations, shared message queues, or blackboard-style shared state. There is no single coordinator. Each agent decides whether to handle a task itself, pass it to another agent, or request collaboration.
+
+Strengths: parallelism is natural — agents can operate concurrently without waiting for a coordinator. Resilient to single-agent failure if routing is designed with fallbacks. Can handle emergent task structures that no single planner could anticipate.
+
+Weaknesses: coordination logic is distributed and harder to reason about. Harder to trace why a task ended up where it did. Race conditions and message ordering issues are possible. Much harder to enforce global safety constraints — there is no single checkpoint.
+
+## When to use which
+Use supervisor when: tasks are well-defined enough for a planner to decompose them, safety review is important, debuggability is a priority, and team size is modest. This is the right starting point for most production multi-agent systems today.
+
+Use peer-to-peer when: tasks are highly parallelizable, the domain is dynamic enough that a central planner would become a bottleneck, and you have strong observability in place to trace distributed agent interactions.
+
+## A hybrid that often makes sense
+Many production systems use a hierarchical hybrid: a supervisor that delegates to subagents, where some subagents can call each other directly for sub-sub-tasks. This preserves coordination clarity at the top level while allowing parallel execution within subtask groups.
+
+## What to watch for in the ecosystem
+Frameworks like LangGraph are explicitly designed to support both patterns via stateful graph execution. Anthropic's multi-agent guidance as of 2025 recommends starting with supervisor patterns and moving toward peer-to-peer only when concrete parallelism or resilience requirements justify the added complexity.
+
+## Common follow-up: how do you handle failures in each pattern?
+Supervisor: build retry logic and fallback subagents at the supervisor level. Peer-to-peer: design each agent to handle task rejection and pass to an alternative agent. Both patterns need explicit dead-letter handling for tasks that cannot be completed.
+
+## Self-study prompts
+- Build a simple two-subagent supervisor system using LangGraph or a plain Python orchestration loop.
+- Read the LangGraph multi-agent documentation comparing supervisor and peer-to-peer patterns.
+- Think through a real task you know well: how would you decompose it for a supervisor? What would peer-to-peer routing even mean in that context?
+
+## Interview takeaway
+The choice between supervisor and peer-to-peer is fundamentally about where you want coordination complexity to live. Supervisor concentrates it in one agent, making it visible and controllable but creating a bottleneck. Peer-to-peer distributes it, enabling parallelism but requiring more robust observability. Know both patterns well enough to argue for either based on real constraints.
+""",
+        "tags_json": ["agents", "multi-agent", "architecture", "supervisor"],
     },
     {
         "category": "system-design",
