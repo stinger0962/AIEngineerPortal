@@ -21,6 +21,7 @@ import type {
   Exercise,
   ExerciseAttempt,
   ExerciseDetail,
+  ExerciseVariation,
   FeedRefreshMeta,
   InterviewPractice,
   InterviewQuestion,
@@ -33,10 +34,12 @@ import type {
   MemoryCard,
   MemoryCardReview,
   NewsItem,
+  PinnedExercise,
   PortfolioReadiness,
   Project,
   Recommendation,
   SkillGapInsight,
+  VariationType,
 } from "@/lib/types/portal";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -188,18 +191,57 @@ export const portalApi = {
         reviewed_at: new Date().toISOString(),
       },
     ),
-  async submitForAIFeedback(exerciseId: number, code: string): Promise<AIFeedbackResponse> {
+  async submitForAIFeedback(exerciseId: number, code: string, referenceSolution?: string): Promise<AIFeedbackResponse> {
+    const body: Record<string, string> = { code };
+    if (referenceSolution) {
+      body.reference_solution = referenceSolution;
+    }
     const res = await fetch(
       `${API_BASE}/exercises/${exerciseId}/ai-feedback`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify(body),
       }
     );
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: "AI feedback unavailable" }));
       throw new Error(err.detail || `AI feedback failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async generateVariation(exerciseId: number, variationType: VariationType = "scenario"): Promise<ExerciseVariation> {
+    const res = await fetch(
+      `${API_BASE}/exercises/${exerciseId}/variation?variation_type=${variationType}`,
+      { method: "POST" }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Variation generation failed" }));
+      throw new Error(err.detail || `Generation failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async pinVariation(exerciseId: number, variation: ExerciseVariation): Promise<PinnedExercise> {
+    const res = await fetch(
+      `${API_BASE}/exercises/${exerciseId}/variation/pin`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: variation.title,
+          prompt_md: variation.prompt_md,
+          starter_code: variation.starter_code,
+          solution_code: variation.solution_code,
+          explanation_md: variation.explanation_md,
+          variation_type: variation.variation_type,
+        }),
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Pin failed" }));
+      throw new Error(err.detail || `Pin failed (${res.status})`);
     }
     return res.json();
   },

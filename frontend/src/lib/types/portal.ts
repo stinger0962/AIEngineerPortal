@@ -89,6 +89,8 @@ export type Exercise = {
   next_exercise_id?: number | null;
   next_exercise_slug?: string | null;
   next_exercise_title?: string | null;
+  is_generated?: boolean;
+  parent_exercise_id?: number;
 };
 
 export type ExerciseAttempt = {
@@ -313,4 +315,23 @@ export interface AIFeedbackResponse {
   input_tokens?: number;
   output_tokens?: number;
   latency_ms?: number;
+}
+
+export type VariationType = "scenario" | "concept" | "harder";
+
+export interface ExerciseVariation {
+  title: string;
+  prompt_md: string;
+  starter_code: string;
+  solution_code: string;
+  explanation_md: string;
+  variation_type: VariationType;
+  parent_exercise_id: number;
+  parent_title: string;
+}
+
+export interface PinnedExercise {
+  id: number;
+  slug: string;
+  title: string;
 }
