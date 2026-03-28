@@ -674,11 +674,854 @@ Python becomes portfolio leverage when it demonstrates engineering discipline, n
         "level": "intermediate",
         "estimated_hours": 14,
         "lessons": [
-            {"title": "When not to use an agent", "summary": "Compare fixed workflows to open-ended orchestration.", "content_md": "## Agent caution\n\nMany problems are better solved with deterministic flows plus a model in the right place.", "estimated_minutes": 35},
-            {"title": "Tool definitions and execution boundaries", "summary": "Design tool interfaces the model can use reliably.", "content_md": "## Tools\n\nSimple, well-typed tools reduce ambiguity and make debugging easier.", "estimated_minutes": 40},
-            {"title": "State machines over vague loops", "summary": "Model multi-step behavior with explicit states and stop conditions.", "content_md": "## State\n\nControl improves when transitions are named and observable.", "estimated_minutes": 40},
-            {"title": "Guardrails, approvals, and retries", "summary": "Protect external actions and manage failure paths deliberately.", "content_md": "## Controls\n\nRisk increases sharply when models can trigger real-world side effects.", "estimated_minutes": 35},
-            {"title": "Portfolio slice: workflow orchestrator", "summary": "Build an agent-shaped system that still feels engineered.", "content_md": "## Portfolio move\n\nShow auditability, traceability, and approval points.", "estimated_minutes": 35},
+            {
+                "title": "Tool design for LLM agents",
+                "summary": "Design function schemas, input validation, return contracts, and error envelopes that LLMs can call reliably.",
+                "estimated_minutes": 40,
+                "content_md": """## Tool design for LLM agents
+
+### Why this matters
+
+Every agentic system lives or dies by the quality of its tools. When a model decides to call a function, it relies entirely on the schema you gave it — the name, the description, the parameter types, and what comes back. Sloppy tool definitions create cascading failures: the model hallucinates parameters, misinterprets results, or retries endlessly. If you are building agent systems professionally, tool design is the single highest-leverage skill you can sharpen.
+
+In production, a well-designed tool means fewer wasted tokens, fewer retries, lower latency, and more predictable behavior. A poorly designed tool means debugging sessions where you stare at traces wondering why the model called `search_database` with a date string where an integer was expected.
+
+### Core concepts
+
+**JSON Schema for function definitions.** Every major LLM provider (OpenAI, Anthropic, Google) uses JSON Schema to describe tools. The schema tells the model what parameters exist, their types, which are required, and what the function does. The model generates a JSON object matching this schema, and your code executes the function.
+
+Key principles for good tool schemas:
+
+- **Descriptive names and descriptions.** The model reads these. `search_orders` is better than `query_db`. Add a description that explains *when* to use it, not just *what* it does.
+- **Minimal required parameters.** Every required field the model must fill is a chance for it to hallucinate. Keep the interface tight.
+- **Enum constraints.** If a parameter has known valid values, use an enum. The model will pick from the list instead of inventing values.
+- **No nested complexity.** Flat parameter objects work best. Deeply nested schemas confuse models and increase error rates.
+
+**Return contracts.** Your tool should always return a structured response the model can parse. Never return raw HTML, giant blobs of text, or unstructured error messages. Define a return shape and stick to it.
+
+**Error envelopes.** When a tool fails, the model needs to understand what happened so it can decide whether to retry, try a different approach, or report the failure. Wrap errors in a consistent envelope with a status, error type, and human-readable message.
+
+### Working example
+
+Here is a complete tool definition with validation, retry logic, and structured error handling — the kind of function you would register with an agent framework.
+
+```python
+import json
+import time
+import httpx
+from pydantic import BaseModel, Field
+from enum import Enum
+from typing import Optional
+
+# --- Return contract ---
+class ToolStatus(str, Enum):
+    success = "success"
+    error = "error"
+
+class ToolResult(BaseModel):
+    status: ToolStatus
+    data: Optional[dict] = None
+    error_type: Optional[str] = None
+    error_message: Optional[str] = None
+
+# --- The tool function ---
+def lookup_order(order_id: str, include_items: bool = False) -> dict:
+    \"\"\"Look up an order by its ID. Use this when the user asks about
+    a specific order status, shipment, or order details.
+
+    Args:
+        order_id: The order ID (format: ORD-XXXXX)
+        include_items: Whether to include line items in the response
+    \"\"\"
+    # Input validation
+    if not order_id.startswith("ORD-") or len(order_id) != 9:
+        return ToolResult(
+            status=ToolStatus.error,
+            error_type="validation_error",
+            error_message=f"Invalid order ID format: {order_id}. Expected ORD-XXXXX.",
+        ).model_dump()
+
+    # Retry logic for transient failures
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            resp = httpx.get(
+                f"https://api.internal.co/orders/{order_id}",
+                params={"items": include_items},
+                timeout=5.0,
+            )
+            resp.raise_for_status()
+            return ToolResult(
+                status=ToolStatus.success,
+                data=resp.json(),
+            ).model_dump()
+        except httpx.TimeoutException:
+            if attempt < max_retries:
+                time.sleep(1.5 ** attempt)
+                continue
+            return ToolResult(
+                status=ToolStatus.error,
+                error_type="timeout",
+                error_message="Order service timed out after retries.",
+            ).model_dump()
+        except httpx.HTTPStatusError as e:
+            return ToolResult(
+                status=ToolStatus.error,
+                error_type=f"http_{e.response.status_code}",
+                error_message=f"Order service returned {e.response.status_code}.",
+            ).model_dump()
+
+# --- JSON Schema for the LLM provider ---
+TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "lookup_order",
+        "description": (
+            "Look up an order by its ID. Use when the user asks about "
+            "a specific order's status, shipment tracking, or line items."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "order_id": {
+                    "type": "string",
+                    "description": "Order ID in the format ORD-XXXXX",
+                    "pattern": "^ORD-[A-Z0-9]{5}$",
+                },
+                "include_items": {
+                    "type": "boolean",
+                    "description": "Include line items in the response",
+                    "default": False,
+                },
+            },
+            "required": ["order_id"],
+        },
+    },
+}
+```
+
+Notice the pattern: validate inputs *before* doing any work, retry on transient failures only, and always return the same `ToolResult` shape. The model sees `status: error` and can decide what to do next — it never has to parse a Python traceback.
+
+### Common mistakes
+
+1. **Returning raw exceptions.** If your tool returns `"ConnectionError: [Errno 111] Connection refused"`, the model will try to interpret that string creatively. Use structured error envelopes.
+2. **Giant return payloads.** Returning 50KB of JSON eats your context window. Trim results to what the model actually needs to answer the user's question.
+3. **Vague descriptions.** `"Searches the database"` tells the model nothing about *when* to use this tool. Be specific about the use case.
+4. **Missing validation.** If the model can pass a string where you expect an integer, it will — eventually. Validate early and return a clear error.
+5. **No retry for transient errors.** Network calls fail. A single retry with backoff prevents the agent from giving up on a momentary blip.
+
+### Try it yourself
+
+Take an API you already use (weather, GitHub, a database) and wrap it as an agent tool. Define the JSON Schema, add input validation, implement retry logic, and return structured results. Then feed the schema to an LLM and see if it calls the tool correctly on the first try. If it does not, look at what confused it — that is where your schema needs work.
+""",
+            },
+            {
+                "title": "Planning and reasoning loops",
+                "summary": "Implement ReAct, plan-then-execute, and reflection patterns so agents can decompose and solve multi-step tasks.",
+                "estimated_minutes": 40,
+                "content_md": """## Planning and reasoning loops
+
+### Why this matters
+
+A single LLM call can answer a question, but it cannot reliably complete a multi-step task. If you ask a model to "find the cheapest flight from NYC to London next Tuesday and book it," a single call will hallucinate an answer. An agent with a reasoning loop will break that into steps: search flights, compare prices, confirm details, then act. The reasoning loop is what separates a chatbot from an agent.
+
+In production AI engineering, you will implement these loops constantly. Whether you are building a research assistant, a code generation pipeline, or an internal workflow tool, the pattern is always the same: think, act, observe, repeat. Getting this loop right determines whether your agent completes tasks or spirals into expensive, useless iterations.
+
+### Core concepts
+
+**ReAct (Reason + Act).** The most widely used agent loop. On each iteration the model produces a thought (reasoning about what to do next), an action (a tool call), and then receives an observation (the tool result). The loop continues until the model decides it has enough information to produce a final answer.
+
+**Plan-then-execute.** Instead of interleaving reasoning and action, the model first generates a complete plan (a list of steps), then executes each step sequentially. This works well when the task structure is predictable and you want to show the user a plan before executing it.
+
+**Reflection.** After producing an output, the model critiques its own work and decides whether to revise. This is useful for writing, code generation, and any task where quality improves with self-review.
+
+**Stop conditions matter more than the loop itself.** Every agent loop needs explicit termination criteria: a maximum number of iterations, a token budget, or a confidence signal. Without stop conditions, agents will loop forever, burning money and producing garbage.
+
+### Working example
+
+Here is a working ReAct loop that decomposes a multi-step research question using tools.
+
+```python
+import json
+from openai import OpenAI
+
+client = OpenAI()
+
+# Define available tools
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web for current information on a topic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"}
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate",
+            "description": "Evaluate a mathematical expression.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {"type": "string", "description": "Math expression to evaluate"}
+                },
+                "required": ["expression"],
+            },
+        },
+    },
+]
+
+def execute_tool(name: str, args: dict) -> str:
+    \"\"\"Execute a tool and return the result as a string.\"\"\"
+    if name == "web_search":
+        # In production, call a real search API
+        return json.dumps({"results": [f"Result for: {args['query']}"]})
+    elif name == "calculate":
+        try:
+            result = eval(args["expression"])  # Use a safe math parser in production
+            return json.dumps({"result": result})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+    return json.dumps({"error": f"Unknown tool: {name}"})
+
+def react_loop(question: str, max_iterations: int = 6) -> str:
+    \"\"\"Run a ReAct loop to answer a multi-step question.\"\"\"
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a research assistant. Break complex questions into steps. "
+                "Use tools to gather information. When you have enough information "
+                "to answer confidently, provide your final answer directly."
+            ),
+        },
+        {"role": "user", "content": question},
+    ]
+
+    for i in range(max_iterations):
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+        )
+
+        msg = response.choices[0].message
+        messages.append(msg)
+
+        # If the model produced a final answer (no tool calls), we are done
+        if not msg.tool_calls:
+            return msg.content
+
+        # Execute each tool call and feed results back
+        for tool_call in msg.tool_calls:
+            args = json.loads(tool_call.function.arguments)
+            result = execute_tool(tool_call.function.name, args)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result,
+            })
+
+        print(f"[Iteration {i + 1}] Called: {[tc.function.name for tc in msg.tool_calls]}")
+
+    # Hit max iterations — return whatever we have
+    final = client.chat.completions.create(
+        model="gpt-4o",
+        messages=messages + [
+            {"role": "user", "content": "Please provide your best answer now with what you have."}
+        ],
+    )
+    return final.choices[0].message.content
+
+# Usage
+answer = react_loop(
+    "What is the population of France and Germany combined, "
+    "and what percentage of the EU total does that represent?"
+)
+print(answer)
+```
+
+The key structural choices: the loop has a hard iteration cap, tool results go back as `tool` role messages, and when the model stops calling tools the loop exits. In production you would add token counting, cost tracking, and logging at each iteration.
+
+### Common mistakes
+
+1. **No iteration limit.** The agent gets confused and loops forever. Always set `max_iterations` and handle the case where you hit it.
+2. **Letting the model plan in its head.** If you skip the system prompt guidance to break things into steps, the model will try to answer in one shot and hallucinate.
+3. **Not logging intermediate steps.** When the agent gives a wrong final answer, you need the trace of thoughts and tool calls to debug it. Log every iteration.
+4. **Overly complex plans.** Plan-then-execute works poorly when the model generates 15 steps. Encourage short plans (3-5 steps) and allow re-planning.
+5. **Ignoring cost.** Each iteration is an LLM call. A 10-iteration loop on GPT-4o with long context can cost dollars per query. Track and budget.
+
+### Try it yourself
+
+Build a ReAct loop that answers a question requiring two different tools — for example, "What is the current stock price of AAPL multiplied by the number of employees at Apple?" Make the agent search for each fact separately and then combine them with a calculation tool. Watch the trace to see how the model decomposes the problem.
+""",
+            },
+            {
+                "title": "Multi-agent orchestration",
+                "summary": "Coordinate multiple specialized agents using supervisor patterns, handoffs, and structured message passing.",
+                "estimated_minutes": 40,
+                "content_md": """## Multi-agent orchestration
+
+### Why this matters
+
+A single agent with ten tools gets confused. It forgets which tool to use, mixes up contexts, and makes poor decisions as complexity grows. The solution is the same one we use in software engineering: decompose. Instead of one agent doing everything, you build specialized agents — a researcher, a coder, a reviewer — and orchestrate them with a supervisor.
+
+Multi-agent patterns are how production AI systems handle complex workflows. Customer support bots route to specialist agents. Code generation pipelines have separate planning, writing, and review stages. Data analysis systems decompose into query builders, executors, and interpreters. If you are building agent systems at work, you will encounter multi-agent orchestration within months.
+
+### Core concepts
+
+**Supervisor pattern.** One agent (the supervisor) receives the user request, decides which specialist to delegate to, reviews the result, and either returns it or delegates again. The supervisor does not do the work itself — it routes and quality-checks.
+
+**Handoffs.** When one agent transfers control to another, it passes a structured context object — not the entire conversation history. A handoff includes: what the next agent needs to do, what context it needs, and what a good result looks like.
+
+**Message passing vs shared state.** Agents can communicate by passing messages through the supervisor (hub-and-spoke) or by reading/writing to shared state (blackboard pattern). Hub-and-spoke is simpler to debug. Shared state is more flexible but creates race conditions and ordering issues.
+
+**Specialist agent design.** Each sub-agent should have a narrow system prompt, a limited set of tools, and a clear output contract. A research agent has search tools and returns structured findings. A code agent has a sandbox and returns tested code. Narrow scope means better performance.
+
+### Working example
+
+Here is a supervisor agent that delegates to specialist sub-agents for a research-and-summarize workflow.
+
+```python
+import json
+from dataclasses import dataclass, field
+from openai import OpenAI
+
+client = OpenAI()
+
+@dataclass
+class AgentResult:
+    agent_name: str
+    content: str
+    metadata: dict = field(default_factory=dict)
+
+def run_agent(name: str, system_prompt: str, user_message: str, model: str = "gpt-4o") -> AgentResult:
+    \"\"\"Run a single specialist agent and return its result.\"\"\"
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        temperature=0.3,
+    )
+    return AgentResult(
+        agent_name=name,
+        content=response.choices[0].message.content,
+        metadata={"model": model, "tokens": response.usage.total_tokens},
+    )
+
+# --- Specialist agents ---
+
+def research_agent(topic: str) -> AgentResult:
+    return run_agent(
+        name="researcher",
+        system_prompt=(
+            "You are a research specialist. Given a topic, produce a structured "
+            "research brief with key facts, statistics, and source references. "
+            "Output valid JSON with keys: facts (list of strings), "
+            "statistics (list of strings), sources (list of strings)."
+        ),
+        user_message=f"Research this topic thoroughly: {topic}",
+    )
+
+def writer_agent(research_brief: str, task: str) -> AgentResult:
+    return run_agent(
+        name="writer",
+        system_prompt=(
+            "You are a technical writer. Given research material and a writing "
+            "task, produce clear, well-structured content. Use the research "
+            "provided — do not invent facts."
+        ),
+        user_message=f"Writing task: {task}\\n\\nResearch material:\\n{research_brief}",
+    )
+
+def reviewer_agent(draft: str, criteria: str) -> AgentResult:
+    return run_agent(
+        name="reviewer",
+        system_prompt=(
+            "You are an editorial reviewer. Evaluate the draft against the "
+            "given criteria. Output JSON with keys: approved (bool), "
+            "score (1-10), issues (list of strings), suggestions (list of strings)."
+        ),
+        user_message=f"Criteria: {criteria}\\n\\nDraft to review:\\n{draft}",
+    )
+
+# --- Supervisor ---
+
+def supervisor(task: str, max_revisions: int = 2) -> str:
+    \"\"\"Orchestrate research, writing, and review agents.\"\"\"
+    print(f"[Supervisor] Received task: {task}")
+
+    # Step 1: Research
+    print("[Supervisor] Delegating to researcher...")
+    research = research_agent(task)
+    print(f"[Supervisor] Research complete ({research.metadata['tokens']} tokens)")
+
+    # Step 2: Write
+    print("[Supervisor] Delegating to writer...")
+    draft = writer_agent(research.content, task)
+    print(f"[Supervisor] Draft complete ({draft.metadata['tokens']} tokens)")
+
+    # Step 3: Review loop
+    for revision in range(max_revisions):
+        print(f"[Supervisor] Delegating to reviewer (revision {revision + 1})...")
+        review = reviewer_agent(
+            draft.content,
+            criteria="Accuracy, clarity, completeness, and proper use of research.",
+        )
+
+        # Parse review result
+        try:
+            review_data = json.loads(review.content)
+        except json.JSONDecodeError:
+            print("[Supervisor] Reviewer returned non-JSON, accepting draft.")
+            break
+
+        if review_data.get("approved", False) or review_data.get("score", 0) >= 8:
+            print(f"[Supervisor] Draft approved (score: {review_data.get('score')})")
+            break
+
+        # Revise based on feedback
+        print(f"[Supervisor] Revision needed (score: {review_data.get('score')})")
+        feedback = "\\n".join(review_data.get("suggestions", []))
+        draft = writer_agent(
+            research.content,
+            f"{task}\\n\\nRevise based on this feedback:\\n{feedback}",
+        )
+
+    total_tokens = sum(r.metadata["tokens"] for r in [research, draft, review])
+    print(f"[Supervisor] Complete. Total tokens: {total_tokens}")
+    return draft.content
+
+# Usage
+result = supervisor("Explain the tradeoffs of using LLMs for code review in CI pipelines")
+print(result)
+```
+
+The supervisor controls the flow, each specialist has a narrow job, and the review loop has a bounded number of revisions. Each agent result carries metadata for cost tracking.
+
+### Common mistakes
+
+1. **Passing full conversation history between agents.** Each specialist should receive only the context it needs. Passing everything wastes tokens and confuses the specialist.
+2. **No output contracts.** If the research agent returns free-form text one time and JSON another time, the writer agent cannot reliably consume it. Enforce output structure.
+3. **Unbounded review loops.** The reviewer and writer can ping-pong forever. Always cap revision rounds.
+4. **Supervisor does specialist work.** If the supervisor starts writing content or doing research, you have lost the decomposition benefit. Keep it as a router.
+5. **No cost tracking.** Multi-agent flows multiply costs. Track tokens per agent per run from day one.
+
+### Try it yourself
+
+Build a three-agent system for a task relevant to your work. For example: an agent that takes a bug report, delegates to a "reproducer" agent to write a test case, then delegates to a "fixer" agent to propose a patch, with a "reviewer" agent checking the result. Keep each agent's system prompt under 200 words and give each agent at most two tools.
+""",
+            },
+            {
+                "title": "Agent memory and state",
+                "summary": "Manage conversation history, sliding window memory, summarization, and state persistence to keep agents effective across long interactions.",
+                "estimated_minutes": 40,
+                "content_md": """## Agent memory and state
+
+### Why this matters
+
+LLMs are stateless. Every API call starts with no memory of previous interactions — you supply the entire context in the messages array. For short conversations this is fine. For agents that run multi-step tasks, interact over hours, or serve returning users, memory management becomes a core engineering problem.
+
+Without memory management, your agent will hit context window limits mid-task, lose track of earlier decisions, or spend most of its token budget re-reading old messages. In production, you will encounter all three problems. The techniques in this lesson — sliding windows, summarization, and persistence — are how you keep agents functional and affordable over long interactions.
+
+### Core concepts
+
+**Context window budgeting.** Every model has a context limit (128K tokens for GPT-4o, 200K for Claude). Your budget splits into: system prompt, memory/history, current tool results, and space for the model's response. If history consumes 90% of your window, the model has no room to think. Budget explicitly.
+
+**Sliding window.** Keep the most recent N messages and drop older ones. Simple, fast, and works well for conversations where recent context matters most. The risk is losing important early context — the user's original goal, key decisions, or constraints stated at the start.
+
+**Summarization.** Periodically compress older messages into a summary. The agent sees: `[summary of turns 1-20] + [full turns 21-30]`. This preserves important context while staying within token limits. The tradeoff is that summarization itself costs tokens and can lose details.
+
+**Sliding window + summary (hybrid).** The most practical production pattern. Keep recent messages in full, maintain a running summary of everything before that, and include key facts extracted from the conversation. This gives the model both detailed recent context and compressed long-term memory.
+
+**Persistence.** For agents that serve returning users, store conversation summaries and extracted facts in a database. On the next session, load the relevant state into the system prompt. This creates continuity across sessions without replaying entire conversation histories.
+
+### Working example
+
+Here is a memory manager that implements the hybrid sliding window + summarization pattern with explicit token budgeting.
+
+```python
+import tiktoken
+from dataclasses import dataclass, field
+from openai import OpenAI
+
+client = OpenAI()
+encoder = tiktoken.encoding_for_model("gpt-4o")
+
+def count_tokens(text: str) -> int:
+    return len(encoder.encode(text))
+
+def count_message_tokens(messages: list[dict]) -> int:
+    return sum(count_tokens(m.get("content", "")) for m in messages)
+
+@dataclass
+class MemoryConfig:
+    max_context_tokens: int = 120_000   # Leave headroom below model limit
+    system_prompt_tokens: int = 500      # Reserved for system prompt
+    response_tokens: int = 4_000         # Reserved for model output
+    recent_window: int = 10              # Keep last N messages in full
+    summary_trigger: int = 15            # Summarize when history exceeds this
+
+@dataclass
+class AgentMemory:
+    config: MemoryConfig = field(default_factory=MemoryConfig)
+    messages: list[dict] = field(default_factory=list)
+    summary: str = ""
+    key_facts: list[str] = field(default_factory=list)
+    total_tokens_used: int = 0
+
+    @property
+    def available_tokens(self) -> int:
+        reserved = self.config.system_prompt_tokens + self.config.response_tokens
+        return self.config.max_context_tokens - reserved
+
+    def add_message(self, role: str, content: str):
+        self.messages.append({"role": role, "content": content})
+        self.total_tokens_used += count_tokens(content)
+
+        # Trigger summarization when history gets long
+        if len(self.messages) > self.config.summary_trigger:
+            self._compress()
+
+    def _compress(self):
+        \"\"\"Summarize older messages, keep recent window.\"\"\"
+        if len(self.messages) <= self.config.recent_window:
+            return
+
+        old_messages = self.messages[:-self.config.recent_window]
+        old_text = "\\n".join(
+            f"{m['role']}: {m['content']}" for m in old_messages
+        )
+
+        # Ask the model to summarize and extract key facts
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",  # Use a cheap model for summarization
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Summarize the following conversation segment. "
+                        "Preserve: decisions made, user preferences, task progress, "
+                        "and any constraints. Output JSON with keys: "
+                        "summary (string), key_facts (list of strings)."
+                    ),
+                },
+                {"role": "user", "content": old_text},
+            ],
+            temperature=0.1,
+        )
+
+        import json
+        try:
+            result = json.loads(response.choices[0].message.content)
+            self.summary = result.get("summary", "")
+            new_facts = result.get("key_facts", [])
+            # Deduplicate key facts
+            for fact in new_facts:
+                if fact not in self.key_facts:
+                    self.key_facts.append(fact)
+        except json.JSONDecodeError:
+            self.summary = response.choices[0].message.content
+
+        # Keep only the recent window
+        self.messages = self.messages[-self.config.recent_window:]
+
+    def build_context(self, system_prompt: str) -> list[dict]:
+        \"\"\"Build the full message list for the next API call.\"\"\"
+        context = [{"role": "system", "content": system_prompt}]
+
+        # Inject memory context if we have it
+        if self.summary or self.key_facts:
+            memory_block = "## Conversation Memory\\n"
+            if self.summary:
+                memory_block += f"**Summary of earlier conversation:**\\n{self.summary}\\n\\n"
+            if self.key_facts:
+                memory_block += "**Key facts:**\\n"
+                memory_block += "\\n".join(f"- {f}" for f in self.key_facts)
+            context.append({"role": "system", "content": memory_block})
+
+        # Add recent messages
+        context.extend(self.messages)
+
+        # Final token check — trim if over budget
+        while count_message_tokens(context) > self.available_tokens and len(context) > 2:
+            context.pop(1)  # Remove oldest non-system message
+
+        return context
+
+    def get_stats(self) -> dict:
+        context = self.build_context("test")
+        return {
+            "messages_in_window": len(self.messages),
+            "summary_length": count_tokens(self.summary),
+            "key_facts": len(self.key_facts),
+            "context_tokens": count_message_tokens(context),
+            "available_tokens": self.available_tokens,
+            "total_tokens_used": self.total_tokens_used,
+        }
+
+# Usage
+memory = AgentMemory()
+memory.add_message("user", "I want to build a RAG system for legal documents.")
+memory.add_message("assistant", "Great choice. What document formats will you ingest?")
+memory.add_message("user", "PDFs and Word docs, about 10,000 documents total.")
+# ... after many more turns, older messages get summarized automatically
+
+stats = memory.get_stats()
+print(f"Context tokens: {stats['context_tokens']} / {memory.available_tokens}")
+```
+
+The key design choices: summarization uses a cheap model (gpt-4o-mini) to save cost, key facts are deduplicated and persist across summaries, and there is a hard token budget enforced at build time.
+
+### Common mistakes
+
+1. **No token budgeting.** You send the full history until the API returns a context length error. By then you have already paid for the failed request.
+2. **Summarizing with the expensive model.** Summarization is a low-stakes task. Use a cheap, fast model and save your budget for the agent's actual reasoning.
+3. **Losing the user's original goal.** If the user's first message states the objective, make sure it survives summarization — either as a key fact or by always including the first message.
+4. **No persistence layer.** When the agent restarts, all memory is lost. Store summaries and key facts in a database keyed by session or user ID.
+5. **Over-summarizing.** If you summarize every 5 messages, you spend as much on summarization as on the actual task. Find the right trigger threshold for your use case.
+
+### Try it yourself
+
+Build a chatbot with the hybrid memory manager above. Have a 30-turn conversation with it about a technical topic, then check the stats. Can the agent still recall decisions from turn 3 at turn 30? Experiment with different `recent_window` and `summary_trigger` values to find the sweet spot for your use case.
+""",
+            },
+            {
+                "title": "Benchmarking and guardrails",
+                "summary": "Build evaluation harnesses to score agent task completion and implement safety guardrails for production agent systems.",
+                "estimated_minutes": 40,
+                "content_md": """## Benchmarking and guardrails
+
+### Why this matters
+
+An agent that works in your demo might fail 40% of the time in production. Without benchmarks, you will not know until users complain. Without guardrails, failures can mean the agent sends the wrong email, deletes the wrong file, or generates harmful content. Evaluation and safety are not nice-to-haves — they are the difference between a demo and a product.
+
+As an AI engineer, you will spend a significant portion of your time on evaluation. Not because it is glamorous, but because it is the only way to make changes confidently. When you swap a model, adjust a prompt, or add a new tool, benchmarks tell you whether things got better or worse. Guardrails tell you the system stays safe regardless.
+
+### Core concepts
+
+**Task-level evaluation.** For agents, accuracy on individual responses is not enough. You care about task completion: did the agent achieve the user's goal across all steps? This requires test cases with defined inputs, expected outcomes, and scoring criteria.
+
+**Scoring dimensions.** A single pass/fail is too coarse. Score separately on:
+- **Correctness** — Did the agent produce the right answer or take the right action?
+- **Efficiency** — How many steps and tokens did it take?
+- **Tool use accuracy** — Did it call the right tools with the right arguments?
+- **Safety** — Did it stay within bounds and avoid harmful outputs?
+
+**Cost tracking.** Every agent run has a dollar cost. Track tokens per model per run, and compute a cost-per-task metric. When you optimize, you want to know if you saved 30% on cost without losing accuracy.
+
+**Input guardrails.** Filter user inputs before they reach the agent. Detect prompt injection attempts, off-topic requests, and inputs that would trigger expensive or dangerous operations.
+
+**Output guardrails.** Validate agent outputs before they reach the user or external systems. Check for PII leakage, harmful content, and responses that violate business rules.
+
+**Action guardrails.** For agents that take real-world actions (sending emails, modifying databases, calling APIs), require confirmation for high-risk actions, set rate limits, and maintain an audit log.
+
+### Working example
+
+Here is a test harness that scores agent task completion across multiple dimensions, with cost tracking.
+
+```python
+import json
+import time
+from dataclasses import dataclass, field
+from typing import Callable
+
+@dataclass
+class TestCase:
+    name: str
+    input: str
+    expected_outcome: str
+    expected_tool_calls: list[str] = field(default_factory=list)
+    max_steps: int = 10
+    max_cost_usd: float = 0.50
+
+@dataclass
+class RunResult:
+    output: str
+    tool_calls_made: list[str]
+    steps: int
+    total_tokens: int
+    cost_usd: float
+    duration_seconds: float
+
+@dataclass
+class Score:
+    test_name: str
+    correctness: float     # 0.0 to 1.0
+    efficiency: float      # 0.0 to 1.0
+    tool_accuracy: float   # 0.0 to 1.0
+    safety_pass: bool
+    cost_usd: float
+    duration_seconds: float
+
+    @property
+    def overall(self) -> float:
+        if not self.safety_pass:
+            return 0.0
+        return (self.correctness * 0.5 + self.efficiency * 0.25 + self.tool_accuracy * 0.25)
+
+# --- Cost calculation ---
+COST_PER_1K = {
+    "gpt-4o": {"input": 0.0025, "output": 0.01},
+    "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
+}
+
+def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    rates = COST_PER_1K.get(model, COST_PER_1K["gpt-4o"])
+    return (input_tokens / 1000 * rates["input"]) + (output_tokens / 1000 * rates["output"])
+
+# --- Guardrails ---
+BLOCKED_PATTERNS = [
+    "DROP TABLE", "DELETE FROM", "rm -rf",
+    "password", "credit card", "SSN",
+]
+
+def check_input_guardrail(user_input: str) -> tuple[bool, str]:
+    \"\"\"Return (is_safe, reason).\"\"\"
+    for pattern in BLOCKED_PATTERNS:
+        if pattern.lower() in user_input.lower():
+            return False, f"Blocked pattern detected: {pattern}"
+    if len(user_input) > 10_000:
+        return False, "Input too long (max 10,000 chars)"
+    return True, "OK"
+
+def check_output_guardrail(output: str) -> tuple[bool, str]:
+    \"\"\"Check agent output for safety issues.\"\"\"
+    import re
+    # Check for PII patterns
+    if re.search(r'\\b\\d{3}-\\d{2}-\\d{4}\\b', output):  # SSN pattern
+        return False, "Potential SSN detected in output"
+    if re.search(r'\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b', output):
+        return False, "Potential credit card number in output"
+    return True, "OK"
+
+# --- Scoring ---
+def score_run(test: TestCase, result: RunResult, judge_fn: Callable) -> Score:
+    \"\"\"Score a single test run across all dimensions.\"\"\"
+    # Correctness: use an LLM judge or deterministic check
+    correctness = judge_fn(test.expected_outcome, result.output)
+
+    # Efficiency: ratio of actual steps to max allowed
+    efficiency = max(0.0, 1.0 - (result.steps / test.max_steps))
+
+    # Tool accuracy: overlap between expected and actual tool calls
+    if test.expected_tool_calls:
+        expected_set = set(test.expected_tool_calls)
+        actual_set = set(result.tool_calls_made)
+        if expected_set:
+            precision = len(expected_set & actual_set) / max(len(actual_set), 1)
+            recall = len(expected_set & actual_set) / len(expected_set)
+            tool_accuracy = 2 * (precision * recall) / max(precision + recall, 0.001)
+        else:
+            tool_accuracy = 1.0
+    else:
+        tool_accuracy = 1.0
+
+    # Safety: check output guardrails
+    safety_pass, _ = check_output_guardrail(result.output)
+
+    return Score(
+        test_name=test.name,
+        correctness=correctness,
+        efficiency=efficiency,
+        tool_accuracy=tool_accuracy,
+        safety_pass=safety_pass,
+        cost_usd=result.cost_usd,
+        duration_seconds=result.duration_seconds,
+    )
+
+# --- Test harness ---
+def run_benchmark(
+    agent_fn: Callable[[str], RunResult],
+    test_cases: list[TestCase],
+    judge_fn: Callable[[str, str], float],
+) -> dict:
+    \"\"\"Run all test cases and return aggregate results.\"\"\"
+    scores = []
+    for test in test_cases:
+        # Input guardrail
+        is_safe, reason = check_input_guardrail(test.input)
+        if not is_safe:
+            print(f"  SKIP {test.name}: {reason}")
+            continue
+
+        print(f"  Running: {test.name}...", end=" ")
+        start = time.time()
+        result = agent_fn(test.input)
+        result.duration_seconds = time.time() - start
+
+        score = score_run(test, result, judge_fn)
+        scores.append(score)
+        print(f"score={score.overall:.2f} cost=${score.cost_usd:.4f}")
+
+    # Aggregate
+    if not scores:
+        return {"error": "No tests completed"}
+
+    return {
+        "total_tests": len(scores),
+        "avg_overall": sum(s.overall for s in scores) / len(scores),
+        "avg_correctness": sum(s.correctness for s in scores) / len(scores),
+        "avg_efficiency": sum(s.efficiency for s in scores) / len(scores),
+        "avg_tool_accuracy": sum(s.tool_accuracy for s in scores) / len(scores),
+        "safety_pass_rate": sum(s.safety_pass for s in scores) / len(scores),
+        "total_cost_usd": sum(s.cost_usd for s in scores),
+        "avg_duration_s": sum(s.duration_seconds for s in scores) / len(scores),
+        "scores": [
+            {"name": s.test_name, "overall": s.overall, "cost": s.cost_usd}
+            for s in scores
+        ],
+    }
+
+# --- Example usage ---
+test_suite = [
+    TestCase(
+        name="simple_lookup",
+        input="What is the status of order ORD-12345?",
+        expected_outcome="Order status with tracking information",
+        expected_tool_calls=["lookup_order"],
+        max_steps=3,
+    ),
+    TestCase(
+        name="multi_step_research",
+        input="Compare the pricing of AWS and GCP for hosting a vector database",
+        expected_outcome="Comparison with specific pricing data from both providers",
+        expected_tool_calls=["web_search", "web_search"],
+        max_steps=6,
+    ),
+]
+
+# Run with your agent function and a judge
+# results = run_benchmark(my_agent, test_suite, my_judge_fn)
+# print(json.dumps(results, indent=2))
+```
+
+This harness separates concerns cleanly: test cases define expectations, guardrails filter inputs and outputs, scoring covers multiple dimensions, and cost tracking is built in from the start. In production, you would store results in a database, track them over time, and trigger alerts when scores drop.
+
+### Common mistakes
+
+1. **Testing only the happy path.** Your benchmark should include edge cases, ambiguous inputs, and adversarial inputs. If you only test "What is 2+2?", you will not find the real failures.
+2. **No cost tracking.** You ship an agent that costs $2 per query without realizing it until the invoice arrives. Track cost per test from day one.
+3. **Binary scoring.** Pass/fail misses nuance. An agent that gets 80% of the answer right should score differently from one that is completely wrong.
+4. **Guardrails as an afterthought.** Adding safety checks after deployment means unsafe outputs already reached users. Build guardrails into the evaluation pipeline from the start.
+5. **Not running benchmarks on every change.** Evaluation only works if you run it consistently. Add your benchmark suite to CI so every prompt change, model swap, or tool update gets scored automatically.
+
+### Try it yourself
+
+Create a test suite of 5 cases for an agent you are building (or plan to build). Include at least one edge case and one adversarial input. Implement the scoring harness above and run your agent against the suite. Then change something — the model, a prompt, a tool — and re-run. Did the scores change? That is the feedback loop that makes agent development systematic instead of ad hoc.
+""",
+            },
         ],
     },
     {
