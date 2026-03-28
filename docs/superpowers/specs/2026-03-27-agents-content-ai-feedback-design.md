@@ -26,7 +26,7 @@ All portal content is currently static (hand-authored in `backend/app/seed/data.
 
 ## Architecture Decision
 
-**Option A (now)**: Direct API service — thin `AIService` wrapping Anthropic SDK with structured prompt templates. SSE streaming to frontend.
+**Option A (now)**: Direct API service — thin `AIService` wrapping Anthropic SDK with structured prompt templates. Synchronous JSON responses (SSE deferred to future free-text features).
 
 **Option C (future evolution)**: Agent-based generation using Claude Agent SDK with tools for reading curriculum, checking mastery state, and generating contextual content.
 
@@ -121,21 +121,32 @@ Only `grade_exercise` is wired up this iteration. Others are method stubs docume
     "should_retry": true/false
   }
   ```
-- Streams via SSE for real-time feedback display
+- Returns synchronous JSON response (SSE deferred to future free-text features)
 
 ### New Endpoint
 
 `POST /api/v1/exercises/{exercise_id}/ai-feedback`
 - Accepts: `{ "code": "string" }`
-- Streams: SSE events in this format:
+- Returns: JSON response (synchronous). SSE streaming deferred to future iteration.
+  **Rationale**: Claude returns structured JSON as a complete response — field-by-field SSE streaming of structured output adds complexity without benefit for v1. SSE streaming will be added when we implement free-text features (deep-dives, interview coaching) where progressive rendering improves UX.
+  ```json
+  {
+    "id": 123,
+    "feature": "exercise_grade",
+    "reference_id": 1,
+    "cached": false,
+    "strengths": ["..."],
+    "issues": ["..."],
+    "suggestions": ["..."],
+    "example_fixes": "markdown with code blocks",
+    "score": 85,
+    "should_retry": false,
+    "model": "claude-sonnet-4-20250514",
+    "input_tokens": 1200,
+    "output_tokens": 800,
+    "latency_ms": 3200
+  }
   ```
-  event: chunk
-  data: {"field": "strengths|issues|suggestions|example_fixes", "content": "..."}
-
-  event: done
-  data: {"score": 85, "should_retry": false, "feedback_id": 123}
-  ```
-  Frontend accumulates `chunk` events by field, then uses `done` to finalize the display.
 - Stores: final feedback saved to `ai_feedback` table, linked to `UserExerciseAttempt`
 - Rate limit: simple per-minute Redis counter using existing Redis instance (cost protection)
 - Daily token budget: configurable cap (default 100k tokens/day) with hard cutoff returning "daily limit reached" error
@@ -238,14 +249,14 @@ The `ai_feedback` table supports agent evolution:
 - Add `ANTHROPIC_API_KEY` to config (with configurable model name and daily token budget)
 - Create `ai_feedback` table (SQLAlchemy model + Alembic migration)
 - Implement `AIService.grade_exercise()`
-- Add `POST /exercises/{id}/ai-feedback` endpoint with SSE streaming
+- Add `POST /exercises/{id}/ai-feedback` endpoint (sync JSON response)
 - Add caching + rate limiting using existing Redis instance
 - Pin exercise count to 8 (more can be added later)
 
 **Note**: Alembic migration must run before the endpoint is deployed. The deploy script should run `alembic upgrade head` as part of startup.
 
 ### Batch 3: Frontend AI Feedback UX
-- Update exercise detail page with streaming feedback component
+- Update exercise detail page with AI feedback display component
 - Add retry flow (keep code, show "Try Again")
 - Add attempt history with AI feedback display
 - Add fallback to keyword matching when API unavailable
@@ -262,7 +273,7 @@ The `ai_feedback` table supports agent evolution:
 
 **Backend (new):**
 - `backend/app/services/ai_service.py` — Claude API wrapper
-- `backend/app/api/v1/routes/ai_feedback.py` — SSE endpoint
+- `backend/app/api/v1/routes/ai_feedback.py` — AI grading endpoint
 
 **Backend (modify):**
 - `backend/app/seed/data.py` — Agent content enrichment
