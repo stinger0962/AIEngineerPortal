@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import enum
 from datetime import date, datetime
 from typing import Dict, List, Optional
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -104,6 +106,36 @@ class UserExerciseAttempt(Base):
     status: Mapped[str] = mapped_column(String(50))
     score: Mapped[float] = mapped_column(Float)
     attempted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ai_feedback_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("ai_feedback.id"), nullable=True
+    )
+
+
+class AIFeedbackFeature(str, enum.Enum):
+    """Discriminator for polymorphic reference_id mapping."""
+    exercise_grade = "exercise_grade"
+    deep_dive = "deep_dive"
+    variation = "variation"
+    interview_coach = "interview_coach"
+
+
+class AIFeedback(Base):
+    __tablename__ = "ai_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    feature: Mapped[str] = mapped_column(String(30), nullable=False)
+    reference_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    response_json: Mapped[Optional[Dict]] = mapped_column(JSONB, nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow
+    )
 
 
 class KnowledgeArticle(Base):
