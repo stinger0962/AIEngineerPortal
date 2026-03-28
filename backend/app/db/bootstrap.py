@@ -4,6 +4,15 @@ from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 
+PHASE_FIVE_COLUMN_PATCHES = {
+    "exercise_attempts": [
+        (
+            "ai_feedback_id",
+            "ALTER TABLE exercise_attempts ADD COLUMN ai_feedback_id INTEGER REFERENCES ai_feedback(id)",
+        ),
+    ],
+}
+
 PHASE_TWO_COLUMN_PATCHES = {
     "news_items": [
         ("is_seeded", "ALTER TABLE news_items ADD COLUMN is_seeded BOOLEAN NOT NULL DEFAULT FALSE"),
@@ -29,7 +38,8 @@ def apply_runtime_schema_patches(engine: Engine) -> None:
         return
 
     with engine.begin() as connection:
-        for table_name, patches in PHASE_TWO_COLUMN_PATCHES.items():
+        all_patches = {**PHASE_TWO_COLUMN_PATCHES, **PHASE_FIVE_COLUMN_PATCHES}
+        for table_name, patches in all_patches.items():
             if table_name not in existing_tables:
                 continue
             existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
