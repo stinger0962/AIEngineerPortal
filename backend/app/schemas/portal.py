@@ -105,6 +105,8 @@ class ExerciseOut(PortalBase):
     next_exercise_id: Optional[int] = None
     next_exercise_slug: Optional[str] = None
     next_exercise_title: Optional[str] = None
+    is_generated: bool = False
+    parent_exercise_id: Optional[int] = None
 
 
 class ExerciseAttemptIn(BaseModel):
@@ -325,6 +327,7 @@ class ProgressSnapshotOut(PortalBase):
 class AIFeedbackRequest(BaseModel):
     """Request body for AI exercise grading."""
     code: str
+    reference_solution: Optional[str] = None
 
 
 class AIFeedbackOut(BaseModel):
@@ -343,3 +346,37 @@ class AIFeedbackOut(BaseModel):
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
     latency_ms: Optional[int] = None
+
+
+class VariationRequest(BaseModel):
+    """Query params for variation generation."""
+    variation_type: str = "scenario"
+
+
+class VariationResponse(BaseModel):
+    """Ephemeral variation returned from generation (not yet saved)."""
+    title: str
+    prompt_md: str
+    starter_code: str
+    solution_code: str
+    explanation_md: str
+    variation_type: str
+    parent_exercise_id: int
+    parent_title: str
+
+
+class PinVariationRequest(BaseModel):
+    """Request to pin a generated variation to the exercise library."""
+    title: str
+    prompt_md: str
+    starter_code: str
+    solution_code: str
+    explanation_md: str
+    variation_type: str
+
+
+class PinVariationResponse(BaseModel):
+    """Response after pinning a variation."""
+    id: int
+    slug: str
+    title: str
