@@ -20,9 +20,16 @@ export default async function PracticePage() {
           <Panel key={exercise.id} className="space-y-4">
             <div className="flex items-center justify-between gap-4">
               <h3 className="text-xl font-semibold text-ink">{exercise.title}</h3>
-              <span className="rounded-full bg-mint px-3 py-1 text-xs uppercase tracking-[0.24em] text-ink">
-                {exercise.difficulty}
-              </span>
+              <div className="flex items-center gap-2">
+                {exercise.is_generated && (
+                  <span className="text-xs bg-ember/10 text-ember px-2 py-0.5 rounded-full">
+                    Generated
+                  </span>
+                )}
+                <span className="rounded-full bg-mint px-3 py-1 text-xs uppercase tracking-[0.24em] text-ink">
+                  {exercise.difficulty}
+                </span>
+              </div>
             </div>
             <p className="text-sm text-ink/70">
               {titleCase(exercise.category)}
