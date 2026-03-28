@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ExerciseAttemptForm } from "@/components/forms/exercise-attempt-form";
+import { VariationSection } from "@/components/forms/variation-section";
 import { Panel } from "@/components/ui/panel";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { portalApi } from "@/lib/api/portal";
@@ -86,6 +87,14 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
           </div>
         ) : null}
         <ExerciseAttemptForm exerciseId={detail.exercise.id} starterCode={detail.exercise.starter_code} />
+      </Panel>
+      <Panel className="space-y-4">
+        <SectionHeading
+          eyebrow="Practice"
+          title="Generate a variation"
+          description="Generate a new exercise variation to deepen understanding or practice a related concept."
+        />
+        <VariationSection exerciseId={detail.exercise.id} />
       </Panel>
       <Panel className="space-y-3">
         <SectionHeading
