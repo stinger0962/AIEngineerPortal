@@ -115,6 +115,35 @@ PRACTICE_PLAYBOOK = {
             "evaluation-and-observability-2",
         ],
     },
+    "agents": {
+        "practice_stage": "Agent architecture patterns",
+        "hint_md": (
+            "Focus on explicit control surfaces — function schemas, state machines, "
+            "and structured outputs. Agents are most useful when the task requires "
+            "dynamic tool selection or multi-step reasoning. Start with the simplest "
+            "pattern (single tool call) before reaching for ReAct loops."
+        ),
+        "review_checklist_json": [
+            "Tool schemas validate inputs and handle errors gracefully",
+            "Agent loop has explicit termination conditions",
+            "State is serializable and inspectable between steps",
+            "Cost and token usage are tracked per invocation",
+            "Fallback behavior exists for tool call failures",
+        ],
+        "success_criteria_json": [
+            "Tools return structured, typed responses",
+            "Agent completes the task within a bounded number of steps",
+            "All tool calls include error handling and retries",
+            "Memory/state management prevents unbounded context growth",
+        ],
+        "related_lesson_slugs": [
+            "ai-agents-and-tools-1",
+            "ai-agents-and-tools-2",
+            "ai-agents-and-tools-3",
+            "ai-agents-and-tools-4",
+            "ai-agents-and-tools-5",
+        ],
+    },
 }
 
 
@@ -134,6 +163,7 @@ def _score_attempt(exercise: Exercise, submitted_code: str) -> tuple[float, str]
         "prompt-formatting": ["system", "user", "context"],
         "retrieval": ["score", "sorted", "reverse"],
         "evaluation": ["score", "coverage", "faithfulness"],
+        "agents": ["tool", "schema", "async", "retry", "state"],
     }
 
     for token in category_expectations.get(exercise.category, []):
