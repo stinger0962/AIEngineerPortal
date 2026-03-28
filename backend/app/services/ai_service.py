@@ -45,14 +45,29 @@ class AIService:
         attempts_history: List[Dict[str, Any]],
     ) -> Dict[str, str]:
         system = (
-            "You are a senior AI engineer reviewing code from a full-stack engineer "
-            "who is learning AI agent patterns. You give specific, actionable feedback "
-            "with example code fixes. You encourage retry when the solution needs work. "
-            "Always respond with valid JSON matching this schema:\n"
-            '{"strengths": ["..."], "issues": ["..."], "suggestions": ["..."], '
-            '"example_fixes": "markdown string with code blocks", '
-            '"score": 0-100, "should_retry": true/false}\n'
-            "Score guide: 85+ solid, 70-84 needs review, <70 retry recommended."
+            "You are reviewing Python code from an experienced full-stack engineer learning "
+            "AI engineering (application-level — agents, RAG, tool use, not ML research).\n\n"
+            "## Review priorities (in order)\n"
+            "1. **Correctness**: Does it solve the problem? Handle edge cases?\n"
+            "2. **AI engineering patterns**: Does it follow current best practices for "
+            "tool design, structured outputs, error handling with LLMs, token management?\n"
+            "3. **Production readiness**: Proper error handling, typing, logging, cost awareness?\n"
+            "4. **Code quality**: Clean, readable, idiomatic Python?\n\n"
+            "## Feedback style\n"
+            "- Be specific: quote the line, explain what's wrong, show the fix\n"
+            "- Teach the WHY: \"This matters because in production agents, X causes Y\"\n"
+            "- Give concrete code examples in `example_fixes`, not vague suggestions\n"
+            "- If the solution works but isn't production-quality, say so and show the upgrade\n"
+            "- Acknowledge what they did well — learning builds on strengths\n\n"
+            "## Output format\n"
+            "Respond with ONLY valid JSON (no markdown fences):\n"
+            '{"strengths": ["specific things done well"], '
+            '"issues": ["specific problems with line references"], '
+            '"suggestions": ["actionable next steps to improve"], '
+            '"example_fixes": "markdown with ```python code blocks showing fixes", '
+            '"score": 0-100, "should_retry": true/false}\n\n'
+            "Score guide: 90+ production-ready, 75-89 works but needs polish, "
+            "60-74 has issues worth fixing, <60 fundamental problems — retry."
         )
 
         user_parts = [
@@ -172,43 +187,76 @@ class AIService:
         """Build prompt for generating an exercise variation."""
         type_instructions = {
             "scenario": (
-                "Generate a variation with a DIFFERENT domain/scenario but the SAME learning objective. "
-                "For example, if the original uses a database, use a weather API instead. "
-                "Keep the same difficulty and the same core pattern being taught."
+                "VARIATION TYPE: Same learning objective, DIFFERENT real-world scenario.\n"
+                "- Change the domain (e.g., if original uses a search API, use a payment gateway, CI/CD pipeline, or IoT sensor feed)\n"
+                "- Keep the same core pattern and difficulty\n"
+                "- The new scenario must introduce its own realistic constraints (rate limits, auth, pagination, error codes)"
             ),
             "concept": (
-                "Generate a DIFFERENT exercise within the same category. "
-                "Teach a different pattern or concept, but keep the same difficulty level. "
-                "The exercise should feel fresh, not like a rephrasing."
+                "VARIATION TYPE: DIFFERENT concept within the same category.\n"
+                "- Teach a different pattern the learner hasn't seen in this seed exercise\n"
+                "- Stay at the same difficulty level but cover NEW ground\n"
+                "- Example shifts: tool registry → tool dependency graph, ReAct loop → plan-then-execute, memory manager → context window optimizer"
             ),
             "harder": (
-                "Generate a HARDER version of this exercise. Add constraints, edge cases, "
-                "or require more sophisticated patterns. The core topic stays the same "
-                "but the implementation demands more engineering skill."
+                "VARIATION TYPE: Same topic, significantly HARDER.\n"
+                "- Add production constraints: concurrent requests, graceful degradation, partial failures, token budget limits\n"
+                "- Require handling edge cases: malformed responses, timeout cascades, retry storms, circular dependencies\n"
+                "- Demand more sophisticated patterns: backpressure, circuit breakers, structured logging, cost tracking"
             ),
         }
 
         system = (
-            "You are a senior AI engineer creating practice exercises for a full-stack engineer "
-            "learning AI agent patterns. Generate a high-quality exercise variation.\n\n"
+            "You are creating a practice exercise for an AI engineer who builds production agent systems.\n\n"
+            "## Who this is for\n"
+            "A senior full-stack engineer transitioning to AI engineering on the APPLICATION side — "
+            "they harness LLMs and agents, they don't train models. They already know Python, APIs, "
+            "and system design. They need to learn: tool design, agent orchestration, RAG patterns, "
+            "evaluation, prompt engineering, cost optimization, and production reliability.\n\n"
+            "## Current AI engineering landscape (use these in exercises)\n"
+            "- Tool/function calling patterns (OpenAI, Anthropic, MCP protocol)\n"
+            "- Agent frameworks: LangGraph, CrewAI, Claude Agent SDK, AutoGen\n"
+            "- Structured outputs with Pydantic validation\n"
+            "- Retrieval-augmented generation (vector DBs, reranking, hybrid search)\n"
+            "- Evaluation: LLM-as-judge, reference-based scoring, human-in-the-loop\n"
+            "- Cost control: token budgets, caching, model routing (expensive vs cheap models)\n"
+            "- Observability: tracing agent steps, logging decisions, measuring latency\n"
+            "- Safety: guardrails, content filtering, prompt injection defense\n\n"
             f"{type_instructions.get(variation_type, type_instructions['scenario'])}\n\n"
-            "Respond with valid JSON matching this schema:\n"
-            '{"title": "short descriptive title", '
-            '"prompt_md": "200+ word problem statement in markdown", '
-            '"starter_code": "Python starter with TODOs and type hints", '
-            '"solution_code": "complete working Python solution", '
-            '"explanation_md": "300+ word explanation with key decisions"}\n\n'
-            "The exercise must feel like real engineering work, not a toy problem."
+            "## Exercise quality requirements\n"
+            "1. **Problem statement**: Real-world motivation (\"You're building X for Y because Z\"). "
+            "Include specific constraints the learner must handle. No toy problems.\n"
+            "2. **Starter code**: Typed Python with clear TODO markers. Include imports, type hints, "
+            "dataclass/Pydantic models, and the function signatures. The learner fills in the logic, "
+            "not the scaffolding.\n"
+            "3. **Solution code**: Production-quality Python. Use proper error handling, logging, "
+            "type hints, and docstrings. Show the BEST way to solve it, not just a working way.\n"
+            "4. **Explanation**: Teach WHY each design decision was made. Cover:\n"
+            "   - Why this pattern over alternatives\n"
+            "   - Common mistakes and how to avoid them\n"
+            "   - How this applies in production agent systems\n"
+            "   - What to watch out for at scale\n\n"
+            "## Output format\n"
+            "Respond with ONLY valid JSON (no markdown fences, no commentary):\n"
+            "{\n"
+            '  "title": "Concise, specific title (not generic)",\n'
+            '  "prompt_md": "Problem statement in markdown. 200-400 words. Include WHY this matters, WHAT to build, and specific CONSTRAINTS.",\n'
+            '  "starter_code": "Python with imports, types, models, function signatures, and TODO comments. 30-80 lines.",\n'
+            '  "solution_code": "Complete, production-quality Python. 50-150 lines.",\n'
+            '  "explanation_md": "Teaching explanation in markdown. 300-600 words. Cover design decisions, mistakes to avoid, production considerations."\n'
+            "}"
         )
 
         user = (
-            f"## Seed Exercise: {seed_exercise.get('title', '')}\n"
-            f"Category: {seed_exercise.get('category', '')}\n"
-            f"Difficulty: {seed_exercise.get('difficulty', '')}\n\n"
-            f"### Problem\n{seed_exercise.get('prompt_md', '')}\n\n"
+            f"## Seed Exercise\n"
+            f"**Title:** {seed_exercise.get('title', '')}\n"
+            f"**Category:** {seed_exercise.get('category', '')}\n"
+            f"**Difficulty:** {seed_exercise.get('difficulty', '')}\n\n"
+            f"### Problem Statement\n{seed_exercise.get('prompt_md', '')}\n\n"
             f"### Starter Code\n```python\n{seed_exercise.get('starter_code', '')}\n```\n\n"
-            f"### Solution\n```python\n{seed_exercise.get('solution_code', '')}\n```\n\n"
-            f"### Explanation\n{seed_exercise.get('explanation_md', '')}"
+            f"### Reference Solution\n```python\n{seed_exercise.get('solution_code', '')}\n```\n\n"
+            f"### Explanation\n{seed_exercise.get('explanation_md', '')}\n\n"
+            "Generate a variation that teaches something genuinely useful for building production AI agent systems."
         )
 
         return {"system": system, "user": user}
