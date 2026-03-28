@@ -93,6 +93,10 @@ class Exercise(Base):
     solution_code: Mapped[str] = mapped_column(Text)
     explanation_md: Mapped[str] = mapped_column(Text)
     tags_json: Mapped[List] = mapped_column(JSON, default=list)
+    is_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+    parent_exercise_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("exercises.id"), nullable=True
+    )
 
 
 class UserExerciseAttempt(Base):

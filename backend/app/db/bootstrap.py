@@ -11,6 +11,16 @@ PHASE_FIVE_COLUMN_PATCHES = {
             "ALTER TABLE exercise_attempts ADD COLUMN ai_feedback_id INTEGER REFERENCES ai_feedback(id)",
         ),
     ],
+    "exercises": [
+        (
+            "is_generated",
+            "ALTER TABLE exercises ADD COLUMN is_generated BOOLEAN DEFAULT FALSE",
+        ),
+        (
+            "parent_exercise_id",
+            "ALTER TABLE exercises ADD COLUMN parent_exercise_id INTEGER REFERENCES exercises(id)",
+        ),
+    ],
 }
 
 PHASE_TWO_COLUMN_PATCHES = {
