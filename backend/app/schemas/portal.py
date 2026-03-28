@@ -320,3 +320,26 @@ class ProgressSnapshotOut(PortalBase):
     projects_completed_count: int
     interview_readiness_score: int
     notes: str
+
+
+class AIFeedbackRequest(BaseModel):
+    """Request body for AI exercise grading."""
+    code: str
+
+
+class AIFeedbackOut(BaseModel):
+    """Response body for AI exercise grading. Not ORM-mapped — constructed from response_json."""
+    id: int
+    feature: str
+    reference_id: int
+    cached: bool = False
+    strengths: List[str] = []
+    issues: List[str] = []
+    suggestions: List[str] = []
+    example_fixes: str = ""
+    score: int = 0
+    should_retry: bool = True
+    model: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    latency_ms: Optional[int] = None
