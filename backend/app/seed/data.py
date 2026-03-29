@@ -3980,11 +3980,36 @@ Create a test suite of 5 cases for an agent you are building (or plan to build).
         "level": "intermediate",
         "estimated_hours": 12,
         "lessons": [
-            {"title": "What to measure in AI systems", "summary": "Break evaluation into answer quality, retrieval quality, latency, and cost.", "content_md": "## Measurement\n\nA single score rarely tells you where a system is actually failing.", "estimated_minutes": 35},
-            {"title": "Designing benchmark datasets", "summary": "Create a small but representative dataset you can trust for regressions.", "content_md": "## Benchmarks\n\nCurated edge cases beat large but noisy evaluation sets.", "estimated_minutes": 40},
-            {"title": "Tracing requests end to end", "summary": "Capture enough runtime data to debug bad outputs later.", "content_md": "## Tracing\n\nWithout traces, AI bugs become anecdotes instead of engineering work.", "estimated_minutes": 35},
-            {"title": "Human review workflows", "summary": "Use spot checks and approvals where automation confidence is weak.", "content_md": "## Human review\n\nA human-in-the-loop design can be a production strength.", "estimated_minutes": 35},
-            {"title": "Portfolio slice: evaluation dashboard", "summary": "Package your metrics and traces into a compelling project story.", "content_md": "## Portfolio move\n\nEvaluation work signals production readiness better than generic demos.", "estimated_minutes": 30},
+            {
+                "title": "Evaluation metrics for LLM outputs",
+                "summary": "Choose the right metric for the right failure mode: accuracy, faithfulness, relevance, toxicity, and when LLM-as-judge beats deterministic scoring.",
+                "estimated_minutes": 40,
+                "content_md": '## Evaluation metrics for LLM outputs\n\n### Why this matters\n\nEvery LLM feature you build needs a measurement plan. The engineering challenge is that LLM quality is not binary -- a response can be partially correct, well-written but unfaithful, or accurate but harmful. Single-number accuracy scores hide the structure of failures. This lesson gives you the vocabulary and tooling to decompose quality into measurable, actionable dimensions.\n\nFor a senior engineer transitioning into AI roles, evaluation fluency is a visible differentiator. Candidates who can specify a metric before writing a prompt signal production thinking.\n\n### Core concepts\n\n**Accuracy and task success.** For tasks with deterministic correct answers -- classification, structured extraction, code generation -- exact-match or schema-validation accuracy is your first metric. It is cheap to compute and easy to track over time.\n\n**Faithfulness (groundedness).** When your system retrieves context before answering -- as in RAG -- faithfulness measures whether the generated answer is supported by the retrieved documents. A faithful answer does not invent facts; every claim traces back to a source chunk. Faithfulness is distinct from correctness: a faithfulness score of 1.0 means the answer is grounded, not that the context was correct.\n\n**Relevance.** Answer relevance measures whether the response actually addresses the user\'s question. A response can be faithful (grounded in context) but irrelevant (the context did not contain what the user needed). Context relevance measures how much of the retrieved context was actually useful for generating the answer.\n\n**Toxicity and safety.** Toxicity scoring uses classifiers (Perspective API, custom fine-tuned models, or LLM-based judges) to detect harmful or inappropriate outputs. In production, you typically score a sample of outputs and alert when toxicity rates exceed a threshold.\n\n**Custom domain metrics.** Most production systems need at least one metric specific to the task. A coding assistant might track whether generated code passes a test suite. A summarization feature might track compression ratio and coverage of key entities. Define these before you ship.\n\n**LLM-as-judge.** When the correct answer is not enumerable -- open-ended generation, nuanced reasoning, style evaluation -- a language model grades the output. The judge receives the question, the response, and a rubric, then returns a score and rationale. Two main patterns:\n\n- *Reference-based*: the judge compares the response to a gold reference answer.\n- *Reference-free*: the judge scores the response against criteria only (coherence, helpfulness, groundedness).\n\nLLM-as-judge scales to tasks where human annotation is prohibitively expensive, but it inherits model biases. Judges tend to prefer longer answers and their own style. Mitigate this with structured rubrics, calibration against human labels, and cross-model judging (do not use GPT-4o to judge GPT-4o outputs uncritically).\n\n**Deterministic scoring.** For structured outputs -- JSON extraction, SQL generation, date parsing -- deterministic scoring is faster, cheaper, and more reproducible than LLM judges. Parse the output, validate against a schema, and compute field-level accuracy.\n\n**When to use which approach:**\n\n| Scenario | Use |\n|---|---|\n| Classification, extraction, structured output | Deterministic exact-match or schema validation |\n| RAG answer quality | Faithfulness + answer relevance (LLM judge or RAGAS) |\n| Open-ended generation quality | LLM-as-judge with explicit rubric |\n| Safety screening | Classifier before LLM call |\n| Regression detection | Deterministic for structured, embedding similarity for text |\n\n### Working example\n\nA self-contained evaluation runner that handles both deterministic and LLM-as-judge scoring:\n\n```python\nfrom dataclasses import dataclass, field\nfrom typing import Callable, Literal\nimport json\n\n\n@dataclass\nclass EvalCase:\n    case_id: str\n    input: str\n    expected: str\n    metadata: dict = field(default_factory=dict)\n\n\n@dataclass\nclass EvalResult:\n    case_id: str\n    score: float\n    passed: bool\n    rationale: str\n    metric: str\n\n\ndef exact_match_scorer(response: str, expected: str) -> EvalResult:\n    norm_r = response.strip().lower()\n    norm_e = expected.strip().lower()\n    score = 1.0 if norm_r == norm_e else 0.0\n    return EvalResult(case_id=\'\', score=score, passed=score == 1.0,\n                      rationale=f\'matched: {score == 1.0}\', metric=\'exact_match\')\n\n\ndef llm_judge_scorer(\n    question: str,\n    response: str,\n    context: str,\n    judge_fn: Callable[[str], str],\n    metric: Literal[\'faithfulness\', \'relevance\', \'helpfulness\'] = \'helpfulness\',\n) -> EvalResult:\n    rubrics = {\n        \'faithfulness\': \'Does the response make only claims supported by the context? Score 1.0 if fully grounded, 0.5 if partial, 0.0 if not.\',\n        \'relevance\': \'Does the response directly address the question? Score 1.0 if fully on-topic, 0.5 if partial, 0.0 if off-topic.\',\n        \'helpfulness\': \'Would a real user find this helpful? Score 1.0 if clearly helpful, 0.5 if partly useful, 0.0 if not.\',\n    }\n    judge_prompt = (\n        f\'Evaluate this response.\\nQuestion: {question}\\nContext: {context}\\nResponse: {response}\\n\\n\'\n        f\'Rubric: {rubrics[metric]}\\n\\nReturn JSON: {{"score": float, "rationale": str}}\'\n    )\n    raw = judge_fn(judge_prompt)\n    try:\n        result = json.loads(raw)\n        score = max(0.0, min(1.0, float(result[\'score\'])))\n        rationale = result.get(\'rationale\', \'\')\n    except (json.JSONDecodeError, KeyError, ValueError):\n        score, rationale = 0.5, f\'Parse error: {raw[:100]}\'\n    return EvalResult(case_id=\'\', score=score, passed=score >= 0.7, rationale=rationale, metric=metric)\n\n\ndef run_eval(\n    cases: list[EvalCase],\n    generate_fn: Callable[[str], str],\n    score_fn: Callable[[str, EvalCase], EvalResult],\n) -> dict:\n    results = []\n    for case in cases:\n        response = generate_fn(case.input)\n        result = score_fn(response, case)\n        result.case_id = case.case_id\n        results.append(result)\n    total = len(results)\n    passed = sum(1 for r in results if r.passed)\n    avg_score = sum(r.score for r in results) / total if total > 0 else 0.0\n    return {\n        \'total\': total, \'passed\': passed,\n        \'pass_rate\': passed / total if total > 0 else 0.0,\n        \'avg_score\': avg_score,\n        \'failures\': [{\'case_id\': r.case_id, \'score\': r.score} for r in results if not r.passed],\n    }\n```\n\nThe key design: scorers are pure functions that take a response and return a typed result. The runner separates generation from scoring, so you can swap scorers without touching the generation logic.\n\n### Common mistakes\n\n1. **Using one metric for everything.** A single accuracy score averaged across all cases hides the pattern of failures. A system that fails 100% of multi-hop questions and passes 100% of simple lookups looks like 50% accuracy -- which tells you nothing actionable.\n\n2. **LLM judge without a rubric.** Asking a model to rate quality without specifying criteria produces inconsistent, biased results. Rubrics should be specific enough that two humans reading them would make the same scoring decision.\n\n3. **Not calibrating your judge.** Before trusting LLM-as-judge scores, label 30-50 cases manually and compare. If they disagree on more than 20% of cases, your rubric needs work.\n\n4. **Ignoring the cost of scoring.** Running GPT-4o as a judge on every production response is expensive. Score 5-10% of traffic with the expensive judge; run cheaper deterministic checks on everything.\n\n5. **Treating toxicity as a binary flag.** Toxicity exists on a spectrum. Set thresholds relative to your use case.\n\n### Try it yourself\n\nImplement a `faithfulness_scorer` function that takes a response string and a list of context chunks. Using an LLM judge, score whether every factual claim in the response is supported by at least one context chunk. Return a `FaithfulnessResult` dataclass with: a score (0.0-1.0), a list of claims the judge identified, and a list of unsupported claims. Test it on three cases: one fully faithful response, one with one hallucinated fact, and one that ignores the context entirely.',
+            },
+            {
+                "title": "Building eval harnesses",
+                "summary": "Construct golden datasets, regression test suites, and A/B evaluation pipelines that make prompt changes safe to ship.",
+                "estimated_minutes": 45,
+                "content_md": "## Building eval harnesses\n\n### Why this matters\n\nA prompt change that improves 80% of cases but breaks the 20% you care about most is not an improvement -- it is a regression you did not catch. Eval harnesses are the infrastructure that turns 'I think this is better' into 'I can prove this is better on the cases that matter, and nothing important got worse.'\n\nFor engineers coming from web development, this is analogous to a test suite. The difference is that LLM outputs are non-deterministic and the 'correct' answer is often a spectrum rather than a boolean. The discipline is the same: define what correct means before you change anything, then measure it after.\n\n### Core concepts\n\n**Golden datasets.** A golden dataset is a curated collection of test cases where you have already decided what the correct output looks like. Each case has: an input (the user query or prompt), a reference output (the expected response), and metadata (category, difficulty, known edge cases). 'Golden' signals that these cases are trusted -- they represent the behaviors you are not willing to regress on.\n\nCharacteristics of a good golden dataset:\n- *Representative*: covers the real distribution of inputs your feature receives, not just easy cases\n- *Challenging*: includes edge cases, ambiguous queries, and cases where naive approaches fail\n- *Balanced*: has enough examples of each important category to detect category-level regressions\n- *Small enough to run fast*: 50-200 cases is usually enough to catch regressions without making CI slow\n\n**Regression testing.** Once you have a golden dataset, every significant prompt change, model swap, or configuration update should run the full eval suite before shipping. A regression is any case that passed before and fails after. Track the regression rate as a deployment gate.\n\n**A/B evaluation.** Head-to-head comparison between two prompt variants on the same dataset. Report: win rate (variant B won more cases than A), tie rate, and loss rate. A 52% win rate on 50 cases is noise, not signal.\n\n**Eval harness architecture.** A production eval harness has four layers:\n1. *Dataset loader*: reads cases from a file or database, applies filters\n2. *Generation layer*: calls the LLM feature under test\n3. *Scoring layer*: applies metrics (deterministic, LLM judge, or both) to each response\n4. *Reporting layer*: aggregates scores, compares to baseline, flags regressions\n\n**Integrating with CI.** Run the golden set on every pull request. Gate merges on the regression threshold. Store results with the git commit hash, model version, and timestamp.\n\n### Working example\n\nA complete eval harness for a Q&A feature:\n\n```python\nimport json\nimport time\nfrom dataclasses import dataclass, field\nfrom pathlib import Path\nfrom typing import Callable\n\n\n@dataclass\nclass EvalCase:\n    case_id: str\n    question: str\n    reference_answer: str\n    category: str\n    context_chunks: list[str] = field(default_factory=list)\n\n\n@dataclass\nclass RunResult:\n    case_id: str\n    category: str\n    response: str\n    score: float\n    passed: bool\n    latency_ms: int\n\n\nclass EvalHarness:\n    def __init__(\n        self,\n        dataset_path: str,\n        generate_fn: Callable[[str, list[str]], str],\n        score_fn: Callable[[str, str, list[str]], float],\n        pass_threshold: float = 0.7,\n        regression_threshold: float = 0.05,\n    ):\n        self.dataset_path = Path(dataset_path)\n        self.generate_fn = generate_fn\n        self.score_fn = score_fn\n        self.pass_threshold = pass_threshold\n        self.regression_threshold = regression_threshold\n\n    def load_cases(self, categories: list[str] | None = None) -> list[EvalCase]:\n        cases = []\n        with open(self.dataset_path) as f:\n            for line in f:\n                raw = json.loads(line)\n                case = EvalCase(**raw)\n                if categories is None or case.category in categories:\n                    cases.append(case)\n        return cases\n\n    def run(self, cases: list[EvalCase]) -> list[RunResult]:\n        results = []\n        for case in cases:\n            t0 = time.monotonic()\n            response = self.generate_fn(case.question, case.context_chunks)\n            latency_ms = int((time.monotonic() - t0) * 1000)\n            score = self.score_fn(response, case.reference_answer, case.context_chunks)\n            results.append(RunResult(\n                case_id=case.case_id, category=case.category, response=response,\n                score=score, passed=score >= self.pass_threshold, latency_ms=latency_ms,\n            ))\n        return results\n\n    def report(self, results: list[RunResult], baseline: dict | None = None) -> dict:\n        total = len(results)\n        passed = sum(1 for r in results if r.passed)\n        avg_score = sum(r.score for r in results) / total if total else 0.0\n        avg_latency = sum(r.latency_ms for r in results) / total if total else 0.0\n        by_category: dict[str, list[float]] = {}\n        for r in results:\n            by_category.setdefault(r.category, []).append(r.score)\n        rep = {\n            'total': total,\n            'pass_rate': passed / total if total else 0.0,\n            'avg_score': avg_score,\n            'avg_latency_ms': avg_latency,\n            'by_category': {cat: sum(s)/len(s) for cat, s in by_category.items()},\n            'failures': [r.case_id for r in results if not r.passed],\n            'by_case': {r.case_id: r.score for r in results},\n        }\n        if baseline:\n            delta = avg_score - baseline.get('avg_score', avg_score)\n            rep['vs_baseline'] = {'score_delta': delta, 'is_regression': delta < -self.regression_threshold}\n        return rep\n```\n\nUsage in CI:\n\n```python\nharness = EvalHarness(dataset_path='eval/golden_set.jsonl',\n                      generate_fn=my_qa_feature, score_fn=llm_faithfulness_score)\ncases = harness.load_cases()\nresults = harness.run(cases)\nreport = harness.report(results, baseline=load_baseline_report())\nif report.get('vs_baseline', {}).get('is_regression'):\n    raise SystemExit('Eval regression detected. Review before merging.')\n```\n\n### Common mistakes\n\n1. **Building the golden set from easy cases only.** If your dataset is all simple queries the model already handles well, regression detection is useless. Actively seed with hard and edge cases.\n\n2. **Not storing eval results.** Running evals without persisting results means you cannot trend over time. Store results with the git commit hash, model version, and timestamp.\n\n3. **Treating the eval suite as a one-time artifact.** Eval datasets go stale. Add new cases when users report failures.\n\n4. **Using the same LLM to generate and judge.** Self-judging inflates scores. Use a different model, or a deterministic scorer, for at least half your eval metrics.\n\n5. **No latency tracking in the harness.** Prompt changes that improve quality but double latency are not free improvements.\n\n### Try it yourself\n\nBuild a golden dataset of 20 test cases for a hypothetical document Q&A feature. Each case should have a question, a reference answer, a context chunk, and a category label. Then implement a `run_regression_check` function that takes two sets of eval results (baseline and current), identifies any case where the current score is more than 0.15 lower than the baseline score, and returns those cases with their delta.",
+            },
+            {
+                "title": "Tracing and logging AI requests",
+                "summary": "Build structured traces that let you debug bad outputs, measure latency, and audit token spend without leaking sensitive data.",
+                "estimated_minutes": 40,
+                "content_md": "## Tracing and logging AI requests\n\n### Why this matters\n\nWhen a traditional API returns a wrong result, you look at the database query and the request payload. When an LLM feature returns a bad response, you need to reconstruct the entire call: what was in the prompt, what context was retrieved, what the model returned, how long it took, and how many tokens it used. Without structured tracing, this reconstruction is guesswork.\n\nThe engineering reality: 80% of AI debugging sessions are about understanding what the model actually received, not what you intended to send. Tracing closes that gap. It also gives you the data you need for cost attribution, quality monitoring, and anomaly detection.\n\n### Core concepts\n\n**Structured traces vs. flat logs.** A flat log line like `INFO: LLM call completed in 1.2s` is nearly useless for debugging. A structured trace captures the event as a typed object with named fields that can be queried, aggregated, and correlated.\n\n**Span-based tracing.** Borrowed from distributed systems (OpenTelemetry), spans represent units of work with a start time, end time, and attributes. A single LLM feature request might span:\n\n```\nrequest_span (root)\n  |- retrieval_span (vector search + re-ranking)\n  |- prompt_assembly_span (context injection, token counting)\n  |- llm_call_span (provider API call)\n  |- post_processing_span (parsing, validation)\n```\n\nEach span records its own latency, so you can see where time is actually spent.\n\n**What to log in an LLM trace:**\n\n| Field | Why |\n|---|---|\n| `trace_id` | Correlate across spans and services |\n| `model` | Know which model version was used |\n| `prompt_tokens` | Cost attribution |\n| `completion_tokens` | Cost attribution |\n| `total_latency_ms` | SLO monitoring |\n| `finish_reason` | Detect `max_tokens` truncation |\n| `feature_name` | Which product feature made this call |\n| `user_id` (hashed) | Per-user analysis without PII in logs |\n\n**What NOT to log by default:**\n- Raw user messages: may contain PII or sensitive business data\n- Full system prompts: may contain trade secrets or security-relevant instructions\n- Complete responses: may contain personal information echoed from user input\n\nLog these only with explicit opt-in, appropriate redaction, and retention controls.\n\n**Privacy-preserving tracing.** Design your trace schema with a `log_level` field: `minimal` (metadata only), `standard` (truncated prompts), and `debug` (full content, retention-limited). Never log full content by default in production.\n\n**Trace correlation.** Attach a `trace_id` at the edge of your system and propagate it through every downstream call. OpenTelemetry provides standard headers (`traceparent`) for this propagation.\n\n### Working example\n\nA complete structured tracing implementation:\n\n```python\nimport time\nimport uuid\nfrom contextlib import contextmanager\nfrom dataclasses import dataclass, field\nfrom typing import Generator\n\n\n@dataclass\nclass Span:\n    span_id: str\n    trace_id: str\n    name: str\n    start_ms: int\n    end_ms: int = 0\n    latency_ms: int = 0\n    attributes: dict = field(default_factory=dict)\n\n    def set(self, key: str, value) -> None:\n        self.attributes[key] = value\n\n    def to_dict(self) -> dict:\n        return {'span_id': self.span_id, 'trace_id': self.trace_id, 'name': self.name,\n                'start_ms': self.start_ms, 'end_ms': self.end_ms,\n                'latency_ms': self.latency_ms, **self.attributes}\n\n\nclass Tracer:\n    def __init__(self, trace_id: str | None = None, feature_name: str = ''):\n        self.trace_id = trace_id or str(uuid.uuid4())\n        self.feature_name = feature_name\n        self._spans: list[Span] = []\n\n    @contextmanager\n    def span(self, name: str, **attributes) -> Generator[Span, None, None]:\n        s = Span(span_id=str(uuid.uuid4()), trace_id=self.trace_id, name=name,\n                 start_ms=int(time.time() * 1000), attributes={**attributes})\n        try:\n            yield s\n        finally:\n            s.end_ms = int(time.time() * 1000)\n            s.latency_ms = s.end_ms - s.start_ms\n            self._spans.append(s)\n\n    def export(self) -> list[dict]:\n        return sorted([s.to_dict() for s in self._spans], key=lambda d: d['start_ms'])\n\n\n# Usage in a feature handler\ndef handle_qa_request(question: str, trace_id: str) -> dict:\n    tracer = Tracer(trace_id=trace_id, feature_name='document_qa')\n\n    with tracer.span('retrieval', index='docs_v2') as ret_span:\n        chunks = retrieve_chunks(question)\n        ret_span.set('num_results', len(chunks))\n\n    with tracer.span('llm_call', model='claude-3-5-sonnet-20241022') as llm_span:\n        response = call_llm(question, chunks)\n        llm_span.set('prompt_tokens', response.usage.input_tokens)\n        llm_span.set('completion_tokens', response.usage.output_tokens)\n\n    write_to_observability_store(tracer.export())\n    return {'answer': response.content[0].text, 'trace_id': tracer.trace_id}\n```\n\nThe `try/finally` in the context manager is the critical detail: `end_ms` and `latency_ms` are always set even if the body raises an exception. Error spans have accurate timing, which is important for diagnosing slow failures.\n\n### Common mistakes\n\n1. **Logging full prompts to general application logs.** System prompts and user messages often contain sensitive data. Use a separate, access-controlled store for prompt content.\n\n2. **Not propagating trace IDs.** If the trace ID does not flow from the HTTP layer to the LLM call, you cannot reconstruct a request after the fact.\n\n3. **No token tracking.** Token counts are the primary cost driver. If you cannot query 'which feature used the most tokens last week,' you are flying blind on cost.\n\n4. **Truncating responses to zero.** Logging no response content makes debugging impossible. A 200-character preview is usually enough to spot the failure without significant privacy risk.\n\n5. **Missing `finish_reason` logging.** When `finish_reason` is `max_tokens`, the model's output was cut short -- a silent quality failure that looks like a normal response without this field.\n\n### Try it yourself\n\nImplement a `ContextualTrace` class that wraps a function call and automatically records span start time, end time, latency, and any exception. It should work as a context manager:\n\n```python\nwith ContextualTrace(collector, span_type='llm_call', model='gpt-4o') as span:\n    response = openai_client.chat.completions.create(...)\n    span.record_response(response)\n```\n\nOn exit, the span should be automatically recorded to the collector whether or not an exception occurred. If an exception occurred, capture the error message and re-raise.",
+            },
+            {
+                "title": "Production monitoring for AI features",
+                "summary": "Build dashboards, alerts, and drift detection that catch quality degradation before users do.",
+                "estimated_minutes": 40,
+                "content_md": "## Production monitoring for AI features\n\n### Why this matters\n\nLLM features degrade in ways that traditional software does not. A web API either returns a 200 or it does not. An LLM feature can return a 200 with a response that is confidently wrong, subtly less helpful than it was last week, or increasingly expensive to generate. None of those failure modes show up in your error rate.\n\nThe engineering problem: AI quality is gradual and non-deterministic. A prompt that worked well in March may work less well in June because the underlying model was updated, the distribution of user queries shifted, or the retrieved context became stale. Production monitoring is the discipline of detecting these drifts before they become user complaints.\n\n### Core concepts\n\n**The three layers of AI observability:**\n\n1. *System health*: Are requests succeeding? Are latencies within SLO? This layer uses the same tooling as traditional API monitoring.\n2. *Quality health*: Are responses meeting quality thresholds? Are faithfulness scores declining? This layer requires AI-specific metrics computed from sampled responses.\n3. *Business health*: Are users getting value from the feature? Are follow-up questions decreasing (suggesting first-response resolution)?\n\n**Sampling strategy for quality monitoring.** Scoring every production response with an LLM judge is expensive. A practical strategy:\n- Score 100% of responses with fast deterministic checks (length, format validation, toxicity classifier)\n- Score 5-10% of responses with an LLM judge for quality metrics\n- Score 100% of flagged responses (user corrections, thumbs-down)\n- Run batch eval on the golden dataset nightly to detect model drift\n\n**Key metrics to track:**\n\n| Metric | Alert condition | Frequency |\n|---|---|---|\n| Pass rate | < 85% rolling 24h | Hourly |\n| Average faithfulness | < 0.75 (14-day rolling) | Daily |\n| Toxicity rate | > 0.5% sampled | Real-time |\n| P95 latency | > 2x SLO baseline | Real-time |\n| Token cost per request | > 20% above 14-day avg | Daily |\n| Provider error rate | > 2% over 5 minutes | Real-time |\n\n**Drift detection.** Quality drift is a sustained change in a quality metric over time, distinct from a one-time spike. Two patterns:\n- *Statistical process control*: alert when the current value is more than 2 standard deviations below the 30-day mean.\n- *Reference set drift*: re-run your golden evaluation dataset weekly and compare to baseline. A decline of more than 5 percentage points is a signal worth investigating.\n\n**SLOs for AI features.** Define both system SLOs (latency, availability, error rate) and quality SLOs (minimum pass rate, maximum toxicity rate) before launch. When quality SLOs are breached, the response is a product decision (degrade gracefully, show a fallback) not just an engineering escalation.\n\n### Working example\n\nA monitoring pipeline that processes traces and emits quality metrics:\n\n```python\nfrom dataclasses import dataclass\nfrom collections import deque\nfrom typing import Callable\nimport statistics\nimport time\n\n\n@dataclass\nclass QualityEvent:\n    trace_id: str\n    feature_name: str\n    timestamp_ms: int\n    pass_rate: float\n    faithfulness: float | None\n    latency_ms: int\n    prompt_tokens: int\n    completion_tokens: int\n\n\nclass QualityMonitor:\n    def __init__(self, window_hours: int = 24, alert_fn: Callable | None = None):\n        self.window_ms = window_hours * 3600 * 1000\n        self.alert_fn = alert_fn or (lambda name, data: print(f'ALERT {name}: {data}'))\n        self._events: deque[QualityEvent] = deque()\n        self._baselines: dict[str, dict] = {}\n\n    def record(self, event: QualityEvent) -> None:\n        self._events.append(event)\n        self._evict_old()\n        self._check_alerts(event.feature_name)\n\n    def _evict_old(self) -> None:\n        cutoff = int(time.time() * 1000) - self.window_ms\n        while self._events and self._events[0].timestamp_ms < cutoff:\n            self._events.popleft()\n\n    def _check_alerts(self, feature_name: str) -> None:\n        events = [e for e in self._events if e.feature_name == feature_name]\n        if len(events) < 10:\n            return\n        avg_pass = statistics.mean(e.pass_rate for e in events)\n        baseline = self._baselines.get(feature_name, {})\n        if avg_pass < 0.80:\n            self.alert_fn('quality_degradation',\n                          {'feature': feature_name, 'avg_pass_rate': avg_pass})\n        baseline_pass = baseline.get('pass_rate', avg_pass)\n        if avg_pass < baseline_pass - 0.05:\n            self.alert_fn('drift_detected', {\n                'feature': feature_name, 'current': avg_pass,\n                'baseline': baseline_pass, 'delta': avg_pass - baseline_pass,\n            })\n\n    def set_baseline(self, feature_name: str, metrics: dict) -> None:\n        self._baselines[feature_name] = metrics\n\n    def summary(self, feature_name: str) -> dict:\n        events = [e for e in self._events if e.feature_name == feature_name]\n        if not events:\n            return {}\n        latencies = sorted(e.latency_ms for e in events)\n        n = len(latencies)\n        return {\n            'feature': feature_name,\n            'sample_size': n,\n            'avg_pass_rate': statistics.mean(e.pass_rate for e in events),\n            'p95_latency_ms': latencies[int(n * 0.95)],\n            'total_cost_estimate': sum(\n                e.prompt_tokens * 0.000003 + e.completion_tokens * 0.000015 for e in events\n            ),\n        }\n```\n\n### Common mistakes\n\n1. **Monitoring only system metrics.** Error rate and latency being green does not mean the feature is working well. Quality metrics require a separate instrument.\n\n2. **No baseline to compare against.** An average faithfulness score of 0.78 is meaningless without knowing whether it was 0.85 last week. Always store a baseline before making changes.\n\n3. **Alerting on every sample.** Individual quality scores are noisy. Alert on rolling averages over meaningful sample sizes (at least 50 events).\n\n4. **Cost monitoring as an afterthought.** Teams regularly discover that a new prompt version tripled their token count after they see the cloud bill. Track cost per request in real time.\n\n5. **No on-call playbook for quality alerts.** Document the investigation steps before you need them.\n\n### Try it yourself\n\nImplement a `DriftDetector` class that maintains a 30-day rolling window of daily quality scores for a feature. It should compute a z-score for the most recent day's score relative to the 30-day distribution and return an `is_drift: bool` signal when the z-score exceeds -2.0. Test it with a simulated series of 30 stable days followed by 3 days of declining quality.",
+            },
+            {
+                "title": "Human-in-the-loop evaluation",
+                "summary": "Design annotation workflows, measure inter-rater reliability, and close the feedback loop between human judgment and prompt improvement.",
+                "estimated_minutes": 40,
+                "content_md": "## Human-in-the-loop evaluation\n\n### Why this matters\n\nAutomated metrics can tell you whether a response is grounded in context or matches a reference string. They cannot tell you whether a response was actually helpful to the person who asked. Human judgment remains the ground truth for AI quality, and the best production teams build systematic workflows to capture that judgment and feed it back into the system.\n\nHuman-in-the-loop (HITL) evaluation is not a fallback for when automated metrics fail -- it is the calibration source that makes automated metrics trustworthy. Without it, you are optimizing a proxy that may be drifting away from what users actually want.\n\n### Core concepts\n\n**Annotation workflows.** An annotation workflow is the structured process by which human reviewers evaluate AI outputs. Key components:\n- *Task definition*: what exactly is the reviewer being asked to judge?\n- *Rubric*: the scoring guide that defines what each score value means\n- *Interface*: the tool used to present cases and collect ratings\n- *Sampling strategy*: which outputs get reviewed?\n- *Reviewer pool*: internal team, domain experts, or crowdsourced annotators\n\nA typical annotation task for a Q&A feature:\n\n```\nQuestion: [shown to reviewer]\nAnswer: [shown to reviewer]\nContext used: [shown to reviewer]\n\nRate this answer on:\n1. Helpfulness (1-5): Does it address what the user asked?\n2. Faithfulness (1-5): Are all claims supported by the context shown?\n3. Safety (pass/fail): Is any content harmful or inappropriate?\n```\n\n**Inter-rater reliability (IRR).** When multiple reviewers score the same output, they will not always agree. IRR measures the degree of agreement. Common measures:\n- *Cohen's Kappa* (two raters, categorical labels): values above 0.6 are acceptable; above 0.8 is good\n- *Percent agreement*: simple but inflates for imbalanced classes\n\nLow IRR signals one of three problems: the rubric is ambiguous, the task is genuinely subjective, or reviewers are not applying the rubric correctly.\n\n**Calibration.** Before rating independently, reviewers should score a shared set of anchor cases together. Discuss disagreements. This step dramatically improves IRR and surfaces rubric ambiguities before they contaminate your data.\n\n**Using human feedback to improve prompts.** Human ratings are valuable inputs for three improvement loops:\n1. *Rubric refinement*: low-rated cases reveal failure modes. Cluster them to find systematic prompt weaknesses.\n2. *Prompt iteration*: when 30%+ of reviewed cases fail a specific dimension, revisit the prompt instructions.\n3. *Golden dataset growth*: reviewed cases where human rating disagrees with automated metrics are high-value additions.\n\n**Feedback signals from product.** Beyond explicit annotation, implicit user signals are cheap and continuous:\n- Thumbs up/down ratings\n- Copy button clicks on responses (strong positive signal)\n- Follow-up questions that suggest the first answer was inadequate\n- Session abandonment after a response\n\n**The feedback loop:**\n\n```\nUser request -> LLM response -> User feedback (explicit or implicit)\n                                       |\n                             Quality metric update\n                                       |\n                    Flag for human review (if quality drops)\n                                       |\n                    Human annotates the failure case\n                                       |\n                    Add to golden dataset / update rubric / iterate prompt\n                                       |\n                              Rerun eval suite\n```\n\n### Working example\n\nA human feedback collection and aggregation pipeline:\n\n```python\nfrom dataclasses import dataclass\nfrom collections import defaultdict\nimport statistics\n\n\n@dataclass\nclass ThumbsFeedback:\n    trace_id: str\n    feature_name: str\n    rating: str  # 'up', 'down', 'neutral'\n    timestamp_ms: int\n\n\n@dataclass\nclass Annotation:\n    trace_id: str\n    feature_name: str\n    rater_id: str\n    helpfulness: int   # 1-5\n    faithfulness: int  # 1-5\n    notes: str = ''\n\n\nclass FeedbackAggregator:\n    def __init__(self):\n        self._thumbs: list[ThumbsFeedback] = []\n        self._annotations: list[Annotation] = []\n\n    def record_thumbs(self, feedback: ThumbsFeedback) -> None:\n        self._thumbs.append(feedback)\n\n    def record_annotation(self, annotation: Annotation) -> None:\n        self._annotations.append(annotation)\n\n    def satisfaction_rate(self, feature_name: str) -> float | None:\n        rated = [t for t in self._thumbs\n                 if t.feature_name == feature_name and t.rating in ('up', 'down')]\n        if not rated:\n            return None\n        return sum(1 for t in rated if t.rating == 'up') / len(rated)\n\n    def compute_irr(self, feature_name: str) -> dict:\n        by_trace: dict[str, list[Annotation]] = defaultdict(list)\n        for a in self._annotations:\n            if a.feature_name == feature_name:\n                by_trace[a.trace_id].append(a)\n        multi_rated = {tid: annots for tid, annots in by_trace.items() if len(annots) > 1}\n        if not multi_rated:\n            return {'error': 'No multiply-rated traces found'}\n        agreements = total_pairs = 0\n        for annots in multi_rated.values():\n            ratings = [a.helpfulness >= 3 for a in annots]\n            for i in range(len(ratings)):\n                for j in range(i + 1, len(ratings)):\n                    total_pairs += 1\n                    if ratings[i] == ratings[j]:\n                        agreements += 1\n        return {\n            'traces_with_multiple_raters': len(multi_rated),\n            'percent_agreement_helpfulness': agreements / total_pairs if total_pairs else 0.0,\n        }\n\n    def low_quality_traces(\n        self, feature_name: str, threshold: float = 2.5, min_raters: int = 1\n    ) -> list[str]:\n        by_trace: dict[str, list[Annotation]] = defaultdict(list)\n        for a in self._annotations:\n            if a.feature_name == feature_name:\n                by_trace[a.trace_id].append(a)\n        result = []\n        for trace_id, annots in by_trace.items():\n            if len(annots) < min_raters:\n                continue\n            avg = statistics.mean((a.helpfulness + a.faithfulness) / 2 for a in annots)\n            if avg < threshold:\n                result.append(trace_id)\n        return result\n```\n\n### Common mistakes\n\n1. **Asking reviewers to rate 'overall quality' without a rubric.** Reviewers will apply inconsistent mental models and IRR will be low. Always decompose into specific dimensions.\n\n2. **Not measuring IRR before trusting annotations.** Low-IRR data is worse than no data because it gives false confidence.\n\n3. **No connection between annotation outcomes and prompt changes.** If human reviewers identify 40 cases where the model hallucinated but that feedback never influences the prompt, the annotation effort was wasted.\n\n4. **Using only thumbs ratings as quality signal.** Thumbs ratings are high-volume but noisy. Triangulate with more specific annotation.\n\n5. **Annotation fatigue.** Keep sessions under 45 minutes and rotate reviewers. Quality declines significantly after the first hundred or so reviews in a session.\n\n### Try it yourself\n\nDesign a minimal annotation interface specification for a coding assistant feature. Define: the fields shown to the reviewer, the scoring rubric for three dimensions specific to code generation (correctness, readability, explanation quality), and a short calibration set of five cases with pre-agreed ratings. Then implement a `compute_kappa` function that takes two lists of integer ratings and returns Cohen's Kappa for two raters on a 5-point scale.",
+            },
         ],
     },
     {
@@ -4285,6 +4310,815 @@ EXERCISES = [
         "explanation_md": "Strong AI engineering distinguishes answer quality from grounding and traceability.",
         "tags_json": ["evaluation", "metrics", "faithfulness"],
     },
+    # ── Evaluation exercises ─────────────────────────────────────────
+    {
+        "title": "Build an LLM-as-judge evaluator",
+        "slug": "build-llm-as-judge-evaluator",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """## Build an LLM-as-Judge Evaluator
+
+Automated evaluation with a language model as the judge is one of the most important patterns in applied AI engineering. Instead of requiring human annotation for every output, you prompt a capable model with a rubric and let it score responses at scale.
+
+### What you are building
+
+Implement a `LLMJudge` class that:
+
+1. **Accepts a rubric** -- a plain-English description of what "good" looks like for the task.
+2. **Scores a response** -- given a question, a generated response, and optional context, returns a score between 0.0 and 1.0 plus a one-sentence rationale.
+3. **Batches evaluations** -- runs a list of `(question, response, context)` tuples and returns aggregated results.
+4. **Validates output** -- if the judge returns malformed JSON or an out-of-range score, log a warning and return a default score of 0.5 rather than crashing.
+
+### Rubric for testing
+
+```
+A helpful response directly addresses the user's question, uses only information
+from the provided context, and does not introduce unsupported claims.
+Score 1.0 if fully helpful and faithful, 0.5 if partially, 0.0 if off-topic or hallucinated.
+```
+
+### Constraints
+
+- No external evaluation libraries.
+- Type-hint every method.
+- The judge prompt must include the rubric, question, context, and response in clearly labeled sections.
+- Return a `JudgeResult` dataclass with: `score: float`, `rationale: str`, `raw_output: str`.
+""",
+        "starter_code": """from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable
+
+
+@dataclass
+class JudgeResult:
+    score: float
+    rationale: str
+    raw_output: str
+
+
+class LLMJudge:
+    def __init__(self, rubric: str, judge_fn: Callable[[str], str]):
+        # TODO: store rubric and judge_fn
+        raise NotImplementedError
+
+    def score(self, question: str, response: str, context: str = "") -> JudgeResult:
+        # TODO: build judge prompt, call judge_fn, parse result
+        raise NotImplementedError
+
+    def batch_score(self, cases: list[dict]) -> dict:
+        # TODO: score all cases and return aggregate metrics
+        raise NotImplementedError
+""",
+        "solution_code": """from __future__ import annotations
+import json
+import logging
+from dataclasses import dataclass
+from typing import Callable
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class JudgeResult:
+    score: float
+    rationale: str
+    raw_output: str
+
+
+class LLMJudge:
+    def __init__(self, rubric: str, judge_fn: Callable[[str], str]):
+        self.rubric = rubric
+        self._judge_fn = judge_fn
+
+    def _build_prompt(self, question: str, response: str, context: str) -> str:
+        return (
+            f"You are an impartial evaluation judge.\n\nRubric:\n{self.rubric}\n\n"
+            f"Question: {question}\n\nContext:\n{context or '(none)'}\n\n"
+            f"Response to evaluate:\n{response}\n\n"
+            f'Return JSON with exactly two keys: "score" (float 0.0-1.0) and "rationale" (one sentence). JSON only.'
+        )
+
+    def score(self, question: str, response: str, context: str = "") -> JudgeResult:
+        prompt = self._build_prompt(question, response, context)
+        raw = self._judge_fn(prompt)
+        try:
+            parsed = json.loads(raw)
+            score = max(0.0, min(1.0, float(parsed["score"])))
+            rationale = str(parsed.get("rationale", ""))
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.warning("Judge parse error: %s | raw: %s", e, raw[:200])
+            score, rationale = 0.5, f"Parse error: {raw[:100]}"
+        return JudgeResult(score=score, rationale=rationale, raw_output=raw)
+
+    def batch_score(self, cases: list[dict]) -> dict:
+        results = [
+            self.score(
+                question=c["question"],
+                response=c["response"],
+                context=c.get("context", ""),
+            )
+            for c in cases
+        ]
+        scores = [r.score for r in results]
+        n = len(scores)
+        avg = sum(scores) / n if n else 0.0
+        pass_rate = sum(1 for s in scores if s >= 0.7) / n if n else 0.0
+        return {
+            "total": n,
+            "avg_score": avg,
+            "pass_rate": pass_rate,
+            "failures": [
+                {"index": i, "score": r.score, "rationale": r.rationale}
+                for i, r in enumerate(results) if r.score < 0.7
+            ],
+        }
+""",
+        "explanation_md": "The score is clamped to [0.0, 1.0] after parsing to catch models that return scores like 4/5. Parse errors fall back to 0.5 rather than crashing -- in batch evaluation, one malformed response should not abort the entire run. The batch method returns failures with their index so you can look up the specific case that scored poorly.",
+        "tags_json": ["evaluation", "llm-judge", "metrics", "testing"],
+    },
+    {
+        "title": "Create a golden dataset test suite",
+        "slug": "create-golden-dataset-test-suite",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """## Create a Golden Dataset Test Suite
+
+A golden dataset is a curated set of test cases you trust to detect regressions. Build the infrastructure to load, run, and report on a golden evaluation suite.
+
+### What you are building
+
+Implement a `GoldenSuite` class that:
+
+1. **Loads cases from JSONL** -- each line has `case_id`, `input`, `expected`, and `category` fields.
+2. **Runs evaluation** -- for each case, calls a `generate_fn` and a `score_fn`, records score and pass/fail.
+3. **Detects regressions** -- accepts a baseline report dict and identifies any case where current score is more than 0.10 below the baseline score for the same `case_id`.
+4. **Reports by category** -- returns average score and pass rate broken down by category.
+5. **Outputs a portable report** -- returns a dict with `by_case` scores suitable as the next run's baseline.
+
+### Constraints
+
+- Use only the Python standard library.
+- `score_fn` signature: `(response: str, expected: str) -> float` returning 0.0 to 1.0.
+- `generate_fn` signature: `(input: str) -> str`.
+- Pass threshold is configurable (default 0.7).
+- Regression threshold is configurable (default 0.10).
+""",
+        "starter_code": """from __future__ import annotations
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class SuiteResult:
+    case_id: str
+    category: str
+    score: float
+    passed: bool
+    regression: bool = False
+
+
+class GoldenSuite:
+    def __init__(self, dataset_path: str, pass_threshold: float = 0.7, regression_threshold: float = 0.10):
+        # TODO: store config
+        raise NotImplementedError
+
+    def load(self, categories: list[str] | None = None) -> list[dict]:
+        # TODO: load cases from JSONL, optionally filter by category
+        raise NotImplementedError
+
+    def run(self, generate_fn, score_fn, baseline: dict | None = None) -> list[SuiteResult]:
+        # TODO: run all cases, detect regressions
+        raise NotImplementedError
+
+    def report(self, results: list[SuiteResult]) -> dict:
+        # TODO: aggregate by category, compute pass rate, return by_case
+        raise NotImplementedError
+""",
+        "solution_code": """from __future__ import annotations
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+
+@dataclass
+class SuiteResult:
+    case_id: str
+    category: str
+    score: float
+    passed: bool
+    regression: bool = False
+
+
+class GoldenSuite:
+    def __init__(self, dataset_path: str, pass_threshold: float = 0.7, regression_threshold: float = 0.10):
+        self.dataset_path = Path(dataset_path)
+        self.pass_threshold = pass_threshold
+        self.regression_threshold = regression_threshold
+
+    def load(self, categories: list[str] | None = None) -> list[dict]:
+        cases = []
+        with open(self.dataset_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                case = json.loads(line)
+                if categories is None or case.get("category") in categories:
+                    cases.append(case)
+        return cases
+
+    def run(
+        self,
+        generate_fn: Callable[[str], str],
+        score_fn: Callable[[str, str], float],
+        baseline: dict | None = None,
+    ) -> list[SuiteResult]:
+        cases = self.load()
+        baseline_scores = baseline.get("by_case", {}) if baseline else {}
+        results = []
+        for case in cases:
+            response = generate_fn(case["input"])
+            score = score_fn(response, case["expected"])
+            passed = score >= self.pass_threshold
+            base = baseline_scores.get(case["case_id"])
+            regression = base is not None and score < base - self.regression_threshold
+            results.append(SuiteResult(
+                case_id=case["case_id"], category=case.get("category", "unknown"),
+                score=score, passed=passed, regression=regression,
+            ))
+        return results
+
+    def report(self, results: list[SuiteResult]) -> dict:
+        total = len(results)
+        if not total:
+            return {}
+        passed = sum(1 for r in results if r.passed)
+        by_category: dict[str, list[float]] = {}
+        for r in results:
+            by_category.setdefault(r.category, []).append(r.score)
+        return {
+            "total": total,
+            "pass_rate": passed / total,
+            "avg_score": sum(r.score for r in results) / total,
+            "regression_count": sum(1 for r in results if r.regression),
+            "regressions": [r.case_id for r in results if r.regression],
+            "by_category": {
+                cat: {
+                    "avg_score": sum(s) / len(s),
+                    "pass_rate": sum(1 for s in scores if s >= self.pass_threshold) / len(scores),
+                }
+                for cat, scores in by_category.items()
+            },
+            "by_case": {r.case_id: r.score for r in results},
+        }
+""",
+        "explanation_md": "The `by_case` dict in the report is the format expected by the next run's `baseline` parameter, so you can chain runs naturally. Regressions are detected per-case rather than in aggregate -- a 0.10 drop on a single case is a regression even if the average score improved.",
+        "tags_json": ["evaluation", "testing", "golden-dataset", "regression"],
+    },
+    {
+        "title": "Implement structured request tracing",
+        "slug": "implement-structured-request-tracing",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """## Implement Structured Request Tracing
+
+Build a span-based tracing system for LLM requests -- the core data collection layer that feeds monitoring dashboards and post-hoc debugging.
+
+### What you are building
+
+Implement a `Tracer` class that:
+
+1. **Creates a root trace** -- with a `trace_id`, feature name, and start timestamp.
+2. **Supports named spans** -- each span has its own start/end timestamps, latency, and attributes.
+3. **Works as a context manager** -- spans auto-complete on `__exit__` with elapsed time, even if the body raises.
+4. **Exports sorted spans** -- `export()` returns a list of dicts sorted by `start_ms`.
+
+### Usage pattern to support
+
+```python
+tracer = Tracer(trace_id="req-123", feature_name="document_qa")
+
+with tracer.span("retrieval", index="docs_v2") as ret_span:
+    results = retrieve(query)
+    ret_span.set("num_results", len(results))
+
+with tracer.span("llm_call", model="claude-3-5-sonnet-20241022") as llm_span:
+    response = call_llm(prompt)
+    llm_span.set("prompt_tokens", response.usage.input_tokens)
+
+events = tracer.export()  # list of dicts, one per span
+```
+
+### Constraints
+
+- Use only the Python standard library.
+- All spans must capture `span_id`, `trace_id`, `name`, `start_ms`, `end_ms`, `latency_ms`.
+- Context manager must capture elapsed time even if the body raises an exception.
+""",
+        "starter_code": """from __future__ import annotations
+import time
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Span:
+    span_id: str
+    trace_id: str
+    name: str
+    start_ms: int
+    end_ms: int = 0
+    latency_ms: int = 0
+    attributes: dict = field(default_factory=dict)
+
+    def set(self, key: str, value) -> None:
+        # TODO: store attribute
+        raise NotImplementedError
+
+
+class Tracer:
+    def __init__(self, trace_id: str | None = None, feature_name: str = ""):
+        # TODO: initialize tracer
+        raise NotImplementedError
+
+    @contextmanager
+    def span(self, name: str, **attributes):
+        # TODO: create span, yield it, complete on exit
+        raise NotImplementedError
+
+    def export(self) -> list[dict]:
+        # TODO: return sorted list of span dicts
+        raise NotImplementedError
+""",
+        "solution_code": """from __future__ import annotations
+import time
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Generator
+
+
+@dataclass
+class Span:
+    span_id: str
+    trace_id: str
+    name: str
+    start_ms: int
+    end_ms: int = 0
+    latency_ms: int = 0
+    attributes: dict = field(default_factory=dict)
+
+    def set(self, key: str, value) -> None:
+        self.attributes[key] = value
+
+    def to_dict(self) -> dict:
+        return {
+            "span_id": self.span_id,
+            "trace_id": self.trace_id,
+            "name": self.name,
+            "start_ms": self.start_ms,
+            "end_ms": self.end_ms,
+            "latency_ms": self.latency_ms,
+            **self.attributes,
+        }
+
+
+class Tracer:
+    def __init__(self, trace_id: str | None = None, feature_name: str = ""):
+        self.trace_id = trace_id or str(uuid.uuid4())
+        self.feature_name = feature_name
+        self._spans: list[Span] = []
+
+    @contextmanager
+    def span(self, name: str, **attributes) -> Generator[Span, None, None]:
+        s = Span(
+            span_id=str(uuid.uuid4()),
+            trace_id=self.trace_id,
+            name=name,
+            start_ms=int(time.time() * 1000),
+            attributes={**attributes},
+        )
+        try:
+            yield s
+        finally:
+            s.end_ms = int(time.time() * 1000)
+            s.latency_ms = s.end_ms - s.start_ms
+            self._spans.append(s)
+
+    def export(self) -> list[dict]:
+        return sorted([s.to_dict() for s in self._spans], key=lambda d: d["start_ms"])
+""",
+        "explanation_md": "The `try/finally` is the critical detail: `end_ms` and `latency_ms` are always set even if the body raises an exception. Error spans have accurate timing. The `**attributes` in `span()` lets callers attach known metadata at creation time; `set()` lets them add attributes discovered during the span body (like token counts from the response).",
+        "tags_json": ["evaluation", "tracing", "observability", "logging"],
+    },
+    {
+        "title": "Build a quality monitoring dashboard data pipeline",
+        "slug": "build-quality-monitoring-pipeline",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """## Build a Quality Monitoring Dashboard Data Pipeline
+
+Transform raw LLM request traces into hourly quality snapshots suitable for a time-series monitoring dashboard.
+
+### What you are building
+
+Implement a `QualityPipeline` that:
+
+1. **Ingests raw trace events** -- each event has `trace_id`, `feature_name`, `timestamp_ms`, `pass_rate`, `latency_ms`, `prompt_tokens`, `completion_tokens`.
+2. **Aggregates into hourly buckets** -- for each (feature, hour) pair, compute: sample count, avg pass rate, P95 latency, total tokens, estimated cost.
+3. **Detects anomalies** -- flags hours where the pass rate is more than 1.5 standard deviations below the feature's 7-day rolling average.
+4. **Generates a dashboard payload** -- returns a dict keyed by feature name with hourly snapshots and an anomalies list.
+5. **Estimates cost** -- use pricing of $3/million input tokens and $15/million output tokens.
+
+### Constraints
+
+- Use only the Python standard library.
+- Bucket events by UTC hour (floor timestamp to hour boundary).
+- Anomaly detection requires at least 7 hourly data points before flagging.
+""",
+        "starter_code": """from __future__ import annotations
+from collections import defaultdict
+
+INPUT_TOKEN_PRICE = 3 / 1_000_000
+OUTPUT_TOKEN_PRICE = 15 / 1_000_000
+
+
+class QualityPipeline:
+    def __init__(self):
+        raise NotImplementedError
+
+    def ingest(self, events: list[dict]) -> None:
+        raise NotImplementedError
+
+    def aggregate(self) -> dict[str, list[dict]]:
+        raise NotImplementedError
+
+    def detect_anomalies(self, hourly: dict[str, list[dict]]) -> list[dict]:
+        raise NotImplementedError
+
+    def dashboard_payload(self) -> dict:
+        raise NotImplementedError
+""",
+        "solution_code": """from __future__ import annotations
+import statistics
+from collections import defaultdict
+
+INPUT_TOKEN_PRICE = 3 / 1_000_000
+OUTPUT_TOKEN_PRICE = 15 / 1_000_000
+HOUR_MS = 3600 * 1000
+
+
+class QualityPipeline:
+    def __init__(self):
+        self._buckets: dict[tuple[str, int], list[dict]] = defaultdict(list)
+
+    def ingest(self, events: list[dict]) -> None:
+        for event in events:
+            hour_bucket = (event["timestamp_ms"] // HOUR_MS) * HOUR_MS
+            self._buckets[(event["feature_name"], hour_bucket)].append(event)
+
+    def aggregate(self) -> dict[str, list[dict]]:
+        by_feature: dict[str, list[dict]] = defaultdict(list)
+        for (feature, hour_ms), events in sorted(self._buckets.items()):
+            latencies = sorted(e["latency_ms"] for e in events)
+            n = len(latencies)
+            total_p = sum(e["prompt_tokens"] for e in events)
+            total_c = sum(e["completion_tokens"] for e in events)
+            cost = total_p * INPUT_TOKEN_PRICE + total_c * OUTPUT_TOKEN_PRICE
+            by_feature[feature].append({
+                "hour_ms": hour_ms,
+                "sample_count": n,
+                "avg_pass_rate": sum(e["pass_rate"] for e in events) / n,
+                "p95_latency_ms": latencies[max(0, int(n * 0.95) - 1)],
+                "total_prompt_tokens": total_p,
+                "total_completion_tokens": total_c,
+                "estimated_cost_usd": round(cost, 6),
+            })
+        return dict(by_feature)
+
+    def detect_anomalies(self, hourly: dict[str, list[dict]]) -> list[dict]:
+        anomalies = []
+        for feature, snapshots in hourly.items():
+            pass_rates = [s["avg_pass_rate"] for s in snapshots]
+            for i, snapshot in enumerate(snapshots):
+                window = pass_rates[max(0, i - 167):i]
+                if len(window) < 7:
+                    continue
+                mean = statistics.mean(window)
+                stdev = statistics.stdev(window) if len(window) > 1 else 0.0
+                if stdev > 0 and snapshot["avg_pass_rate"] < mean - 1.5 * stdev:
+                    anomalies.append({
+                        "feature": feature,
+                        "hour_ms": snapshot["hour_ms"],
+                        "avg_pass_rate": snapshot["avg_pass_rate"],
+                        "rolling_mean": round(mean, 4),
+                        "z_score": round((snapshot["avg_pass_rate"] - mean) / stdev, 2),
+                    })
+        return anomalies
+
+    def dashboard_payload(self) -> dict:
+        hourly = self.aggregate()
+        anomalies = self.detect_anomalies(hourly)
+        return {
+            "features": {
+                feature: {
+                    "hourly": snapshots,
+                    "summary": {
+                        "avg_pass_rate": statistics.mean(s["avg_pass_rate"] for s in snapshots),
+                        "total_cost_usd": sum(s["estimated_cost_usd"] for s in snapshots),
+                        "total_samples": sum(s["sample_count"] for s in snapshots),
+                    } if snapshots else {},
+                }
+                for feature, snapshots in hourly.items()
+            },
+            "anomalies": anomalies,
+        }
+""",
+        "explanation_md": "The bucketing step is the foundation: all downstream aggregation is a groupby over buckets. The anomaly detector looks back up to 168 hours (7 days) but requires at least 7 data points before flagging -- this prevents false alerts in the first day of a new feature. Cost estimation is a first-class output alongside quality metrics.",
+        "tags_json": ["evaluation", "monitoring", "observability", "dashboards", "cost-tracking"],
+    },
+    {
+        "title": "Implement A/B evaluation for prompt variants",
+        "slug": "implement-ab-evaluation-prompt-variants",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """## Implement A/B Evaluation for Prompt Variants
+
+Changing a prompt without measuring the impact is one of the most common mistakes in applied AI engineering. Build a rigorous A/B evaluation pipeline that compares two prompt variants on the same golden dataset.
+
+### What you are building
+
+Implement an `ABEvaluator` that:
+
+1. **Runs both variants** -- for each test case, generates responses using `variant_a_fn` and `variant_b_fn`.
+2. **Scores both responses** -- using a provided `score_fn(response, expected) -> float`.
+3. **Computes win/loss/tie statistics** -- a "win" for B is when B's score exceeds A's by more than `margin` (default 0.05).
+4. **Identifies regressions** -- any case where B scores more than 0.10 lower than A.
+5. **Returns a recommendation** -- `"b"` if win rate > 55% AND regression rate <= 5%, `"a"` if A win rate > 55%, else `"inconclusive"`.
+
+### Constraints
+
+- Use only the Python standard library.
+- Both variants receive the same input for each case.
+- `cases` is a list of dicts with `case_id`, `input`, `expected`.
+""",
+        "starter_code": """from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable
+
+
+@dataclass
+class ABReport:
+    total: int
+    wins_a: int
+    wins_b: int
+    ties: int
+    win_rate_b: float
+    avg_delta: float
+    regressions: list[str]
+    recommend: str
+
+
+class ABEvaluator:
+    def __init__(self, margin: float = 0.05, regression_threshold: float = 0.10):
+        raise NotImplementedError
+
+    def run(
+        self,
+        cases: list[dict],
+        variant_a_fn: Callable[[str], str],
+        variant_b_fn: Callable[[str], str],
+        score_fn: Callable[[str, str], float],
+    ) -> ABReport:
+        raise NotImplementedError
+""",
+        "solution_code": """from __future__ import annotations
+from dataclasses import dataclass
+from typing import Callable
+
+
+@dataclass
+class ABReport:
+    total: int
+    wins_a: int
+    wins_b: int
+    ties: int
+    win_rate_b: float
+    avg_delta: float
+    regressions: list[str]
+    recommend: str
+
+
+class ABEvaluator:
+    def __init__(self, margin: float = 0.05, regression_threshold: float = 0.10):
+        self.margin = margin
+        self.regression_threshold = regression_threshold
+
+    def run(
+        self,
+        cases: list[dict],
+        variant_a_fn: Callable[[str], str],
+        variant_b_fn: Callable[[str], str],
+        score_fn: Callable[[str, str], float],
+    ) -> ABReport:
+        wins_a = wins_b = ties = 0
+        deltas = []
+        regressions = []
+
+        for case in cases:
+            score_a = score_fn(variant_a_fn(case["input"]), case["expected"])
+            score_b = score_fn(variant_b_fn(case["input"]), case["expected"])
+            delta = score_b - score_a
+            deltas.append(delta)
+
+            if delta > self.margin:
+                wins_b += 1
+            elif delta < -self.margin:
+                wins_a += 1
+            else:
+                ties += 1
+
+            if delta < -self.regression_threshold:
+                regressions.append(case["case_id"])
+
+        n = len(cases)
+        win_rate_b = wins_b / n if n else 0.0
+        win_rate_a = wins_a / n if n else 0.0
+        regression_rate = len(regressions) / n if n else 0.0
+        avg_delta = sum(deltas) / n if n else 0.0
+
+        if win_rate_b > 0.55 and regression_rate <= 0.05:
+            recommend = "b"
+        elif win_rate_a > 0.55:
+            recommend = "a"
+        else:
+            recommend = "inconclusive"
+
+        return ABReport(
+            total=n, wins_a=wins_a, wins_b=wins_b, ties=ties,
+            win_rate_b=win_rate_b, avg_delta=avg_delta,
+            regressions=regressions, recommend=recommend,
+        )
+""",
+        "explanation_md": "The `margin` parameter prevents treating noise as a win. A 0.05 delta on a 0-1 scale is within normal LLM score variance. The recommendation logic requires both a win-rate threshold AND a regression constraint -- a variant that wins 60% of cases but causes regressions on 10% is not ready to ship.",
+        "tags_json": ["evaluation", "a-b-testing", "prompt-engineering", "regression"],
+    },
+    {
+        "title": "Build a human feedback collection pipeline",
+        "slug": "build-human-feedback-collection-pipeline",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """## Build a Human Feedback Collection Pipeline
+
+User feedback is the ground truth that calibrates all other evaluation signals. Build a feedback collection and aggregation pipeline that captures thumbs ratings and explicit annotations, then surfaces quality insights.
+
+### What you are building
+
+Implement a `FeedbackPipeline` that:
+
+1. **Records thumbs feedback** -- stores `(trace_id, feature_name, rating: "up"/"down"/"neutral", timestamp_ms)`.
+2. **Records explicit annotations** -- stores `(trace_id, feature_name, rater_id, helpfulness: 1-5, faithfulness: 1-5, notes: str)`.
+3. **Computes satisfaction rate** -- thumbs_up / (thumbs_up + thumbs_down) per feature, ignoring neutral.
+4. **Computes annotation quality** -- average helpfulness and faithfulness per feature, pass rate (score >= 3).
+5. **Identifies low-quality traces** -- returns trace IDs where average annotation score < a configurable threshold.
+6. **Generates a combined report** -- merges thumbs and annotation signals into one dict per feature.
+
+### Constraints
+
+- Use only the Python standard library.
+- Features with zero thumbs or zero annotations should report `None` for those metrics rather than 0.
+- The `low_quality_traces` method should accept a `min_raters` parameter (default 1).
+""",
+        "starter_code": """from __future__ import annotations
+from dataclasses import dataclass
+
+
+@dataclass
+class ThumbsFeedback:
+    trace_id: str
+    feature_name: str
+    rating: str  # "up", "down", "neutral"
+    timestamp_ms: int
+
+
+@dataclass
+class Annotation:
+    trace_id: str
+    feature_name: str
+    rater_id: str
+    helpfulness: int   # 1-5
+    faithfulness: int  # 1-5
+    notes: str = ""
+
+
+class FeedbackPipeline:
+    def __init__(self):
+        raise NotImplementedError
+
+    def record_thumbs(self, feedback: ThumbsFeedback) -> None:
+        raise NotImplementedError
+
+    def record_annotation(self, annotation: Annotation) -> None:
+        raise NotImplementedError
+
+    def satisfaction_rate(self, feature_name: str) -> float | None:
+        raise NotImplementedError
+
+    def annotation_quality(self, feature_name: str) -> dict | None:
+        raise NotImplementedError
+
+    def low_quality_traces(self, feature_name: str, threshold: float = 2.5, min_raters: int = 1) -> list[str]:
+        raise NotImplementedError
+
+    def combined_report(self, feature_name: str) -> dict:
+        raise NotImplementedError
+""",
+        "solution_code": """from __future__ import annotations
+import statistics
+from collections import defaultdict
+from dataclasses import dataclass
+
+
+@dataclass
+class ThumbsFeedback:
+    trace_id: str
+    feature_name: str
+    rating: str
+    timestamp_ms: int
+
+
+@dataclass
+class Annotation:
+    trace_id: str
+    feature_name: str
+    rater_id: str
+    helpfulness: int
+    faithfulness: int
+    notes: str = ""
+
+
+class FeedbackPipeline:
+    def __init__(self):
+        self._thumbs: list[ThumbsFeedback] = []
+        self._annotations: list[Annotation] = []
+
+    def record_thumbs(self, feedback: ThumbsFeedback) -> None:
+        self._thumbs.append(feedback)
+
+    def record_annotation(self, annotation: Annotation) -> None:
+        self._annotations.append(annotation)
+
+    def _thumbs_for(self, feature: str) -> list[ThumbsFeedback]:
+        return [t for t in self._thumbs if t.feature_name == feature]
+
+    def _annotations_for(self, feature: str) -> list[Annotation]:
+        return [a for a in self._annotations if a.feature_name == feature]
+
+    def satisfaction_rate(self, feature_name: str) -> float | None:
+        rated = [t for t in self._thumbs_for(feature_name) if t.rating in ("up", "down")]
+        if not rated:
+            return None
+        return sum(1 for t in rated if t.rating == "up") / len(rated)
+
+    def annotation_quality(self, feature_name: str) -> dict | None:
+        annots = self._annotations_for(feature_name)
+        if not annots:
+            return None
+        return {
+            "sample_size": len(annots),
+            "avg_helpfulness": statistics.mean(a.helpfulness for a in annots),
+            "avg_faithfulness": statistics.mean(a.faithfulness for a in annots),
+            "pass_rate": sum(1 for a in annots if a.helpfulness >= 3 and a.faithfulness >= 3) / len(annots),
+        }
+
+    def low_quality_traces(
+        self, feature_name: str, threshold: float = 2.5, min_raters: int = 1
+    ) -> list[str]:
+        by_trace: dict[str, list[Annotation]] = defaultdict(list)
+        for a in self._annotations_for(feature_name):
+            by_trace[a.trace_id].append(a)
+        return [
+            trace_id for trace_id, annots in by_trace.items()
+            if len(annots) >= min_raters
+            and statistics.mean((a.helpfulness + a.faithfulness) / 2 for a in annots) < threshold
+        ]
+
+    def combined_report(self, feature_name: str) -> dict:
+        return {
+            "feature": feature_name,
+            "satisfaction_rate": self.satisfaction_rate(feature_name),
+            "annotation_quality": self.annotation_quality(feature_name),
+            "low_quality_trace_count": len(self.low_quality_traces(feature_name)),
+            "thumbs_total": len(self._thumbs_for(feature_name)),
+            "annotations_total": len(self._annotations_for(feature_name)),
+        }
+""",
+        "explanation_md": "Returning `None` rather than `0` for features with no data prevents division-by-zero bugs downstream and makes it explicit when data is genuinely absent. The `min_raters` parameter implements the 'require agreement' pattern -- a single harsh rater's opinion should not automatically flag a trace for review.",
+        "tags_json": ["evaluation", "human-feedback", "annotation", "observability"],
+    },
+
     # ── Agent exercises ──────────────────────────────────────────────
     {
         "title": "Build a tool registry with schema validation",
@@ -13167,6 +14001,341 @@ Production LLM debugging is disciplined hypothesis testing, not creative prompt 
 """,
         "tags_json": ["llm-systems", "debugging", "production", "quality"],
     },
+    # ── Evaluation interview questions ───────────────────────────────
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How would you set up an evaluation pipeline for a new LLM feature before it goes to production?",
+        "answer_outline_md": """## What this question tests
+
+The interviewer wants to see that you have a systematic pre-launch evaluation process -- not just a gut check that the demo looks good. Strong candidates treat evaluation as engineering work that happens before shipping, not after user complaints arrive.
+
+## Start with the success criteria
+
+Before writing any code, define what the feature needs to do well enough to ship. For a Q&A assistant, that might be: answer relevance >= 0.80, faithfulness >= 0.85 for RAG-backed answers, toxicity rate < 0.1%, and P95 latency < 3s. Without explicit criteria, you do not know when evaluation is done.
+
+## Build the golden dataset first
+
+Construct 50-100 test cases that cover:
+- Representative queries from expected real usage (seed from stakeholder input or synthetic generation)
+- Edge cases that are likely to trip up the system (ambiguous questions, multi-part queries, out-of-scope queries)
+- Safety cases (attempts to get the model to produce harmful output)
+
+Label the expected outputs manually for at least a sample. For open-ended generation, "expected" means a rubric description rather than an exact string.
+
+## Choose the right metrics for the task
+
+| Feature type | Primary metrics |
+|---|---|
+| RAG Q&A | Faithfulness, answer relevance, context precision |
+| Classification | Accuracy, per-class F1 |
+| Code generation | Test pass rate, schema validity |
+| Open-ended generation | Helpfulness (LLM judge), safety |
+
+Avoid using only one metric -- quality is multidimensional.
+
+## Build the harness before the feature is done
+
+The eval harness should be functional by the time you finish the first working version of the feature. This way, every iteration is measured against a stable baseline from the start.
+
+```python
+def run_pre_launch_eval(feature_fn, golden_cases, score_fns, thresholds):
+    results = []
+    for case in golden_cases:
+        response = feature_fn(case["input"])
+        scores = {name: fn(response, case) for name, fn in score_fns.items()}
+        results.append({"case_id": case["case_id"], "scores": scores})
+    agg = {m: sum(r["scores"][m] for r in results) / len(results) for m in score_fns}
+    failures = {m: v for m, v in agg.items() if v < thresholds.get(m, 0)}
+    return {"aggregates": agg, "blocking_failures": failures, "ready": not failures}
+```
+
+If `ready` is False, the feature does not ship until the specific failing metrics are addressed.
+
+## Include latency and cost in the eval run
+
+A feature that scores 0.90 on faithfulness but takes 8 seconds on average is not ready for production. Run the eval suite with timing instrumentation and include P95 latency and average token cost in the pre-launch report.
+
+## Human spot-check before launch
+
+Before launch, have at least one person manually review 20-30 cases from the eval run -- especially borderline passes and cases that were hard to write rubrics for. Human review is the final calibration step.
+
+## Common mistakes to name
+
+- Evaluating only the happy path
+- Using the same LLM to generate and evaluate (self-judging bias)
+- No latency measurement in the eval run
+- Skipping the golden dataset and evaluating only on examples you generated that morning
+
+## Self-study prompts
+
+- Build a pre-launch eval report for a hypothetical search feature: define the metrics, write 10 sample test cases, and sketch the harness.
+- Compare RAGAS, Phoenix, and LangSmith for pre-launch evaluation workflows.
+
+## Interview takeaway
+
+Pre-launch evaluation is disciplined engineering, not vibes checking. Define criteria before building, measure systematically, gate on thresholds, and get human eyes on borderline cases. The discipline is the same as a load test before deploying a new API -- you just replace RPS with quality metrics.
+""",
+        "tags_json": ["evaluation", "production", "testing", "quality"],
+    },
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "What observability signals would you instrument for an AI-powered search feature?",
+        "answer_outline_md": """## What this question tests
+
+The interviewer wants to see that you think in layers -- system health, retrieval quality, generation quality, and user behavior -- rather than treating observability as a single dashboard showing error rates.
+
+## Layer 1: System health (same as any backend feature)
+
+- HTTP error rate: 4xx and 5xx rates from the search endpoint
+- P50 / P95 / P99 latency: end-to-end from the user's perspective
+- Provider error rate: how often the LLM provider returns errors, timeouts, or rate-limit responses
+- Availability: uptime of the search endpoint
+
+These signals tell you when the system is broken. They do not tell you when quality is degrading.
+
+## Layer 2: Retrieval quality signals
+
+- **Hit rate at k**: for queries with known relevant documents, what fraction of the top-k results contained a relevant document?
+- **Mean reciprocal rank (MRR)**: how high in the ranked list does the first relevant result appear?
+- **Context relevance score**: for a sample of queries, use an LLM judge to score whether retrieved chunks are relevant.
+- **Retrieval latency**: separate from total latency -- how long does the vector search and re-ranking step take?
+
+## Layer 3: Generation quality signals
+
+- **Answer relevance**: does the final answer address the query? Score a sample with an LLM judge.
+- **Faithfulness / groundedness**: are claims in the generated answer supported by retrieved chunks? This is the critical quality metric for RAG search.
+- **Response length distribution**: sudden changes can indicate prompt regressions.
+- **Finish reason breakdown**: track `max_tokens` truncation rate. High truncation means your output is being cut short.
+
+## Layer 4: User behavior signals
+
+- **Click-through rate on search results**: are users clicking the returned documents?
+- **Reformulation rate**: does the user immediately rephrase and search again? High reformulation suggests the first result was not helpful.
+- **Thumbs rating**: if exposed, track it per query.
+- **Zero-result rate**: how often does the search return no useful results?
+
+## Async quality scoring pipeline
+
+Run quality metrics asynchronously on a sampled fraction of traffic (5-10%), rather than blocking the request:
+
+```
+User request -> Search feature -> Response delivered to user
+                                        |
+                              Async quality scorer (sampled)
+                                        |
+                          Quality events -> monitoring store
+                                        |
+                               Dashboard + alerts
+```
+
+## Key alerts to configure
+
+- Faithfulness score drops below 0.75 on 30-minute rolling average
+- Provider error rate exceeds 2% over 5 minutes
+- P95 latency exceeds your SLO threshold
+- Reformulation rate spikes above baseline
+
+## Common mistakes to name
+
+- Monitoring only system metrics and missing quality degradation for weeks
+- No retrieval quality signals (treating the retrieval layer as a black box)
+- Alerting on individual response scores (noisy) instead of rolling averages
+
+## Self-study prompts
+
+- Look at how LangSmith or Phoenix instruments traces for a RAG pipeline -- map their span model to the four layers described here.
+- Design an async quality scoring pipeline for a search feature you have built or can imagine.
+
+## Interview takeaway
+
+Search observability has four layers: system health, retrieval quality, generation quality, and user behavior. Instrumenting only one layer gives a partial picture. Measure at each layer separately, alert on sustained degradation rather than individual spikes, and connect quality signals to user behavior so you know whether improvements matter.
+""",
+        "tags_json": ["evaluation", "observability", "search", "monitoring", "production"],
+    },
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How do you detect when an LLM feature's quality has degraded in production?",
+        "answer_outline_md": """## What makes this question advanced
+
+Quality degradation in production LLM features is subtle and multi-causal. It can come from model provider updates, distribution shift in user queries, stale retrieval indices, or prompt regressions. A strong answer shows a systematic detection and diagnosis workflow, not just "set up an alert."
+
+## Why quality degrades silently
+
+Unlike a broken API endpoint, a quality-degraded LLM feature still returns HTTP 200. Users get responses. They are just worse. This failure mode is invisible to system health monitoring. You need a separate quality signal pipeline layered on top of standard observability.
+
+## The three-signal approach to detection
+
+**Signal 1: Continuous sampling with an automated judge**
+
+Score 5-10% of production responses with an LLM judge against your quality rubric. Compute a rolling 24-hour average pass rate. Alert when the rolling average drops more than a configurable threshold below a 30-day baseline.
+
+```python
+def detect_degradation(rolling_avg: float, baseline_mean: float, baseline_std: float) -> bool:
+    # Alert when current score is more than 1.5 standard deviations below baseline
+    return rolling_avg < baseline_mean - 1.5 * baseline_std
+```
+
+The rolling window smooths out natural variance. The baseline comparison catches sustained shifts rather than one-off bad responses.
+
+**Signal 2: User behavior signals**
+
+Track implicit feedback as a complementary signal:
+- Thumbs-down rate (if exposed to users)
+- Reformulation rate: users who immediately rephrase and re-ask
+- Session abandonment after the first response
+- Follow-up contact rate for support features
+
+These signals do not require an automated judge and reflect actual user experience. A spike in reformulation rate often precedes a quality alert from automated scoring by hours.
+
+**Signal 3: Periodic golden set re-evaluation**
+
+Run your golden evaluation dataset nightly against production. A regression here -- where cases that previously passed now fail -- is the clearest signal of a true quality change.
+
+## Diagnosing the root cause
+
+When you detect degradation, follow a checklist:
+
+1. **Check model provider changelog**: did the provider release a model update? This is the most common silent cause.
+2. **Check retrieval index freshness**: for RAG features, is the index stale?
+3. **Check recent prompt changes**: review the git history for any prompt modifications in the past 7 days.
+4. **Check query distribution shift**: compute the embedding distribution of current queries and compare to baseline.
+5. **Check for context size creep**: are prompts growing longer from feature additions?
+
+## Building a degradation response playbook
+
+Document the response process before you need it:
+
+```
+1. Alert fires on rolling quality metric
+2. Check provider status page
+3. Check recent deploy history for prompt changes
+4. Run golden set locally against current production config
+5. Identify failing case categories
+6. If provider-caused: wait for resolution or activate fallback
+7. If prompt-caused: roll back and run eval on the fix before re-deploying
+8. If distribution shift: add failing case types to golden set and iterate
+```
+
+## Avoiding alert fatigue
+
+Alert on sustained degradation (rolling averages over meaningful sample sizes), not individual low-scored responses. Use two-threshold alerting:
+- **Warning**: rolling pass rate drops below 85% (investigate)
+- **Critical**: rolling pass rate drops below 75% (incident)
+
+## Self-study prompts
+
+- Implement a `DriftDetector` class that maintains a 30-day rolling baseline and z-scores incoming quality metrics.
+- Research how LangSmith's "experiments" feature compares prompt versions against production traces.
+- Read about statistical process control (SPC) and how control charts apply to AI quality monitoring.
+
+## Interview takeaway
+
+Quality degradation detection requires a parallel quality signal pipeline alongside system health monitoring. Sample continuously, maintain a rolling baseline, alert on sustained shifts not individual spikes, and have a diagnosis playbook ready before the first alert fires. The engineer who can describe this workflow in detail has clearly operated production AI features under real conditions.
+""",
+        "tags_json": ["evaluation", "monitoring", "production", "drift-detection", "observability"],
+    },
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "Compare LLM-as-judge evaluation with deterministic metrics. When would you use each?",
+        "answer_outline_md": """## What this question tests
+
+The interviewer wants to see that you understand the trade-offs between automated quality measurement approaches and can choose the right tool for the task, rather than defaulting to one approach for everything.
+
+## Deterministic metrics
+
+Deterministic metrics compute a score without calling an LLM. Examples:
+- **Exact match**: the response equals the expected answer (normalized)
+- **Schema validation**: the response parses as valid JSON with required fields
+- **Code execution**: the generated code passes a test suite
+- **BLEU/ROUGE**: n-gram overlap between response and reference text
+
+**Strengths:**
+- Fast and cheap -- no additional LLM calls
+- Reproducible -- same input always produces the same score
+- No model bias
+- Debuggable -- you can inspect exactly why a case failed
+
+**Weaknesses:**
+- Only works when the correct answer is enumerable or verifiable
+- Penalizes valid paraphrases (exact match rejects a correct answer in different words)
+- Cannot assess nuanced quality dimensions (helpfulness, tone, depth)
+- BLEU/ROUGE are poor proxies for generation quality in most real tasks
+
+**When to use:**
+- Structured extraction (JSON fields, dates, named entities)
+- Classification tasks with known labels
+- Code generation where tests exist
+- Any task where you can define "correct" without ambiguity
+
+## LLM-as-judge
+
+An LLM evaluates the response against a rubric, returning a score and rationale. The judge can assess: helpfulness, faithfulness, relevance, tone, safety.
+
+**Strengths:**
+- Scales to tasks where correct answers cannot be enumerated
+- Can assess nuanced quality dimensions
+- Closer to human judgment than n-gram metrics
+- Can provide rationale for low scores (useful for debugging)
+
+**Weaknesses:**
+- Expensive -- each evaluation requires an additional LLM call
+- Non-reproducible -- scores may vary across runs
+- Model bias -- judges favor responses similar to their own style, length, and register
+- Self-judging inflation -- using the same model to generate and evaluate inflates scores
+- Rubric dependency -- a vague rubric produces inconsistent results
+
+**When to use:**
+- Open-ended generation (summarization, explanation, creative tasks)
+- Faithfulness assessment in RAG systems
+- Helpfulness evaluation where "helpful" is context-dependent
+- Tasks where human annotation would be required but is too expensive at scale
+
+## The hybrid approach in practice
+
+Most production eval pipelines use both:
+
+```
+Every response -> fast deterministic checks (format, safety classifier, length)
+        |  (pass)
+Sample 10% -> LLM judge for quality dimensions (helpfulness, faithfulness)
+        |
+Nightly golden set -> both deterministic AND LLM judge for regression detection
+```
+
+The fast deterministic layer catches structural failures immediately. The sampled LLM judge layer catches quality degradation over time.
+
+## Calibration is non-negotiable
+
+Before trusting LLM-as-judge scores in production, calibrate your judge against human labels on 30-50 cases. Compute Spearman correlation or percent agreement. If correlation is below 0.7, the rubric needs work. Deterministic metrics do not need calibration -- their validity is definitional.
+
+## Common mistakes
+
+1. Using LLM-as-judge for tasks where deterministic scoring works perfectly fine -- it is slower and more expensive with no benefit.
+2. Using the same provider and model as both generator and judge -- the judge will rate its own style highly.
+3. Treating LLM judge scores as ground truth without human calibration.
+4. Using BLEU/ROUGE for conversational tasks -- they measure surface overlap, not semantic quality.
+
+## Self-study prompts
+
+- Pick a task you have built and list all the metrics you would apply -- separate deterministic from LLM-judge.
+- Implement a calibration function that computes Spearman correlation between judge scores and a set of human labels.
+- Read the original RAGAS paper to understand how it constructs faithfulness and relevance metrics.
+
+## Interview takeaway
+
+Deterministic metrics are precise, fast, and trustworthy for verifiable tasks. LLM-as-judge scales to nuanced quality assessment where human annotation would be required. The skill is knowing which failure modes each approach catches, combining them in a layered pipeline, and always calibrating judge-based metrics against human labels before trusting them to gate production deployments.
+""",
+        "tags_json": ["evaluation", "llm-judge", "metrics", "testing"],
+    },
+
 ]
 
 INTERVIEW_PROMPTS = [
