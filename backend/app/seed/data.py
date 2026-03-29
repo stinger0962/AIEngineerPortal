@@ -26,616 +26,1122 @@ LEARNING_LIBRARY = [
         "lessons": [
             {
                 "title": "Python runtime habits that matter in AI work",
-                "summary": "Focus on data modeling, IO boundaries, debugging, and iteration speed rather than syntax memorization.",
-                "content_md": """## Why this path starts with Python
+                "summary": "Data modeling with Pydantic, boundary layers for API responses, idempotent scripts, and logging patterns for AI debugging.",
+                "content_md": """## Why this matters
 
-For an experienced full-stack engineer, the Python gap is usually not syntax. The real gap is confidence under pressure while moving through provider SDKs, JSON payloads, scripts, evaluation loops, and one-off debugging sessions.
+For a senior full-stack engineer, the Python gap is rarely syntax. It is confidence under operational pressure: provider SDKs returning semi-structured payloads, ingestion scripts that need to be reruns weeks later, evaluation loops where a silent failure quietly corrupts a benchmark, and debugging sessions where the real failure was shape mismatch not model quality.
 
-If JavaScript and TypeScript taught you how to ship product features, Python should now become your fast execution language for:
+The habits in this lesson are about closing that gap fast.
 
-- API integrations
-- ingestion and ETL scripts
-- evaluation tooling
-- retrieval pipelines
-- experiment harnesses
-- lightweight services
+## Core concepts
 
-## The operating principle
+### Pydantic at the boundary
 
-In AI work, Python is the language that sits closest to the messy boundary between an idea and a working system. That means your Python habits should optimize for:
+Every AI system has at least three categories of external input: provider API responses, documents or files being ingested, and configuration or environment values. Each one can fail silently if you let raw dicts propagate inward.
 
-- readable control flow
-- explicit inputs and outputs
-- lightweight validation
-- fast debugging
-- safe serialization
-- rerunnable scripts
-
-## What good Python feels like in AI work
-
-A good Python module in an AI system should feel calm to read. You should be able to answer:
-
-1. What comes in?
-2. What gets validated?
-3. What gets transformed?
-4. What leaves the boundary?
-5. What happens when something fails?
-
-When those answers are unclear, AI systems get fragile quickly because the payloads are semi-structured and the failure modes are messy.
-
-## Runtime habits that compound
-
-### 1. Name the boundary clearly
-
-A provider response, uploaded file, benchmark row, or retrieved chunk is a boundary. Treat it like one.
-
-Bad habit:
-
-- pass the raw payload everywhere and let downstream code guess structure
-
-Better habit:
-
-- normalize once at the edge
-- raise or record errors early
-- keep the middle of the system boring
-
-### 2. Log enough to debug, not enough to drown
-
-In AI systems, debugging often means inspecting:
-
-- request identifiers
-- provider or model name
-- retry count
-- latency
-- prompt or context version
-- schema mismatch reason
-
-If your logs do not preserve the path of failure, you will keep changing prompts when the real issue is payload shape or retrieval quality.
-
-### 3. Prefer small functions with obvious return shapes
-
-Many Python bugs in AI projects come from helper functions that quietly return different shapes in different branches. Keep return values stable.
+Pydantic's job is to be the gatekeeper at those entry points.
 
 ```python
-from typing import TypedDict
+from pydantic import BaseModel, Field, field_validator
 
 
-class NormalizedResponse(TypedDict):
-    request_id: str
-    content: str
-    status: str
-
-
-def normalize_provider_payload(payload: dict) -> NormalizedResponse:
-    return {
-        "request_id": str(payload.get("id", "missing")),
-        "content": str(payload.get("content", "")).strip(),
-        "status": str(payload.get("status", "ok")),
-    }
-```
-
-This is not fancy. That is the point. In AI engineering, boring boundaries are a competitive advantage.
-
-### 4. Make scripts rerunnable
-
-Many high-leverage AI tasks live in scripts:
-
-- dataset preparation
-- benchmark generation
-- document cleanup
-- ingestion backfills
-- prompt experiment exports
-
-If a script is not idempotent, you cannot trust it after the first run.
-
-Practical rules:
-
-- use explicit input and output paths
-- do not silently overwrite valuable artifacts
-- print summary stats at the end
-- make failure conditions visible
-
-## A concrete mental model
-
-When you write Python for AI systems, think in layers:
-
-- boundary layer: requests, files, provider responses, queue payloads
-- transformation layer: shaping, cleaning, scoring, filtering
-- orchestration layer: retries, sequencing, branching, persistence
-- review layer: logs, traces, metrics, evaluation output
-
-Your speed improves once each layer has a clean responsibility.
-
-## Common failure patterns
-
-Watch for these early:
-
-- one function fetching data, validating it, logging, retrying, and formatting the UI payload all at once
-- hidden mutation of shared dicts
-- magical string keys sprinkled across the codebase
-- scripts that only work from one local directory
-- exception handling that swallows the failure reason
-
-## What to practice after this lesson
-
-- normalize one loose payload into a typed internal shape
-- rewrite one AI script so it is safe to rerun
-- add one log line that would actually help you debug a provider failure
-
-## Takeaway
-
-The win is not becoming a Python trivia expert. The win is becoming fast and trustworthy when AI systems hand you messy inputs, weak guarantees, and operational ambiguity.
-""",
-                "estimated_minutes": 50,
-            },
-            {
-                "title": "Modeling data with dicts, dataclasses, and Pydantic",
-                "summary": "Use strict validation at boundaries and keep the middle of the system simple.",
-                "content_md": """## Data modeling choices
-
-AI systems move semi-structured data around constantly. That does not mean everything should stay an untyped dict forever.
-
-The practical question is not which modeling approach is best. It is where you need speed and where you need trust.
-
-## A useful rule of thumb
-
-- use dicts for fast exploration
-- use dataclasses for stable internal objects
-- use Pydantic for boundaries you cannot afford to guess at
-
-## Dicts: good for discovery, risky as a long-term contract
-
-Dicts are perfect when:
-
-- the payload shape is still changing
-- you are prototyping an integration
-- you are inspecting raw documents or responses
-
-But if a dict crosses too many layers, the whole system becomes a rumor about structure instead of a contract.
-
-## Dataclasses: good for internal clarity
-
-Dataclasses work well when you already know the shape and want readable internal code.
-
-```python
-from dataclasses import dataclass
-
-
-@dataclass
-class RetrievedChunk:
-    doc_id: str
-    text: str
-    score: float
-    source: str
-```
-
-This is great for the middle of the system where you want:
-
-- readable attributes
-- low ceremony
-- clear intent
-
-## Pydantic: use it where trust matters
-
-Pydantic is strongest at system boundaries:
-
-- request validation
-- response normalization
-- persistence contracts
-- config parsing
-
-Why? Because these are the places where bad assumptions become production bugs.
-
-```python
-from pydantic import BaseModel, Field
-
-
-class ProviderResult(BaseModel):
+class LLMResponse(BaseModel):
     request_id: str = Field(min_length=1)
     content: str
     model: str
-    latency_ms: int
+    latency_ms: int = Field(ge=0)
+    finish_reason: str = "stop"
+
+    @field_validator("content")
+    @classmethod
+    def content_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("LLM returned empty content")
+        return v.strip()
 ```
 
-If the provider returns nonsense, you find out immediately instead of carrying silent damage downstream.
+If the provider sends `{"content": null}`, you find out at the boundary instead of discovering it three layers downstream as an `AttributeError` on `NoneType`.
 
-## A layered pattern that works well
+### Boundary layers as an architectural habit
 
-Try this pattern:
+Think of your system in four layers:
 
-1. receive raw payload as dict
-2. validate and normalize with Pydantic
-3. convert to simpler internal objects when helpful
-4. emit stable shapes at the next boundary
+1. **Boundary layer** — provider responses, uploaded files, queue payloads, environment config. This is where Pydantic lives.
+2. **Transformation layer** — cleaning, scoring, filtering, reshaping. Use simple dataclasses or TypedDicts here.
+3. **Orchestration layer** — retries, sequencing, branching, persistence decisions.
+4. **Review layer** — logs, traces, metrics, evaluation output.
 
-This keeps your code flexible without becoming vague.
+The rule: keep transformation and orchestration logic ignorant of raw external shapes. If a provider changes their response schema, only the boundary model needs to change.
 
-## How this shows up in real portal work
+### Idempotent scripts
 
-Examples:
+Most high-leverage AI work happens in scripts: ingestion backfills, benchmark generation, dataset cleanup, prompt experiment exports. If a script cannot be safely rerun, it is not ready for real use.
 
-- news ingestion starts as raw remote payloads
-- jobs ingestion normalizes inconsistent fields across sources
-- learning and interview APIs return stable shapes to the frontend
-- project data should stay explicit so scoring and recommendations remain trustworthy
+Idempotent script checklist:
 
-## Decision guide
-
-Use a dict when:
-
-- you are exploring
-- the schema is not stable
-- the value of speed is higher than the value of guarantees
-
-Use a dataclass when:
-
-- the shape is stable inside your application
-- you want clean, readable internal code
-
-Use Pydantic when:
-
-- external systems are involved
-- bad input would be expensive
-- you need reliable validation, parsing, and error messages
-
-## Mistakes to avoid
-
-- validating nowhere
-- validating everywhere
-- using Pydantic models deep in the middle of code that only needs simple objects
-- pretending a dict is temporary for months
-
-## Practice prompt
-
-Take one portal payload and decide:
-
-- what is raw input?
-- what is the normalized boundary model?
-- what is the simplest internal shape after validation?
-
-## Takeaway
-
-Good Python data modeling is not about purity. It is about being strict where ambiguity is dangerous and lightweight where speed matters.
-""",
-                "estimated_minutes": 55,
-            },
-            {
-                "title": "Async IO for provider calls and ingestion work",
-                "summary": "Use async where network waiting dominates and make timeout and retry behavior explicit.",
-                "content_md": """## Async patterns that pay off
-
-Async matters in AI work because many valuable operations are waiting problems, not CPU problems.
-
-Examples:
-
-- provider calls
-- multi-document fetches
-- crawling and ingestion
-- retrieval fan-out
-- health checks across dependencies
-
-## The decision rule
-
-Use async when network waiting dominates. Do not use it just because it sounds more advanced.
-
-If you are doing mostly CPU-bound data transforms, async may add complexity without speeding anything up.
-
-## Where async really helps
-
-### Provider integrations
-
-You may need to:
-
-- call a model provider
-- fetch citations
-- store traces
-- query a cache
-
-Those waits stack up quickly if they happen serially.
-
-### Ingestion pipelines
-
-News, jobs, or document pipelines often need to fetch many remote resources in parallel. Async lets you improve throughput without starting with a heavy worker architecture.
-
-## What to make explicit
-
-Async code becomes trustworthy when four things are visible:
-
-- timeout policy
-- retry policy
-- concurrency limits
-- failure logging
-
-If those are hidden, the system may look fast when healthy and become impossible to debug when degraded.
-
-## Example shape
-
-```python
-import asyncio
-
-
-async def fetch_with_timeout(client, url: str) -> dict:
-    return await asyncio.wait_for(client.get(url), timeout=8)
-```
-
-That line is simple, but it expresses an operational decision: this fetch should not hang forever.
-
-## Concurrency is a budget, not a badge
-
-Calling 100 upstream services at once is not maturity. It is often a missing control surface.
-
-Prefer:
-
-- small bounded batches
-- explicit semaphores
-- measured retries
-
-This matters especially when working with provider rate limits or unstable external feeds.
-
-## Mixing sync and async
-
-Two common mistakes:
-
-- calling blocking libraries inside async code
-- forcing async into parts of the system that do not need it
-
-If a dependency is blocking, either keep the path synchronous or isolate the blocking work so the async layer stays honest.
-
-## Debugging async code
-
-You need logs that preserve:
-
-- which task failed
-- which request or URL was involved
-- whether it timed out, retried, or gave up
-
-Without that, async failures feel random even when they are systematic.
-
-## Portal-specific examples
-
-Async is a good fit here for:
-
-- external signal refresh
-- provider-backed assistants in later phases
-- document ingestion and retrieval fan-out
-
-It is not automatically the best fit for:
-
-- every lesson endpoint
-- simple CRUD routes
-- local transformations that are already fast
-
-## Practice prompt
-
-Take one sync network call in your head and ask:
-
-1. What is the timeout?
-2. What is retryable?
-3. What is the concurrency limit?
-4. What gets logged when it fails?
-
-If you cannot answer those, you do not have an operational async design yet.
-
-## Takeaway
-
-Async is valuable when it makes waiting explicit and controlled. It is not a goal on its own.
-""",
-                "estimated_minutes": 50,
-            },
-            {
-                "title": "File handling, serialization, and safe evaluation scripts",
-                "summary": "Write scripts you can trust repeatedly for dataset prep, prompt experiments, and benchmark runs.",
-                "content_md": """## Script quality matters
-
-Some of the most important AI engineering work never appears in the user-facing product. It happens in scripts:
-
-- data cleanup
-- benchmark creation
-- export jobs
-- prompt experiment runners
-- trace analysis
-
-Weak scripts create invisible instability. Strong scripts create leverage.
-
-## The bar for a good script
-
-A good AI script should be:
-
-- explicit about inputs
-- explicit about outputs
-- safe to rerun
-- easy to inspect after execution
-
-## Prefer pathlib and stable paths
-
-Use `pathlib` so file behavior is readable and portable.
+- write to a new output file or use an explicit `--overwrite` flag
+- skip rows that were already processed rather than reprocessing blindly
+- print summary counts at the end: processed, skipped, failed
+- capture failures per row rather than aborting the entire run
 
 ```python
 from pathlib import Path
 
 
-INPUT_PATH = Path("data/raw/eval.jsonl")
-OUTPUT_PATH = Path("data/processed/eval-clean.jsonl")
-```
+def run_pipeline(input_path: Path, output_path: Path, overwrite: bool = False) -> None:
+    if output_path.exists() and not overwrite:
+        raise FileExistsError(f"{output_path} already exists. Pass overwrite=True to replace it.")
 
-Hard-coded ad hoc paths make scripts fragile, especially when you revisit them weeks later.
+    rows = [json.loads(line) for line in input_path.read_text().splitlines() if line.strip()]
+    processed, skipped, failed = [], [], []
 
-## JSONL is often the right default
-
-For AI experiments, JSONL works well because:
-
-- each row is inspectable
-- partial writes are easier to reason about
-- downstream tools can stream it
-
-Use full JSON when the artifact is naturally one object. Use JSONL when you are processing records.
-
-## Idempotence matters
-
-If a script cannot be rerun safely, it is not ready.
-
-Strategies:
-
-- write to a new output file
-- support overwrite explicitly, not silently
-- include a dry-run mode when useful
-- print counts for processed, skipped, and failed rows
-
-## Make failures actionable
-
-Do not just say failed. Capture:
-
-- which input row or file failed
-- why it failed
-- how many items were skipped
-
-That turns a broken run into a debugging task instead of a mystery.
-
-## Evaluation script checklist
-
-Before trusting an evaluation script, check:
-
-- where do inputs come from?
-- what version of prompt or rubric is being used?
-- where are outputs stored?
-- can I compare this run to a previous run?
-- what happens if one row is malformed?
-
-## A small reliable pattern
-
-```python
-def process_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
-    cleaned = []
-    failures = []
     for row in rows:
         try:
-            cleaned.append(transform_row(row))
+            result = transform(row)
+            processed.append(result)
         except Exception as exc:
-            failures.append({"row_id": row.get("id"), "error": str(exc)})
-    return cleaned, failures
+            failed.append({"id": row.get("id"), "error": str(exc)})
+
+    output_path.write_text("\\n".join(json.dumps(r) for r in processed))
+    print(f"Done: {len(processed)} processed, {len(skipped)} skipped, {len(failed)} failed")
 ```
 
-This is simple, but it creates the foundation for honest reruns and post-run review.
+### Logging for AI debugging
 
-## Portal-specific leverage
+Standard application logging covers request/response cycles. AI debugging needs more:
 
-In this portal, strong script habits matter for:
+- which model and which prompt version produced the output
+- the retry count and whether a fallback was used
+- how long the provider call took
+- why a specific chunk was retrieved or excluded
+- what the validation failure reason was
 
-- seeding durable content
-- refreshing intelligence feeds
-- building future evaluation packs
-- generating practice artifacts
+```python
+import logging
+import time
 
-## Practice prompt
+logger = logging.getLogger(__name__)
 
-Take one script you would trust least in production and improve it by adding:
 
-- explicit paths
-- summary output
-- non-destructive write behavior
-- row-level failure capture
+async def call_provider(request: LLMRequest) -> LLMResponse:
+    start = time.monotonic()
+    try:
+        raw = await provider_client.generate(request.model_dump())
+        response = LLMResponse.model_validate(raw)
+        logger.info(
+            "provider_call_ok",
+            extra={
+                "request_id": request.request_id,
+                "model": request.model,
+                "latency_ms": int((time.monotonic() - start) * 1000),
+                "finish_reason": response.finish_reason,
+            },
+        )
+        return response
+    except Exception as exc:
+        logger.error(
+            "provider_call_failed",
+            extra={
+                "request_id": request.request_id,
+                "model": request.model,
+                "latency_ms": int((time.monotonic() - start) * 1000),
+                "error": str(exc),
+            },
+        )
+        raise
+```
 
-## Takeaway
+This pattern gives you structured log events that are queryable. When something goes wrong at 2 AM, you want to filter by `request_id` or `model`, not scan freeform strings.
 
-Good scripts are not glamorous, but they are one of the clearest signs that your AI work can survive beyond a single demo run.
+## Working example
+
+A full boundary + logging pattern for a document ingestion step:
+
+```python
+import json
+import logging
+from pathlib import Path
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+
+
+class RawDocument(BaseModel):
+    doc_id: str = Field(min_length=1)
+    title: str
+    body: str = Field(min_length=10)
+    source_url: str
+
+
+def ingest_documents(raw_path: Path, output_path: Path) -> None:
+    lines = raw_path.read_text().splitlines()
+    good, bad = [], []
+
+    for i, line in enumerate(lines):
+        try:
+            doc = RawDocument.model_validate_json(line)
+            good.append({"id": doc.doc_id, "title": doc.title, "body": doc.body})
+        except Exception as exc:
+            bad.append({"line": i, "error": str(exc)})
+            logger.warning("doc_parse_failed", extra={"line": i, "error": str(exc)})
+
+    output_path.write_text("\\n".join(json.dumps(d) for d in good))
+    logger.info("ingestion_complete", extra={"ok": len(good), "failed": len(bad)})
+    print(f"Ingested {len(good)} docs, {len(bad)} failures")
+```
+
+## Common mistakes
+
+**Validating too late.** Passing raw dicts through multiple functions before checking for required fields means failures surface far from their origin. Validate immediately at the boundary.
+
+**Logs that only describe success.** `logger.info("Request completed")` tells you nothing useful when diagnosing production issues. Log the identifiers, model, latency, and failure reason every time.
+
+**Scripts that require manual cleanup after partial failures.** If a script processes 80% of rows then crashes, a non-idempotent version leaves you guessing which rows were already processed. Capture per-row failures and write outputs atomically.
+
+**Using print instead of structured logging in production code.** Print is fine in notebooks. In services and scripts that run on a schedule, structured logs give you the queryability you need to debug at scale.
+
+## Try it yourself
+
+1. Take any AI script you have and add per-row failure capture. Run it on a dataset with one intentionally malformed row and verify the failure is captured without aborting the run.
+2. Add structured logging to one provider call. Include request ID, model, latency, and any validation failure reason.
+3. Write a Pydantic model for a provider response you use. Add a validator that catches at least one real edge case you have seen in the wild.
 """,
-                "estimated_minutes": 45,
+                "estimated_minutes": 60,
             },
             {
-                "title": "Turning Python fluency into portfolio leverage",
-                "summary": "Use Python skills to make every project more credible through APIs, tooling, and repeatability.",
-                "content_md": """## Portfolio move
+                "title": "Async patterns for AI workloads",
+                "summary": "asyncio for concurrent LLM calls, gathering multiple provider requests, rate limiting with semaphores, and connection pooling.",
+                "content_md": """## Why this matters
 
-Python fluency becomes valuable in your transition when it changes how your projects feel to another engineer or hiring manager.
+AI workloads are overwhelmingly I/O bound. A single LLM call takes 300ms to 3 seconds. If you process 50 documents serially, you are waiting for minutes of cumulative network time. Async Python lets you turn that serial wait into concurrent requests — often achieving 10x throughput improvement with minimal code change.
 
-The question is not Did I use Python.
+But async also has sharp edges. Unconstrained concurrency hammers provider rate limits. Blocking calls inside async code stall the entire event loop. Missing timeouts turn degraded providers into hung services. This lesson covers the patterns that pay off and the mistakes that create new problems.
 
-The question is:
+## Core concepts
 
-Did Python make this project look more engineered, more testable, and more production-shaped?
+### asyncio.gather for concurrent LLM calls
 
-## What Python can signal in a portfolio
+The most common async pattern in AI work is gathering a batch of independent calls:
 
-Done well, Python can show:
+```python
+import asyncio
+from typing import Any
 
-- clean API boundaries
-- typed request and response models
-- scriptable evaluation workflows
-- ingestion or retrieval tooling
-- deployment-ready service structure
-- debugging-friendly logs and traces
 
-## What weak portfolio Python looks like
+async def batch_generate(prompts: list[str], client) -> list[dict]:
+    tasks = [client.generate(prompt) for prompt in prompts]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return [r for r in results if not isinstance(r, Exception)]
+```
 
-- one notebook with no clean interface
-- scripts with no stable inputs or outputs
-- provider code scattered across the project
-- no explanation of runtime tradeoffs
+`return_exceptions=True` is important: without it, a single failure cancels all pending tasks. With it, you get exceptions back as values and can handle them per-item.
 
-That may still demonstrate curiosity, but it does not yet demonstrate AI engineering.
+### Rate limiting with semaphores
 
-## What stronger portfolio Python looks like
+Calling 50 LLM endpoints simultaneously will saturate provider rate limits. A `Semaphore` limits concurrency to a safe window:
 
-### 1. A clean service boundary
+```python
+import asyncio
 
-Even a small FastAPI surface helps. It shows:
 
-- inputs
-- outputs
-- validation
-- separation between UI and backend logic
+async def rate_limited_generate(
+    prompts: list[str],
+    client,
+    max_concurrent: int = 5,
+) -> list[dict | Exception]:
+    semaphore = asyncio.Semaphore(max_concurrent)
 
-### 2. Evaluation or benchmark tooling
+    async def _one(prompt: str) -> dict:
+        async with semaphore:
+            return await client.generate(prompt)
 
-This is especially valuable because it signals maturity. Many demo projects can answer a question once; fewer can measure quality across runs.
+    return await asyncio.gather(*[_one(p) for p in prompts], return_exceptions=True)
+```
 
-### 3. Useful internal scripts
+Choose `max_concurrent` based on the provider's documented rate limit. For OpenAI's API tier, 5-10 concurrent requests is a safe starting point.
 
-Examples:
+### Timeout handling
 
-- `prepare_eval_set.py`
-- `replay_failed_cases.py`
-- `backfill_chunks.py`
-- `score_run.py`
+Every network call needs an explicit timeout. Without one, a slow or hung provider blocks your task indefinitely:
 
-Those filenames communicate discipline immediately.
+```python
+import asyncio
 
-### 4. Debuggable operational behavior
 
-If your project logs useful runtime details and exposes health assumptions clearly, it feels more like a real system than a prototype.
+async def generate_with_timeout(client, prompt: str, timeout_s: float = 30.0) -> dict:
+    try:
+        return await asyncio.wait_for(client.generate(prompt), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        raise TimeoutError(f"Provider call timed out after {timeout_s}s")
+```
 
-## A practical portfolio checklist
+In practice, set timeouts at two levels: per-request (30–60s for LLM calls) and per-batch (total wall clock limit for the whole gather).
 
-For each project, ask:
+### Connection pooling
 
-- Is there at least one stable Python boundary?
-- Is there at least one script or utility that makes the project repeatable?
-- Is there evidence of validation and failure handling?
-- Can I explain the architecture in interview language?
+For high-throughput scenarios, creating a new HTTP connection per request is expensive. Use a shared `httpx.AsyncClient` or `aiohttp.ClientSession` across the lifetime of the service:
 
-## How this applies to your portal
+```python
+import httpx
+from contextlib import asynccontextmanager
 
-Good candidates for Python-heavy portfolio proof include:
 
-- the evaluation dashboard
-- a retrieval-backed assistant
-- a jobs or signal ingestion service
-- future adaptive practice generation
+class ProviderClient:
+    def __init__(self, base_url: str, api_key: str) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=httpx.Timeout(30.0),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
 
-## Practice prompt
+    async def generate(self, payload: dict) -> dict:
+        response = await self._client.post("/v1/generate", json=payload)
+        response.raise_for_status()
+        return response.json()
 
-Take one current project and add one Python artifact that makes it more credible:
+    async def close(self) -> None:
+        await self._client.aclose()
+```
 
-- an API route
-- a typed boundary model
-- an evaluation script
-- a replay or debug utility
+The `limits` parameter controls the connection pool size. A pool of 10-20 connections is usually the right balance between throughput and resource consumption.
 
-## Takeaway
+### Retry with exponential backoff
 
-Python becomes portfolio leverage when it demonstrates engineering discipline, not just model access.
+Provider calls fail transiently. A retry wrapper with bounded backoff handles most cases:
+
+```python
+import asyncio
+import random
+
+
+async def with_retry(
+    coro_fn,
+    *args,
+    max_attempts: int = 3,
+    base_delay: float = 1.0,
+    **kwargs,
+):
+    last_exc = None
+    for attempt in range(max_attempts):
+        try:
+            return await coro_fn(*args, **kwargs)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_attempts - 1:
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+                await asyncio.sleep(delay)
+    raise last_exc
+```
+
+The jitter (`random.uniform`) prevents thundering herd problems when many retries fire simultaneously.
+
+## Working example
+
+A complete async batch processor that combines all the patterns:
+
+```python
+import asyncio
+import logging
+import time
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+async def process_batch(
+    items: list[dict],
+    client: ProviderClient,
+    max_concurrent: int = 5,
+    timeout_s: float = 30.0,
+) -> tuple[list[dict], list[dict]]:
+    semaphore = asyncio.Semaphore(max_concurrent)
+    successes, failures = [], []
+
+    async def _process_one(item: dict) -> dict:
+        async with semaphore:
+            start = time.monotonic()
+            result = await asyncio.wait_for(
+                with_retry(client.generate, item["prompt"]),
+                timeout=timeout_s,
+            )
+            logger.info(
+                "item_processed",
+                extra={"id": item["id"], "latency_ms": int((time.monotonic() - start) * 1000)},
+            )
+            return {"id": item["id"], "result": result}
+
+    tasks = [_process_one(item) for item in items]
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for item, result in zip(items, raw_results):
+        if isinstance(result, Exception):
+            failures.append({"id": item["id"], "error": str(result)})
+        else:
+            successes.append(result)
+
+    return successes, failures
+```
+
+## Common mistakes
+
+**Blocking calls inside async functions.** `time.sleep()`, `requests.get()`, or any synchronous I/O inside an `async def` blocks the entire event loop. Use `asyncio.sleep()`, `httpx.AsyncClient`, or `asyncio.to_thread()` to run blocking code without stalling other coroutines.
+
+**Forgetting `return_exceptions=True` in gather.** Without it, one failure cancels all pending tasks. In a batch of 50 documents, one bad payload kills the other 49.
+
+**No timeout on provider calls.** A provider that starts hanging instead of returning errors will stall your event loop indefinitely. Always wrap with `asyncio.wait_for`.
+
+**Creating a new HTTP session per request.** Session creation involves TCP handshakes and TLS negotiation. Reuse a single `AsyncClient` for the lifetime of the process or request context.
+
+**Treating semaphore count as a performance dial.** Max concurrent is an operational decision based on rate limits, not a number to maximize. Setting it too high causes 429 errors; too low wastes throughput. Start conservative and measure.
+
+## Try it yourself
+
+1. Take a script that processes documents serially with a synchronous HTTP client. Rewrite it to use `asyncio.gather` with a semaphore of 5. Measure the wall-clock time difference on 20 documents.
+2. Add retry logic to a provider call that currently has none. Verify it handles a transient `500` error without propagating the exception.
+3. Profile a batch job: use `time.monotonic()` around the gather call and log the total latency along with the per-item breakdown. Find which items took longest.
 """,
-                "estimated_minutes": 45,
+                "estimated_minutes": 65,
+            },
+            {
+                "title": "Data pipelines for AI ingestion",
+                "summary": "Processing documents for ingestion, streaming data transformations, generators for memory efficiency, and batch vs stream processing tradeoffs.",
+                "content_md": """## Why this matters
+
+AI systems consume data at unusual scales: millions of tokens per ingestion run, thousands of documents per embedding batch, streaming responses that need to be parsed and forwarded in real time. Naive approaches — loading everything into memory, processing records one by one in a tight loop, materializing intermediate lists everywhere — work fine in notebooks and fail quietly in production.
+
+The patterns in this lesson let you build pipelines that are memory-efficient, composable, and debuggable.
+
+## Core concepts
+
+### Generators for memory efficiency
+
+A list comprehension materializes all results in memory at once. A generator yields one item at a time, consuming constant memory regardless of input size.
+
+```python
+# This loads all 100K documents into memory simultaneously
+all_chunks = [chunk for doc in documents for chunk in split_doc(doc)]
+
+# This yields one chunk at a time, using O(1) memory
+def stream_chunks(documents):
+    for doc in documents:
+        yield from split_doc(doc)
+```
+
+For large document collections, the generator version lets you process a 10GB JSONL file on a machine with 2GB of RAM.
+
+### Generator pipelines with composition
+
+Generators compose cleanly into pipeline stages:
+
+```python
+from pathlib import Path
+from typing import Iterator
+import json
+
+
+def read_jsonl(path: Path) -> Iterator[dict]:
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                yield json.loads(line)
+
+
+def filter_valid(records: Iterator[dict]) -> Iterator[dict]:
+    for record in records:
+        if record.get("body") and len(record["body"]) >= 100:
+            yield record
+
+
+def normalize(records: Iterator[dict]) -> Iterator[dict]:
+    for record in records:
+        yield {
+            "id": record["id"],
+            "text": record["body"].strip(),
+            "metadata": {"source": record.get("source", "unknown")},
+        }
+
+
+def write_jsonl(records: Iterator[dict], path: Path) -> int:
+    count = 0
+    with path.open("w") as f:
+        for record in records:
+            f.write(json.dumps(record) + "\\n")
+            count += 1
+    return count
+
+
+# Compose into a pipeline:
+pipeline = normalize(filter_valid(read_jsonl(Path("docs.jsonl"))))
+total = write_jsonl(pipeline, Path("docs-clean.jsonl"))
+print(f"Wrote {total} records")
+```
+
+Each stage is a generator that lazily pulls from the previous one. Memory stays constant. Adding a new transformation means inserting one function in the chain.
+
+### Batch processing for embedding
+
+Embedding APIs accept batches. Processing one document at a time is ~100x slower than batching:
+
+```python
+from typing import Iterator
+
+
+def batch(items: Iterator[dict], size: int) -> Iterator[list[dict]]:
+    batch = []
+    for item in items:
+        batch.append(item)
+        if len(batch) >= size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+async def embed_pipeline(records: Iterator[dict], client, batch_size: int = 100) -> Iterator[dict]:
+    for chunk in batch(records, batch_size):
+        texts = [r["text"] for r in chunk]
+        embeddings = await client.embed(texts)  # one API call for the batch
+        for record, embedding in zip(chunk, embeddings):
+            yield {**record, "embedding": embedding}
+```
+
+For 100K documents with average 256 tokens each, processing in batches of 100 means 1,000 API calls instead of 100,000.
+
+### Streaming document processing
+
+When an LLM generates long outputs, streaming lets you forward tokens to the user as they arrive rather than waiting for the full response:
+
+```python
+import asyncio
+
+
+async def stream_to_output(response_stream, output_queue: asyncio.Queue) -> str:
+    full_text = ""
+    async for chunk in response_stream:
+        token = chunk.choices[0].delta.content or ""
+        full_text += token
+        await output_queue.put(token)  # forward to consumer
+    await output_queue.put(None)  # sentinel: stream ended
+    return full_text
+```
+
+The producer streams tokens to a queue. The consumer (a WebSocket sender, a file writer, a downstream processor) drains the queue independently.
+
+### Batch vs stream: when to use each
+
+Use **batch processing** when:
+- you control both ends of the pipeline (offline ingestion, evaluation runs)
+- throughput matters more than latency
+- partial results are not useful until the full batch completes
+
+Use **streaming** when:
+- you need to show partial results to a user (LLM responses, progress indicators)
+- the total output size is unbounded
+- downstream processing should start before all input is available (pipeline stages)
+
+## Working example
+
+A complete document ingestion pipeline combining generators, batching, and streaming write:
+
+```python
+import json
+import logging
+from pathlib import Path
+from typing import Iterator
+
+logger = logging.getLogger(__name__)
+
+
+def read_raw_docs(path: Path) -> Iterator[dict]:
+    for i, line in enumerate(path.open()):
+        try:
+            yield json.loads(line.strip())
+        except json.JSONDecodeError as exc:
+            logger.warning("parse_error", extra={"line": i, "error": str(exc)})
+
+
+def chunk_doc(doc: dict, max_chars: int = 1000) -> Iterator[dict]:
+    text = doc.get("body", "")
+    for i in range(0, len(text), max_chars):
+        yield {
+            "doc_id": doc["id"],
+            "chunk_index": i // max_chars,
+            "text": text[i : i + max_chars],
+            "metadata": doc.get("metadata", {}),
+        }
+
+
+def stream_chunks(docs: Iterator[dict]) -> Iterator[dict]:
+    for doc in docs:
+        yield from chunk_doc(doc)
+
+
+def write_chunks(chunks: Iterator[dict], path: Path) -> int:
+    count = 0
+    with path.open("w") as f:
+        for chunk in chunks:
+            f.write(json.dumps(chunk) + "\\n")
+            count += 1
+    return count
+
+
+def run_ingestion(input_path: Path, output_path: Path) -> None:
+    docs = read_raw_docs(input_path)
+    chunks = stream_chunks(docs)
+    total = write_chunks(chunks, output_path)
+    logger.info("ingestion_complete", extra={"chunks": total})
+    print(f"Ingested {total} chunks")
+```
+
+The entire pipeline processes one document at a time. A 10GB input file produces output without ever holding more than one document in memory.
+
+## Common mistakes
+
+**Collecting all results before writing.** `results = list(pipeline)` followed by writing defeats the memory benefits of generators. Stream results to the output file or database as they are produced.
+
+**No backpressure in streaming pipelines.** If a producer generates items faster than a consumer can process them, an unbounded queue grows without limit. Use `asyncio.Queue(maxsize=N)` to create backpressure.
+
+**Ignoring partial failures in batch jobs.** A single malformed document in a 100K batch should not abort the run. Catch exceptions per record, log them, and continue.
+
+**Re-reading large files multiple times.** If your pipeline needs to filter then transform, compose those operations into a single pass. Reading a 10GB file twice is unnecessary.
+
+## Try it yourself
+
+1. Write a generator pipeline that reads a JSONL file, filters records with missing required fields, normalizes the text, and writes the cleaned records to a new JSONL file. Verify that it handles a 100K-row file without memory issues.
+2. Add a batching stage to an embedding workflow. Compare wall-clock time for batch size 1, 10, and 100.
+3. Implement a streaming LLM response handler that accumulates the full text while forwarding tokens to a queue. Write a test that verifies the final accumulated text matches the concatenation of all streamed tokens.
+""",
+                "estimated_minutes": 65,
+            },
+            {
+                "title": "Type safety and validation patterns for AI systems",
+                "summary": "Advanced Pydantic patterns, discriminated unions for provider responses, generic types for AI abstractions, and runtime validation strategies.",
+                "content_md": """## Why this matters
+
+AI systems deal with a uniquely uncomfortable combination: structured types in your code, semi-structured data at provider boundaries, and model outputs that may or may not match the schema you specified. Weak typing means bugs that surface as silent data corruption rather than explicit errors. Strong typing — done at the right layer — gives you fast feedback, self-documenting code, and refactoring safety.
+
+This lesson covers the Pydantic and typing patterns that AI engineers reach for in real production systems.
+
+## Core concepts
+
+### Discriminated unions for provider responses
+
+Different LLM providers return fundamentally different response shapes. A naive approach uses optional fields and conditional logic everywhere. A discriminated union gives you a clean type per provider and exhaustive handling at the use site:
+
+```python
+from __future__ import annotations
+from typing import Literal, Union
+from pydantic import BaseModel
+
+
+class OpenAIResponse(BaseModel):
+    provider: Literal["openai"] = "openai"
+    id: str
+    choices: list[dict]
+    usage: dict
+
+    @property
+    def text(self) -> str:
+        return self.choices[0]["message"]["content"]
+
+
+class AnthropicResponse(BaseModel):
+    provider: Literal["anthropic"] = "anthropic"
+    id: str
+    content: list[dict]
+    stop_reason: str
+
+    @property
+    def text(self) -> str:
+        return self.content[0]["text"]
+
+
+class LocalResponse(BaseModel):
+    provider: Literal["local"] = "local"
+    text: str
+    model_path: str
+
+
+ProviderResponse = Union[OpenAIResponse, AnthropicResponse, LocalResponse]
+```
+
+Pydantic's discriminated union uses the `provider` literal field to route validation:
+
+```python
+from pydantic import TypeAdapter
+
+adapter = TypeAdapter(ProviderResponse)
+
+def parse_response(raw: dict, provider: str) -> ProviderResponse:
+    return adapter.validate_python({**raw, "provider": provider})
+```
+
+Now when you add a new provider, you add a new model class and Python's type checker will tell you every place that needs to handle the new case.
+
+### Generic types for AI abstractions
+
+When building reusable AI infrastructure, generics let you preserve type information through abstractions without losing it to `Any`:
+
+```python
+from typing import Generic, TypeVar
+from pydantic import BaseModel
+
+T = TypeVar("T", bound=BaseModel)
+
+
+class ProviderRequest(BaseModel, Generic[T]):
+    model: str
+    payload: T
+    request_id: str
+    timeout_s: float = 30.0
+
+
+class ProviderResult(BaseModel, Generic[T]):
+    request_id: str
+    data: T
+    latency_ms: int
+    cached: bool = False
+
+
+class BatchResult(BaseModel, Generic[T]):
+    successes: list[ProviderResult[T]]
+    failures: list[dict]
+    total_latency_ms: int
+```
+
+A function typed as `async def call(request: ProviderRequest[T]) -> ProviderResult[T]` tells callers that what goes in comes out, typed. No `Any` in the middle.
+
+### Runtime validation for LLM structured outputs
+
+When you ask an LLM to return JSON, it often returns almost-JSON. Robust validation handles the common failure modes:
+
+```python
+import json
+import re
+from pydantic import BaseModel, ValidationError
+
+
+class ExtractedEntities(BaseModel):
+    names: list[str]
+    dates: list[str]
+    locations: list[str]
+
+
+def parse_llm_json(raw_text: str, model_class: type[BaseModel]) -> BaseModel | None:
+    # Strip markdown code fences if present
+    text = raw_text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\\n?", "", text)
+        text = re.sub(r"\\n?```$", "", text)
+
+    # Find the outermost JSON object or array
+    match = re.search(r"(\\{.*\\}|\\[.*\\])", text, re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        data = json.loads(match.group(1))
+        return model_class.model_validate(data)
+    except (json.JSONDecodeError, ValidationError):
+        return None
+```
+
+This handles the three most common LLM JSON failures: markdown code fences, leading/trailing prose, and minor structural errors.
+
+### Nested models with computed fields
+
+Complex AI payloads often have relationships between fields that need validation:
+
+```python
+from pydantic import BaseModel, Field, model_validator
+from typing import Optional
+
+
+class RetrievedContext(BaseModel):
+    chunks: list[str]
+    scores: list[float]
+    total_tokens: int
+
+    @model_validator(mode="after")
+    def validate_parallel_lengths(self) -> "RetrievedContext":
+        if len(self.chunks) != len(self.scores):
+            raise ValueError(
+                f"chunks and scores must have equal length, "
+                f"got {len(self.chunks)} and {len(self.scores)}"
+            )
+        return self
+
+
+class GenerationRequest(BaseModel):
+    user_query: str = Field(min_length=1)
+    context: Optional[RetrievedContext] = None
+    system_prompt: str = Field(default="You are a helpful assistant.")
+    max_tokens: int = Field(default=1024, ge=1, le=8192)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+```
+
+The `@model_validator` runs after all individual field validators, letting you check cross-field invariants.
+
+## Working example
+
+A type-safe provider abstraction that handles multiple providers with full type preservation:
+
+```python
+from __future__ import annotations
+from abc import ABC, abstractmethod
+from typing import Generic, TypeVar
+from pydantic import BaseModel
+
+ResponseT = TypeVar("ResponseT", bound=BaseModel)
+
+
+class NormalizedResponse(BaseModel):
+    request_id: str
+    text: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+
+
+class ProviderAdapter(ABC):
+    @abstractmethod
+    async def generate(self, prompt: str, model: str) -> NormalizedResponse:
+        ...
+
+    @abstractmethod
+    def normalize(self, raw: dict) -> NormalizedResponse:
+        ...
+
+
+class OpenAIAdapter(ProviderAdapter):
+    async def generate(self, prompt: str, model: str = "gpt-4o-mini") -> NormalizedResponse:
+        import time
+        start = time.monotonic()
+        raw = await self._client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return self.normalize(raw.model_dump(), latency_ms=int((time.monotonic() - start) * 1000))
+
+    def normalize(self, raw: dict, latency_ms: int = 0) -> NormalizedResponse:
+        return NormalizedResponse(
+            request_id=raw["id"],
+            text=raw["choices"][0]["message"]["content"],
+            model=raw["model"],
+            input_tokens=raw["usage"]["prompt_tokens"],
+            output_tokens=raw["usage"]["completion_tokens"],
+            latency_ms=latency_ms,
+        )
+```
+
+Every provider adapter produces the same `NormalizedResponse`. Application code only ever sees the normalized shape. Provider-specific details never leak past the adapter.
+
+## Common mistakes
+
+**Using `Optional[str]` where you mean `str`**.  `Optional[str]` means the field can be `None`. If None is not a valid value in your domain, use a non-optional type and let validation fail explicitly when the field is missing.
+
+**Skipping validation on LLM outputs because "it usually works"**. LLM outputs that are sometimes invalid are a reliability bug. Validate every structured output. Handle the failure case explicitly.
+
+**Putting all providers in one model with optional fields**. `class Response(BaseModel): openai_id: Optional[str]; anthropic_id: Optional[str]` is a maintenance nightmare. Use discriminated unions.
+
+**Not using `model_validator` for cross-field constraints**. Individual field validators cannot see other fields. Cross-field invariants belong in a `model_validator`.
+
+## Try it yourself
+
+1. Build a discriminated union for two LLM providers you have worked with. Write a `parse_response` function that takes raw provider output and returns the correct typed model.
+2. Add a `@model_validator` to a model that has two parallel lists (like chunks and scores). Verify it raises a clear error when the lists have different lengths.
+3. Write a `parse_llm_json` function that handles markdown code fences. Test it against: raw JSON, JSON with triple backticks, JSON wrapped in prose like "Here is the result: {...}".
+""",
+                "estimated_minutes": 70,
+            },
+            {
+                "title": "Performance and profiling for AI pipelines",
+                "summary": "Profiling LLM-heavy code, caching strategies with TTL, memory management with large contexts, and concurrent processing patterns.",
+                "content_md": """## Why this matters
+
+AI applications have performance characteristics that differ from traditional web services. A single LLM call takes 500ms to 5 seconds. Embedding a document corpus takes minutes. Loading a large context into a prompt has a measurable cost in both tokens and latency. Without systematic profiling, engineers end up optimizing the wrong thing — rewriting application logic that takes 10ms while ignoring the 3s provider call that dominates wall clock time.
+
+This lesson teaches you where to look, how to measure accurately, and which optimizations actually move the needle.
+
+## Core concepts
+
+### Profiling LLM-heavy code
+
+The first rule of optimization: measure before you change anything. In AI systems, most time is spent in three places:
+
+1. Provider API calls (network latency + model inference time)
+2. Embedding and vector operations
+3. Document loading and preprocessing
+
+Use `time.monotonic()` for wall-clock measurements and Python's `cProfile` for CPU profiling:
+
+```python
+import cProfile
+import pstats
+import io
+import time
+
+
+def profile_pipeline(fn, *args, **kwargs):
+    pr = cProfile.Profile()
+    pr.enable()
+    start = time.monotonic()
+    result = fn(*args, **kwargs)
+    elapsed = time.monotonic() - start
+    pr.disable()
+
+    stream = io.StringIO()
+    ps = pstats.Stats(pr, stream=stream).sort_stats("cumulative")
+    ps.print_stats(20)  # top 20 functions by cumulative time
+
+    print(f"Total wall clock: {elapsed:.2f}s")
+    print(stream.getvalue())
+    return result
+```
+
+For async code, use structured timing around `await` points:
+
+```python
+import asyncio
+import time
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def timed(label: str):
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        print(f"{label}: {elapsed_ms}ms")
+
+
+async def instrumented_pipeline(query: str, client, retriever):
+    async with timed("retrieval"):
+        chunks = await retriever.search(query, top_k=5)
+
+    async with timed("prompt_assembly"):
+        prompt = assemble_prompt(query, chunks)
+
+    async with timed("llm_call"):
+        response = await client.generate(prompt)
+
+    return response
+```
+
+This reveals immediately whether retrieval or generation dominates. Most engineers are surprised the first time they profile: retrieval often takes longer than generation.
+
+### Caching strategies
+
+Caching LLM responses is the highest-leverage performance optimization available. An LLM call that costs 2s and $0.002 becomes a cache hit that costs 0.1ms.
+
+**Exact-match cache with TTL:**
+
+```python
+import time
+import hashlib
+import json
+from typing import Optional
+
+
+class TTLCache:
+    def __init__(self, max_size: int = 1000, ttl_seconds: float = 3600) -> None:
+        self._store: dict[str, tuple[dict, float]] = {}
+        self._max_size = max_size
+        self._ttl = ttl_seconds
+
+    def _key(self, payload: dict) -> str:
+        serialized = json.dumps(payload, sort_keys=True)
+        return hashlib.sha256(serialized.encode()).hexdigest()
+
+    def get(self, payload: dict) -> Optional[dict]:
+        key = self._key(payload)
+        if key not in self._store:
+            return None
+        value, expires_at = self._store[key]
+        if time.monotonic() > expires_at:
+            del self._store[key]
+            return None
+        return value
+
+    def set(self, payload: dict, result: dict) -> None:
+        if len(self._store) >= self._max_size:
+            # Evict the oldest entry (simple LRU approximation)
+            oldest_key = next(iter(self._store))
+            del self._store[oldest_key]
+        key = self._key(payload)
+        self._store[key] = (result, time.monotonic() + self._ttl)
+
+
+cache = TTLCache(max_size=500, ttl_seconds=1800)
+
+
+async def cached_generate(client, payload: dict) -> dict:
+    cached = cache.get(payload)
+    if cached is not None:
+        return {**cached, "cached": True}
+    result = await client.generate(payload)
+    cache.set(payload, result)
+    return result
+```
+
+For production, use Redis instead of an in-process dict so cache survives service restarts and is shared across instances.
+
+### Memory management with large contexts
+
+Python's garbage collector handles most memory management, but large context windows create specific pressure points:
+
+**Token budget management:** Track tokens explicitly rather than discovering context limit errors at runtime.
+
+```python
+def estimate_tokens(text: str) -> int:
+    # rough approximation: 1 token ≈ 4 characters for English text
+    return len(text) // 4
+
+
+def fit_chunks_to_budget(
+    chunks: list[str],
+    max_tokens: int,
+    reserve_for_output: int = 1024,
+) -> list[str]:
+    available = max_tokens - reserve_for_output
+    selected = []
+    used = 0
+    for chunk in chunks:
+        chunk_tokens = estimate_tokens(chunk)
+        if used + chunk_tokens > available:
+            break
+        selected.append(chunk)
+        used += chunk_tokens
+    return selected
+```
+
+**Explicit cleanup for large intermediate objects:** When processing large document collections, delete large intermediate objects explicitly to help the garbage collector:
+
+```python
+def process_large_corpus(doc_paths: list[Path]) -> list[dict]:
+    results = []
+    for path in doc_paths:
+        raw_text = path.read_text()  # potentially large
+        chunks = split_into_chunks(raw_text)
+        del raw_text  # release the full text immediately
+        for chunk in chunks:
+            results.append(embed_chunk(chunk))
+        del chunks  # release the chunk list
+    return results
+```
+
+**Streaming to avoid materializing large lists:**
+
+```python
+def stream_embeddings(chunks: Iterator[str], client) -> Iterator[dict]:
+    for chunk in chunks:
+        embedding = client.embed(chunk)
+        yield {"text": chunk, "embedding": embedding}
+        # chunk and embedding are released after yield
+```
+
+### Concurrent processing patterns
+
+Beyond async network calls, CPU-bound processing (document parsing, tokenization, score computation) can be parallelized with `ProcessPoolExecutor`:
+
+```python
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+
+
+def parse_document(path: Path) -> dict:
+    # CPU-intensive: OCR, PDF parsing, tokenization
+    text = extract_text(path)
+    return {"path": str(path), "text": text, "tokens": len(text) // 4}
+
+
+def parallel_parse(paths: list[Path], max_workers: int = 4) -> list[dict]:
+    results = []
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(parse_document, p): p for p in paths}
+        for future in as_completed(futures):
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                print(f"Parse failed for {futures[future]}: {exc}")
+    return results
+```
+
+Use `ProcessPoolExecutor` for CPU-bound work (parsing, tokenization, scoring). Use `asyncio.gather` for I/O-bound work (API calls, database queries). Do not mix them carelessly — running async code inside a `ProcessPoolExecutor` worker requires starting a new event loop per process.
+
+## Working example
+
+A profiled, cached, memory-efficient document pipeline:
+
+```python
+import asyncio
+import time
+import logging
+from pathlib import Path
+from typing import Iterator
+
+logger = logging.getLogger(__name__)
+
+
+class InstrumentedPipeline:
+    def __init__(self, client, cache: TTLCache) -> None:
+        self._client = client
+        self._cache = cache
+        self._timings: dict[str, float] = {}
+
+    def _time(self, label: str):
+        start = time.monotonic()
+        return lambda: self._timings.__setitem__(label, time.monotonic() - start)
+
+    async def run(self, doc_path: Path, query: str) -> dict:
+        stop = self._time("doc_load")
+        text = doc_path.read_text()
+        stop()
+
+        stop = self._time("chunking")
+        chunks = list(split_into_chunks(text))
+        del text
+        stop()
+
+        stop = self._time("retrieval")
+        relevant = await self._retrieve(query, chunks)
+        del chunks
+        stop()
+
+        stop = self._time("generation")
+        result = await self._generate(query, relevant)
+        stop()
+
+        logger.info("pipeline_timings", extra=self._timings)
+        return result
+
+    async def _generate(self, query: str, context: list[str]) -> dict:
+        payload = {"prompt": assemble_prompt(query, context), "model": "gpt-4o-mini"}
+        return await cached_generate(self._client, self._cache, payload)
+```
+
+## Common mistakes
+
+**Profiling in development with small inputs.** A document that loads in 10ms in dev loads in 400ms in production with a cold file system. Profile with realistic data sizes.
+
+**Caching at the wrong layer.** Caching prompt assembly output (which is nearly free) adds complexity without benefit. Cache expensive operations: provider calls, embedding generation, reranker inference.
+
+**Materializing entire corpora in memory.** `embeddings = [embed(c) for c in all_chunks]` on 1M chunks requires gigabytes of RAM. Stream embeddings to storage as you generate them.
+
+**Not measuring cache hit rate.** A cache that is never hit adds latency (cache key generation, serialization) without benefit. Instrument cache hits and misses.
+
+## Try it yourself
+
+1. Add `@asynccontextmanager`-based timing to a pipeline you own. Log the timings as a structured event. Find which stage dominates.
+2. Implement a `TTLCache` class. Verify that it returns cached values within the TTL and misses after expiry. Add hit/miss counters and log them.
+3. Take a pipeline that processes documents serially. Rewrite the CPU-bound parsing stage to use `ProcessPoolExecutor`. Measure the speedup on a corpus of 50 documents.
+""",
+                "estimated_minutes": 70,
             },
         ],
     },
@@ -8704,6 +9210,1019 @@ Pre-filtering narrows the candidate set before embedding comparison — ensuring
     },
 ]
 
+# ── Python-for-AI exercises ───────────────────────────────────────────────────
+EXERCISES += [
+    {
+        "title": "Build a Pydantic model hierarchy for multi-provider LLM responses",
+        "slug": "pydantic-multi-provider-hierarchy",
+        "category": "python-ai",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a Pydantic Model Hierarchy for Multi-Provider LLM Responses
+
+Different LLM providers return fundamentally different response shapes. OpenAI wraps content in `choices[0].message.content`, Anthropic wraps it in `content[0].text`, and a local Ollama server returns `{"response": "..."}`. Without a shared internal type, your application code ends up scattered with `if provider == "openai"` conditionals.
+
+### What to build
+
+Design a Pydantic model hierarchy that:
+
+1. **Defines provider-specific models** — `OpenAIResponse`, `AnthropicResponse`, and `LocalResponse`, each with the fields that match that provider's real API shape.
+2. **Uses discriminated unions** — add a `provider: Literal[...]` field to each model so Pydantic can route validation automatically.
+3. **Exposes a shared interface** — each model must implement a `.normalized()` method that returns a `NormalizedLLMResponse` with fields: `request_id`, `text`, `model`, `input_tokens`, `output_tokens`.
+4. **Validates via a factory function** — `parse_provider_response(raw: dict, provider: str) -> NormalizedLLMResponse` that accepts raw JSON and the provider name, validates the correct model, and returns the normalized form.
+5. **Handles validation failures gracefully** — if the raw dict does not match the expected shape, raise a descriptive `ValueError`.
+
+### Why this matters
+
+Every AI backend that touches more than one provider needs this pattern. Without it, normalization logic leaks into application code, provider changes break multiple callsites, and testing requires mocking raw provider SDKs. A clean model hierarchy confines the mess to one place.
+
+### Constraints
+
+- Use Pydantic v2 (`from pydantic import BaseModel`).
+- Do not use `Any` in model fields — be explicit about types.
+- The `parse_provider_response` function should work for all three providers from a single entry point.
+""",
+        "starter_code": """\
+from __future__ import annotations
+from typing import Literal, Union
+from pydantic import BaseModel
+
+
+class NormalizedLLMResponse(BaseModel):
+    request_id: str
+    text: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+
+
+class OpenAIResponse(BaseModel):
+    provider: Literal["openai"] = "openai"
+    # TODO: add fields matching OpenAI's chat completion response shape
+    # id, choices (list with message.content), model, usage (prompt_tokens, completion_tokens)
+
+    def normalized(self) -> NormalizedLLMResponse:
+        raise NotImplementedError
+
+
+class AnthropicResponse(BaseModel):
+    provider: Literal["anthropic"] = "anthropic"
+    # TODO: add fields matching Anthropic's response shape
+    # id, content (list with text field), model, usage (input_tokens, output_tokens)
+
+    def normalized(self) -> NormalizedLLMResponse:
+        raise NotImplementedError
+
+
+class LocalResponse(BaseModel):
+    provider: Literal["local"] = "local"
+    # TODO: add fields for a local model response
+    # model, response (text string), prompt_eval_count, eval_count
+
+    def normalized(self) -> NormalizedLLMResponse:
+        raise NotImplementedError
+
+
+ProviderResponse = Union[OpenAIResponse, AnthropicResponse, LocalResponse]
+
+
+def parse_provider_response(raw: dict, provider: str) -> NormalizedLLMResponse:
+    # TODO: inject provider key, validate correct model, return normalized form
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+from typing import Annotated, Literal, Union
+from pydantic import BaseModel, Field
+
+
+class NormalizedLLMResponse(BaseModel):
+    request_id: str
+    text: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+
+
+class OpenAIUsage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class OpenAIMessage(BaseModel):
+    content: str
+
+
+class OpenAIChoice(BaseModel):
+    message: OpenAIMessage
+
+
+class OpenAIResponse(BaseModel):
+    provider: Literal["openai"] = "openai"
+    id: str
+    choices: list[OpenAIChoice]
+    model: str
+    usage: OpenAIUsage
+
+    def normalized(self) -> NormalizedLLMResponse:
+        return NormalizedLLMResponse(
+            request_id=self.id,
+            text=self.choices[0].message.content,
+            model=self.model,
+            input_tokens=self.usage.prompt_tokens,
+            output_tokens=self.usage.completion_tokens,
+        )
+
+
+class AnthropicContentBlock(BaseModel):
+    text: str
+
+
+class AnthropicUsage(BaseModel):
+    input_tokens: int
+    output_tokens: int
+
+
+class AnthropicResponse(BaseModel):
+    provider: Literal["anthropic"] = "anthropic"
+    id: str
+    content: list[AnthropicContentBlock]
+    model: str
+    usage: AnthropicUsage
+
+    def normalized(self) -> NormalizedLLMResponse:
+        return NormalizedLLMResponse(
+            request_id=self.id,
+            text=self.content[0].text,
+            model=self.model,
+            input_tokens=self.usage.input_tokens,
+            output_tokens=self.usage.output_tokens,
+        )
+
+
+class LocalResponse(BaseModel):
+    provider: Literal["local"] = "local"
+    model: str
+    response: str
+    prompt_eval_count: int = 0
+    eval_count: int = 0
+
+    def normalized(self) -> NormalizedLLMResponse:
+        return NormalizedLLMResponse(
+            request_id=f"local-{self.model}",
+            text=self.response,
+            model=self.model,
+            input_tokens=self.prompt_eval_count,
+            output_tokens=self.eval_count,
+        )
+
+
+ProviderResponse = Annotated[
+    Union[OpenAIResponse, AnthropicResponse, LocalResponse],
+    Field(discriminator="provider"),
+]
+
+
+def parse_provider_response(raw: dict, provider: str) -> NormalizedLLMResponse:
+    from pydantic import TypeAdapter, ValidationError
+    adapter = TypeAdapter(ProviderResponse)
+    try:
+        parsed = adapter.validate_python({**raw, "provider": provider})
+        return parsed.normalized()
+    except (ValidationError, KeyError) as exc:
+        raise ValueError(f"Failed to parse {provider} response: {exc}") from exc
+""",
+        "explanation_md": """\
+The discriminated union pattern routes Pydantic validation based on the `provider` literal field — no `if/elif` chains needed. Each provider model knows its own shape and exposes a `.normalized()` method, so application code always works with `NormalizedLLMResponse`. When OpenAI changes their response format, only `OpenAIResponse` needs updating. Adding a new provider means adding a new class and updating the union — nothing else changes.
+
+Key design decisions:
+- Nested models (`OpenAIUsage`, `OpenAIChoice`) over raw dicts for full type safety inside the response tree.
+- `Annotated[Union[...], Field(discriminator="provider")]` is the Pydantic v2 way to declare discriminated unions.
+- The factory function injects the `provider` key into the raw dict before validation, so callers do not need to know the internal shape.
+""",
+        "tags_json": ["python-ai", "pydantic", "type-safety", "providers"],
+    },
+    {
+        "title": "Implement async batch processing for LLM calls",
+        "slug": "async-batch-llm-processing",
+        "category": "python-ai",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement Async Batch Processing for LLM Calls
+
+Calling an LLM API once takes 500ms–3s. Processing 50 prompts serially takes 25–150 seconds. Async batch processing with a concurrency limiter can reduce that to 5–30 seconds while staying within provider rate limits.
+
+### What to build
+
+Implement a `BatchProcessor` class that:
+
+1. **Accepts a list of prompts** and processes them concurrently with a bounded semaphore.
+2. **Respects a `max_concurrent` limit** — never fires more than N simultaneous requests.
+3. **Applies per-item timeout** — each call that exceeds `timeout_s` raises `asyncio.TimeoutError`.
+4. **Retries transient failures** — retry up to `max_retries` times with exponential backoff + jitter before marking an item as failed.
+5. **Returns a structured result** — a `BatchResult` with `successes: list[ItemResult]` and `failures: list[ItemFailure]`. A partial failure should NOT abort the batch.
+6. **Records latency per item** — each `ItemResult` includes `latency_ms`.
+
+### Constraints
+
+- Use `asyncio.Semaphore` for concurrency limiting.
+- Use `asyncio.wait_for` for per-call timeouts.
+- Use `asyncio.gather(..., return_exceptions=True)` so one failure does not cancel other tasks.
+- Type-hint every method.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import asyncio
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable, Awaitable
+
+
+@dataclass
+class ItemResult:
+    index: int
+    prompt: str
+    output: Any
+    latency_ms: int
+
+
+@dataclass
+class ItemFailure:
+    index: int
+    prompt: str
+    error: str
+    attempts: int
+
+
+@dataclass
+class BatchResult:
+    successes: list[ItemResult] = field(default_factory=list)
+    failures: list[ItemFailure] = field(default_factory=list)
+
+    @property
+    def success_rate(self) -> float:
+        total = len(self.successes) + len(self.failures)
+        return len(self.successes) / total if total > 0 else 0.0
+
+
+class BatchProcessor:
+    def __init__(
+        self,
+        call_fn: Callable[[str], Awaitable[Any]],
+        max_concurrent: int = 5,
+        timeout_s: float = 30.0,
+        max_retries: int = 2,
+    ) -> None:
+        self._call_fn = call_fn
+        self._max_concurrent = max_concurrent
+        self._timeout_s = timeout_s
+        self._max_retries = max_retries
+
+    async def run(self, prompts: list[str]) -> BatchResult:
+        # TODO: implement bounded concurrent processing with retry
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import asyncio
+import random
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable, Awaitable
+
+
+@dataclass
+class ItemResult:
+    index: int
+    prompt: str
+    output: Any
+    latency_ms: int
+
+
+@dataclass
+class ItemFailure:
+    index: int
+    prompt: str
+    error: str
+    attempts: int
+
+
+@dataclass
+class BatchResult:
+    successes: list[ItemResult] = field(default_factory=list)
+    failures: list[ItemFailure] = field(default_factory=list)
+
+    @property
+    def success_rate(self) -> float:
+        total = len(self.successes) + len(self.failures)
+        return len(self.successes) / total if total > 0 else 0.0
+
+
+class BatchProcessor:
+    def __init__(
+        self,
+        call_fn: Callable[[str], Awaitable[Any]],
+        max_concurrent: int = 5,
+        timeout_s: float = 30.0,
+        max_retries: int = 2,
+    ) -> None:
+        self._call_fn = call_fn
+        self._max_concurrent = max_concurrent
+        self._timeout_s = timeout_s
+        self._max_retries = max_retries
+
+    async def _call_with_retry(self, prompt: str) -> tuple[Any, int]:
+        last_exc: Exception | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                result = await asyncio.wait_for(self._call_fn(prompt), timeout=self._timeout_s)
+                return result, attempt + 1
+            except Exception as exc:
+                last_exc = exc
+                if attempt < self._max_retries:
+                    delay = (2 ** attempt) * 0.5 + random.uniform(0, 0.2)
+                    await asyncio.sleep(delay)
+        raise last_exc
+
+    async def run(self, prompts: list[str]) -> BatchResult:
+        semaphore = asyncio.Semaphore(self._max_concurrent)
+        result = BatchResult()
+
+        async def _one(index: int, prompt: str):
+            async with semaphore:
+                start = time.monotonic()
+                try:
+                    output, attempts = await self._call_with_retry(prompt)
+                    latency_ms = int((time.monotonic() - start) * 1000)
+                    return ItemResult(index=index, prompt=prompt, output=output, latency_ms=latency_ms)
+                except Exception as exc:
+                    return ItemFailure(
+                        index=index,
+                        prompt=prompt,
+                        error=str(exc),
+                        attempts=self._max_retries + 1,
+                    )
+
+        raw = await asyncio.gather(*[_one(i, p) for i, p in enumerate(prompts)])
+        for item in raw:
+            if isinstance(item, ItemResult):
+                result.successes.append(item)
+            else:
+                result.failures.append(item)
+
+        result.successes.sort(key=lambda r: r.index)
+        result.failures.sort(key=lambda f: f.index)
+        return result
+""",
+        "explanation_md": """\
+The key design choices: `asyncio.Semaphore` enforces the concurrency ceiling without manual task management. `asyncio.wait_for` applies per-call timeouts cleanly. `return_exceptions=True` in gather (implicit here through the try/except wrapper) ensures one failure does not cancel other running tasks. The retry logic uses exponential backoff with jitter to avoid thundering herd on transient provider errors. Results are collected as a `BatchResult` with separate success and failure lists, making it easy for callers to inspect partial failures without aborting the pipeline.
+""",
+        "tags_json": ["python-ai", "async", "batch-processing", "rate-limiting"],
+    },
+    {
+        "title": "Create a streaming document processor with generators",
+        "slug": "streaming-document-processor-generators",
+        "category": "python-ai",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Create a Streaming Document Processor with Generators
+
+Loading 10GB of documents into memory before processing them is the fastest path to an OOM kill. Generator pipelines let you process arbitrarily large corpora in constant memory by pulling one record at a time through each stage.
+
+### What to build
+
+Implement a composable generator pipeline for document ingestion:
+
+1. **`read_jsonl(path: Path) -> Iterator[dict]`** — yields one parsed dict per line, skipping malformed lines with a warning (do not abort).
+2. **`validate_and_clean(records: Iterator[dict]) -> Iterator[dict]`** — yields only records with non-empty `id` and `body` fields (min 50 chars). Strips whitespace from `body`.
+3. **`chunk_document(doc: dict, max_chars: int) -> Iterator[dict]`** — yields chunk dicts `{doc_id, chunk_index, text, char_start}` by splitting `body` at `max_chars` boundaries.
+4. **`stream_chunks(docs: Iterator[dict], max_chars: int) -> Iterator[dict]`** — composes `chunk_document` over a stream of docs using `yield from`.
+5. **`write_jsonl(records: Iterator[dict], path: Path) -> int`** — writes each record as a JSONL line, returns total count written.
+6. **`run_pipeline(input_path: Path, output_path: Path, chunk_size: int) -> dict`** — wires all stages together, returns `{"chunks_written": int, "parse_errors": int, "docs_skipped": int}`.
+
+### Why this matters
+
+Generator pipelines are the standard pattern for large-scale document ingestion. Understanding how to compose them lets you build ETL workflows that scale to any corpus size without changing the architecture.
+
+### Constraints
+
+- No `list()` wrapping of intermediate iterators — keep every stage lazy.
+- Failures at one stage must not abort downstream stages; capture counts instead.
+- Use `yield from` in `stream_chunks` for clean composition.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import json
+import logging
+from pathlib import Path
+from typing import Iterator
+
+logger = logging.getLogger(__name__)
+
+
+def read_jsonl(path: Path) -> Iterator[dict]:
+    # TODO: yield parsed dicts, skip malformed lines with a warning
+    raise NotImplementedError
+
+
+def validate_and_clean(records: Iterator[dict]) -> Iterator[dict]:
+    # TODO: yield only records with valid id and body (>= 50 chars)
+    # strip whitespace from body
+    raise NotImplementedError
+
+
+def chunk_document(doc: dict, max_chars: int = 1000) -> Iterator[dict]:
+    # TODO: yield {doc_id, chunk_index, text, char_start} chunks
+    raise NotImplementedError
+
+
+def stream_chunks(docs: Iterator[dict], max_chars: int = 1000) -> Iterator[dict]:
+    # TODO: compose chunk_document over the docs stream using yield from
+    raise NotImplementedError
+
+
+def write_jsonl(records: Iterator[dict], path: Path) -> int:
+    # TODO: write each record as a JSONL line, return count
+    raise NotImplementedError
+
+
+def run_pipeline(input_path: Path, output_path: Path, chunk_size: int = 1000) -> dict:
+    # TODO: wire all stages, return stats dict
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import json
+import logging
+from pathlib import Path
+from typing import Iterator
+
+logger = logging.getLogger(__name__)
+
+_parse_errors = 0
+_docs_skipped = 0
+
+
+def read_jsonl(path: Path) -> Iterator[dict]:
+    global _parse_errors
+    for i, line in enumerate(path.open(encoding="utf-8")):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            yield json.loads(line)
+        except json.JSONDecodeError as exc:
+            _parse_errors += 1
+            logger.warning("jsonl_parse_error", extra={"line": i, "error": str(exc)})
+
+
+def validate_and_clean(records: Iterator[dict]) -> Iterator[dict]:
+    global _docs_skipped
+    for record in records:
+        doc_id = str(record.get("id", "")).strip()
+        body = str(record.get("body", "")).strip()
+        if not doc_id or len(body) < 50:
+            _docs_skipped += 1
+            continue
+        yield {**record, "id": doc_id, "body": body}
+
+
+def chunk_document(doc: dict, max_chars: int = 1000) -> Iterator[dict]:
+    body = doc["body"]
+    doc_id = doc["id"]
+    for i, start in enumerate(range(0, len(body), max_chars)):
+        yield {
+            "doc_id": doc_id,
+            "chunk_index": i,
+            "text": body[start : start + max_chars],
+            "char_start": start,
+        }
+
+
+def stream_chunks(docs: Iterator[dict], max_chars: int = 1000) -> Iterator[dict]:
+    for doc in docs:
+        yield from chunk_document(doc, max_chars)
+
+
+def write_jsonl(records: Iterator[dict], path: Path) -> int:
+    count = 0
+    with path.open("w", encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\\n")
+            count += 1
+    return count
+
+
+def run_pipeline(input_path: Path, output_path: Path, chunk_size: int = 1000) -> dict:
+    global _parse_errors, _docs_skipped
+    _parse_errors = 0
+    _docs_skipped = 0
+
+    raw = read_jsonl(input_path)
+    clean = validate_and_clean(raw)
+    chunks = stream_chunks(clean, chunk_size)
+    chunks_written = write_jsonl(chunks, output_path)
+
+    return {
+        "chunks_written": chunks_written,
+        "parse_errors": _parse_errors,
+        "docs_skipped": _docs_skipped,
+    }
+""",
+        "explanation_md": """\
+Every stage is a generator: `read_jsonl` yields lazily from the file, `validate_and_clean` filters without accumulating, `stream_chunks` uses `yield from` to flatten the per-document chunk iterator. The only place data is written to disk is in `write_jsonl`, which writes one record at a time. The total memory footprint at any point is one document (or one chunk) plus the output buffer — not the entire corpus.
+
+The global counters for errors and skipped docs are a simplification for the exercise. In production, pass mutable stats dicts through the pipeline or use a class-based approach to avoid global state.
+""",
+        "tags_json": ["python-ai", "generators", "data-pipeline", "ingestion"],
+    },
+    {
+        "title": "Build a type-safe provider abstraction layer",
+        "slug": "type-safe-provider-abstraction",
+        "category": "python-ai",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a Type-Safe Provider Abstraction Layer
+
+Application code that calls OpenAI directly becomes brittle when you add Anthropic as a fallback, switch to a local model for development, or need to mock provider calls in tests. An abstraction layer with a shared interface and typed contracts solves all three.
+
+### What to build
+
+Design a provider abstraction that:
+
+1. **Defines a `GenerateRequest` model** — `prompt: str`, `model: str`, `max_tokens: int`, `temperature: float`, `request_id: str`.
+2. **Defines a `GenerateResponse` model** — `request_id: str`, `text: str`, `model: str`, `input_tokens: int`, `output_tokens: int`, `latency_ms: int`.
+3. **Defines an abstract `LLMProvider` base class** — with an abstract `async def generate(self, request: GenerateRequest) -> GenerateResponse` method and a `provider_name: str` property.
+4. **Implements `MockProvider`** — returns a deterministic fake response based on the prompt hash. Useful for tests.
+5. **Implements `FallbackProvider`** — wraps a `primary` and `fallback` provider. Tries primary first; on any exception, logs the failure and retries with fallback.
+6. **Writes a `ProviderRegistry`** — maps provider names to instances. `get(name) -> LLMProvider` raises a clear error if the provider is not registered.
+
+### Why this matters
+
+This pattern isolates all vendor-specific code behind a stable interface. Tests use `MockProvider`. Development can use a local model. Production uses a hosted API. The `FallbackProvider` adds resilience without touching application code.
+
+### Constraints
+
+- `LLMProvider` must be an abstract base class (`abc.ABC`).
+- `FallbackProvider` must log a warning when it falls back, including which provider failed and the error.
+- `MockProvider` must be deterministic: the same prompt always returns the same text.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import abc
+import hashlib
+import logging
+import time
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+
+
+class GenerateRequest(BaseModel):
+    prompt: str
+    model: str = "default"
+    max_tokens: int = Field(default=1024, ge=1, le=8192)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    request_id: str = ""
+
+
+class GenerateResponse(BaseModel):
+    request_id: str
+    text: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+
+
+class LLMProvider(abc.ABC):
+    @property
+    @abc.abstractmethod
+    def provider_name(self) -> str: ...
+
+    @abc.abstractmethod
+    async def generate(self, request: GenerateRequest) -> GenerateResponse: ...
+
+
+class MockProvider(LLMProvider):
+    # TODO: return deterministic fake response based on prompt hash
+    @property
+    def provider_name(self) -> str:
+        return "mock"
+
+    async def generate(self, request: GenerateRequest) -> GenerateResponse:
+        raise NotImplementedError
+
+
+class FallbackProvider(LLMProvider):
+    # TODO: try primary, fall back to secondary on any exception
+    def __init__(self, primary: LLMProvider, fallback: LLMProvider) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    @property
+    def provider_name(self) -> str:
+        return f"fallback({self._primary.provider_name}->{self._fallback.provider_name})"
+
+    async def generate(self, request: GenerateRequest) -> GenerateResponse:
+        raise NotImplementedError
+
+
+class ProviderRegistry:
+    # TODO: map provider names to instances, raise on missing
+    def __init__(self) -> None:
+        self._providers: dict[str, LLMProvider] = {}
+
+    def register(self, provider: LLMProvider) -> None:
+        raise NotImplementedError
+
+    def get(self, name: str) -> LLMProvider:
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import abc
+import hashlib
+import logging
+import time
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+
+
+class GenerateRequest(BaseModel):
+    prompt: str
+    model: str = "default"
+    max_tokens: int = Field(default=1024, ge=1, le=8192)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    request_id: str = ""
+
+
+class GenerateResponse(BaseModel):
+    request_id: str
+    text: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+
+
+class LLMProvider(abc.ABC):
+    @property
+    @abc.abstractmethod
+    def provider_name(self) -> str: ...
+
+    @abc.abstractmethod
+    async def generate(self, request: GenerateRequest) -> GenerateResponse: ...
+
+
+class MockProvider(LLMProvider):
+    def __init__(self, response_prefix: str = "Mock response: ") -> None:
+        self._prefix = response_prefix
+
+    @property
+    def provider_name(self) -> str:
+        return "mock"
+
+    async def generate(self, request: GenerateRequest) -> GenerateResponse:
+        start = time.monotonic()
+        digest = hashlib.md5(request.prompt.encode()).hexdigest()[:8]
+        text = f"{self._prefix}{digest}"
+        latency_ms = int((time.monotonic() - start) * 1000)
+        return GenerateResponse(
+            request_id=request.request_id or digest,
+            text=text,
+            model=f"mock-{request.model}",
+            input_tokens=len(request.prompt.split()),
+            output_tokens=len(text.split()),
+            latency_ms=latency_ms,
+        )
+
+
+class FallbackProvider(LLMProvider):
+    def __init__(self, primary: LLMProvider, fallback: LLMProvider) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    @property
+    def provider_name(self) -> str:
+        return f"fallback({self._primary.provider_name}->{self._fallback.provider_name})"
+
+    async def generate(self, request: GenerateRequest) -> GenerateResponse:
+        try:
+            return await self._primary.generate(request)
+        except Exception as exc:
+            logger.warning(
+                "provider_fallback",
+                extra={
+                    "primary": self._primary.provider_name,
+                    "fallback": self._fallback.provider_name,
+                    "request_id": request.request_id,
+                    "error": str(exc),
+                },
+            )
+            return await self._fallback.generate(request)
+
+
+class ProviderRegistry:
+    def __init__(self) -> None:
+        self._providers: dict[str, LLMProvider] = {}
+
+    def register(self, provider: LLMProvider) -> None:
+        self._providers[provider.provider_name] = provider
+
+    def get(self, name: str) -> LLMProvider:
+        if name not in self._providers:
+            available = ", ".join(self._providers.keys()) or "none"
+            raise KeyError(f"Provider '{name}' not registered. Available: {available}")
+        return self._providers[name]
+""",
+        "explanation_md": """\
+The abstract base class forces every provider to implement the same interface — application code never needs to know which provider it is talking to. `MockProvider` uses an MD5 hash of the prompt to produce deterministic, stable fake responses, which makes tests reproducible. `FallbackProvider` logs a structured warning (not a print statement) so the fallback event is observable in production. The `ProviderRegistry` keeps the available providers in one place and provides a clear error message when a misconfigured name is requested.
+""",
+        "tags_json": ["python-ai", "abstraction", "type-safety", "providers", "testing"],
+    },
+    {
+        "title": "Implement an LRU cache with TTL for LLM responses",
+        "slug": "lru-cache-ttl-llm-responses",
+        "category": "python-ai",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement an LRU Cache with TTL for LLM Responses
+
+LLM calls are expensive and slow. For many AI features — documentation lookups, FAQ answering, static content generation — the same prompt produces the same answer. Caching identical prompts eliminates redundant API calls and dramatically reduces latency for repeated queries.
+
+### What to build
+
+Implement a `LLMResponseCache` class that combines LRU eviction with TTL expiry:
+
+1. **LRU eviction** — when the cache reaches `max_size`, evict the least-recently-used entry (not the oldest by insertion time).
+2. **TTL expiry** — each entry expires after `ttl_seconds`. Expired entries are treated as cache misses and removed on access.
+3. **Deterministic cache key** — `cache_key(prompt: str, model: str, temperature: float) -> str` returns a stable SHA-256 hash. Same inputs must always produce the same key.
+4. **`get(key: str) -> dict | None`** — returns the cached value if present and not expired, else `None`. Accessing an entry updates its LRU position.
+5. **`set(key: str, value: dict) -> None`** — stores the value. If at capacity, evict the LRU entry first.
+6. **`stats() -> dict`** — returns `{"size": int, "hits": int, "misses": int, "evictions": int, "hit_rate": float}`.
+
+### Why this matters
+
+Caching is the single highest-leverage optimization in most AI applications. Understanding how LRU + TTL interact is essential for building caches that stay fresh without consuming unbounded memory.
+
+### Constraints
+
+- Use `collections.OrderedDict` to implement LRU ordering — do not use `functools.lru_cache` (that hides the mechanism).
+- Do not import any third-party caching library.
+- `hit_rate` should be `hits / (hits + misses)`, returning `0.0` when no requests have been made.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import hashlib
+import json
+import time
+from collections import OrderedDict
+from typing import Optional
+
+
+class LLMResponseCache:
+    def __init__(self, max_size: int = 500, ttl_seconds: float = 3600) -> None:
+        self._max_size = max_size
+        self._ttl = ttl_seconds
+        self._store: OrderedDict[str, tuple[dict, float]] = OrderedDict()
+        self._hits = 0
+        self._misses = 0
+        self._evictions = 0
+
+    @staticmethod
+    def cache_key(prompt: str, model: str, temperature: float) -> str:
+        # TODO: return stable SHA-256 hash of (prompt, model, temperature)
+        raise NotImplementedError
+
+    def get(self, key: str) -> Optional[dict]:
+        # TODO: return value if present and not expired, update LRU order
+        raise NotImplementedError
+
+    def set(self, key: str, value: dict) -> None:
+        # TODO: store value, evict LRU entry if at capacity
+        raise NotImplementedError
+
+    def stats(self) -> dict:
+        # TODO: return size, hits, misses, evictions, hit_rate
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import hashlib
+import json
+import time
+from collections import OrderedDict
+from typing import Optional
+
+
+class LLMResponseCache:
+    def __init__(self, max_size: int = 500, ttl_seconds: float = 3600) -> None:
+        self._max_size = max_size
+        self._ttl = ttl_seconds
+        self._store: OrderedDict[str, tuple[dict, float]] = OrderedDict()
+        self._hits = 0
+        self._misses = 0
+        self._evictions = 0
+
+    @staticmethod
+    def cache_key(prompt: str, model: str, temperature: float) -> str:
+        payload = json.dumps({"prompt": prompt, "model": model, "temperature": temperature}, sort_keys=True)
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    def get(self, key: str) -> Optional[dict]:
+        if key not in self._store:
+            self._misses += 1
+            return None
+        value, expires_at = self._store[key]
+        if time.monotonic() > expires_at:
+            del self._store[key]
+            self._misses += 1
+            return None
+        # Move to end (most recently used)
+        self._store.move_to_end(key)
+        self._hits += 1
+        return value
+
+    def set(self, key: str, value: dict) -> None:
+        if key in self._store:
+            self._store.move_to_end(key)
+        else:
+            if len(self._store) >= self._max_size:
+                # Evict least recently used (first item)
+                self._store.popitem(last=False)
+                self._evictions += 1
+        self._store[key] = (value, time.monotonic() + self._ttl)
+
+    def stats(self) -> dict:
+        total = self._hits + self._misses
+        return {
+            "size": len(self._store),
+            "hits": self._hits,
+            "misses": self._misses,
+            "evictions": self._evictions,
+            "hit_rate": self._hits / total if total > 0 else 0.0,
+        }
+""",
+        "explanation_md": """\
+`OrderedDict` maintains insertion order and provides `move_to_end()` and `popitem(last=False)` — exactly the operations LRU needs. On `get`, moving the accessed entry to the end marks it as most recently used. On `set` when at capacity, `popitem(last=False)` removes the first (least recently used) entry. TTL is stored as an absolute monotonic timestamp alongside the value; checking `time.monotonic() > expires_at` is a single comparison. The `cache_key` serializes inputs as sorted JSON before hashing to ensure that argument ordering does not create spurious cache misses.
+""",
+        "tags_json": ["python-ai", "caching", "lru", "performance"],
+    },
+    {
+        "title": "Profile and optimize a token-heavy pipeline",
+        "slug": "profile-optimize-token-heavy-pipeline",
+        "category": "python-ai",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Profile and Optimize a Token-Heavy Pipeline
+
+Before you can optimize an AI pipeline you need to know where the time actually goes. This exercise gives you a slow, instrumented pipeline and asks you to identify the bottlenecks, then apply targeted optimizations.
+
+### What to build
+
+1. **`PipelineTimer` context manager** — wraps a code block, records wall-clock duration, and stores it in a shared `timings: dict[str, float]` with millisecond precision.
+
+2. **`estimate_tokens(text: str) -> int`** — returns a rough token estimate (1 token ≈ 4 characters). Used to check context budget before calling the LLM.
+
+3. **`fit_to_budget(chunks: list[str], max_tokens: int, reserve: int) -> list[str]`** — returns the largest prefix of chunks that fits within `max_tokens - reserve` estimated tokens. Chunks are taken in order; stop as soon as adding the next chunk would exceed budget.
+
+4. **`InstrumentedPipeline` class** — wraps a mock LLM client and a list of documents. Its `run(query: str) -> dict` method:
+   - Times each stage: `doc_selection`, `chunk_assembly`, `prompt_build`, `llm_call`.
+   - Uses `fit_to_budget` to stay within a 4000-token context window (reserve 1024 for output).
+   - Returns `{"answer": str, "timings": dict, "tokens_used": int, "chunks_used": int}`.
+
+5. **`find_bottleneck(timings: dict[str, float]) -> str`** — returns the name of the stage with the highest recorded latency.
+
+### Why this matters
+
+Systematic profiling reveals that LLM call latency usually dominates, but context assembly is often the next biggest cost. Token budget enforcement prevents expensive 400 errors. Knowing which stage to optimize first is more valuable than blind optimization.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import time
+from contextlib import contextmanager
+from typing import Any, Iterator
+
+
+class PipelineTimer:
+    def __init__(self) -> None:
+        self.timings: dict[str, float] = {}
+
+    @contextmanager
+    def measure(self, label: str) -> Iterator[None]:
+        # TODO: record elapsed ms in self.timings[label]
+        raise NotImplementedError
+
+
+def estimate_tokens(text: str) -> int:
+    # TODO: 1 token ~ 4 characters, return int
+    raise NotImplementedError
+
+
+def fit_to_budget(chunks: list[str], max_tokens: int, reserve: int = 1024) -> list[str]:
+    # TODO: return largest prefix of chunks that fits within max_tokens - reserve tokens
+    raise NotImplementedError
+
+
+class InstrumentedPipeline:
+    def __init__(self, client: Any, documents: list[str]) -> None:
+        self._client = client
+        self._documents = documents
+
+    async def run(self, query: str) -> dict:
+        # TODO: time each stage, fit to budget, call client, return structured result
+        raise NotImplementedError
+
+
+def find_bottleneck(timings: dict[str, float]) -> str:
+    # TODO: return the key with the maximum value
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import time
+from contextlib import contextmanager
+from typing import Any, Iterator
+
+
+class PipelineTimer:
+    def __init__(self) -> None:
+        self.timings: dict[str, float] = {}
+
+    @contextmanager
+    def measure(self, label: str) -> Iterator[None]:
+        start = time.monotonic()
+        try:
+            yield
+        finally:
+            self.timings[label] = round((time.monotonic() - start) * 1000, 2)
+
+
+def estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
+def fit_to_budget(chunks: list[str], max_tokens: int, reserve: int = 1024) -> list[str]:
+    available = max_tokens - reserve
+    selected: list[str] = []
+    used = 0
+    for chunk in chunks:
+        cost = estimate_tokens(chunk)
+        if used + cost > available:
+            break
+        selected.append(chunk)
+        used += cost
+    return selected
+
+
+class InstrumentedPipeline:
+    def __init__(self, client: Any, documents: list[str]) -> None:
+        self._client = client
+        self._documents = documents
+
+    async def run(self, query: str) -> dict:
+        timer = PipelineTimer()
+
+        with timer.measure("doc_selection"):
+            # Naive keyword match for selection
+            relevant = [d for d in self._documents if query.lower() in d.lower()]
+            if not relevant:
+                relevant = self._documents[:5]
+
+        with timer.measure("chunk_assembly"):
+            chunks = [d[:500] for d in relevant]  # simple chunking
+            fitted = fit_to_budget(chunks, max_tokens=4000, reserve=1024)
+
+        with timer.measure("prompt_build"):
+            context = "\\n\\n".join(fitted)
+            prompt = f"Context:\\n{context}\\n\\nQuestion: {query}"
+            tokens_used = estimate_tokens(prompt)
+
+        with timer.measure("llm_call"):
+            answer = await self._client.generate(prompt)
+
+        return {
+            "answer": answer,
+            "timings": timer.timings,
+            "tokens_used": tokens_used,
+            "chunks_used": len(fitted),
+        }
+
+
+def find_bottleneck(timings: dict[str, float]) -> str:
+    if not timings:
+        raise ValueError("No timings recorded")
+    return max(timings, key=lambda k: timings[k])
+""",
+        "explanation_md": """\
+`PipelineTimer` uses a `@contextmanager` so each stage is cleanly delimited: `with timer.measure("stage_name"): ...` — no explicit start/stop calls. `time.monotonic()` is used instead of `time.time()` because it is not affected by system clock adjustments. `fit_to_budget` takes chunks in order and stops as soon as the next chunk would exceed budget, which is the correct greedy approach for RAG context assembly. `find_bottleneck` is a single `max(timings, key=...)` call. In a real profiling session, the `llm_call` stage almost always wins — but `chunk_assembly` with a naive reranker can compete when the corpus is large.
+""",
+        "tags_json": ["python-ai", "profiling", "performance", "token-management"],
+    },
+]
+
 EXERCISE_DRILLS = [
     ("Parse JSONL benchmark rows into normalized records", "parse-jsonl-benchmark-rows", "python-refresh", "easy"),
     ("Summarize token usage by endpoint and model", "summarize-token-usage", "data-transformation", "easy"),
@@ -10100,6 +11619,564 @@ Say you would expose one internal method like `generate_text(request)` and keep 
 The theme is boring boundaries. Good AI backends survive provider changes because only a thin adapter knows vendor-specific details.
 """,
         "tags_json": ["python", "backend", "providers"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How would you design a Python service that wraps multiple LLM providers while remaining testable?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you understand the difference between tightly coupling application code to a specific provider SDK and designing a stable internal interface that survives provider changes. Strong candidates think in abstractions first, then talk about the implementation details.
+
+## Start with the interface, not the implementation
+
+The first thing to design is the internal contract that your application code depends on — not the OpenAI or Anthropic client directly.
+
+```python
+from abc import ABC, abstractmethod
+from pydantic import BaseModel
+
+
+class GenerateRequest(BaseModel):
+    prompt: str
+    model: str
+    max_tokens: int = 1024
+    temperature: float = 0.7
+    request_id: str = ""
+
+
+class GenerateResponse(BaseModel):
+    request_id: str
+    text: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+
+
+class LLMProvider(ABC):
+    @abstractmethod
+    async def generate(self, request: GenerateRequest) -> GenerateResponse: ...
+```
+
+Application code calls `LLMProvider.generate()`. It never imports the OpenAI SDK directly.
+
+## Provider adapters normalize at the boundary
+
+Each provider adapter knows the vendor-specific response shape and converts it to `GenerateResponse`. If OpenAI changes their API, only `OpenAIAdapter` changes.
+
+```python
+class OpenAIAdapter(LLMProvider):
+    def __init__(self, client, default_model: str = "gpt-4o-mini") -> None:
+        self._client = client
+        self._default_model = default_model
+
+    async def generate(self, request: GenerateRequest) -> GenerateResponse:
+        import time
+        start = time.monotonic()
+        raw = await self._client.chat.completions.create(
+            model=request.model or self._default_model,
+            messages=[{"role": "user", "content": request.prompt}],
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+        )
+        return GenerateResponse(
+            request_id=raw.id,
+            text=raw.choices[0].message.content,
+            model=raw.model,
+            input_tokens=raw.usage.prompt_tokens,
+            output_tokens=raw.usage.completion_tokens,
+            latency_ms=int((time.monotonic() - start) * 1000),
+        )
+```
+
+## Testability via a mock provider
+
+A `MockProvider` that implements the same interface is all you need for unit tests. No HTTP mocking, no patching, no network calls:
+
+```python
+class MockProvider(LLMProvider):
+    def __init__(self, fixed_response: str = "mock response") -> None:
+        self._response = fixed_response
+        self.calls: list[GenerateRequest] = []
+
+    async def generate(self, request: GenerateRequest) -> GenerateResponse:
+        self.calls.append(request)
+        return GenerateResponse(
+            request_id=request.request_id or "mock-1",
+            text=self._response,
+            model="mock",
+            input_tokens=len(request.prompt.split()),
+            output_tokens=len(self._response.split()),
+            latency_ms=1,
+        )
+```
+
+In tests, inject `MockProvider()`. In production, inject `OpenAIAdapter(client)`. The service under test never knows the difference.
+
+## Resilience via a fallback wrapper
+
+A `FallbackProvider` adds multi-provider resilience without modifying the interface:
+
+```python
+class FallbackProvider(LLMProvider):
+    def __init__(self, primary: LLMProvider, fallback: LLMProvider) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    async def generate(self, request: GenerateRequest) -> GenerateResponse:
+        try:
+            return await self._primary.generate(request)
+        except Exception as exc:
+            logger.warning("provider_fallback", extra={"error": str(exc)})
+            return await self._fallback.generate(request)
+```
+
+## What to emphasize in the interview
+
+- The abstract base class defines the contract. Application code depends on the contract, not the concrete class.
+- Each adapter is responsible for normalizing its provider's quirks into the shared response model.
+- Testing is just dependency injection: swap `OpenAIAdapter` for `MockProvider`.
+- The retry, timeout, and fallback logic lives in dedicated wrappers, not inside the adapter or the application service.
+
+## Common follow-up question
+
+"How would you add retry with backoff?" — wrap `LLMProvider` in a `RetryingProvider` decorator that catches transient failures and retries. Application code still calls the same interface.
+
+## Interview takeaway
+
+The goal is a service where adding a new provider means adding one class, changing providers means changing one injection point, and testing means passing a mock. Everything else stays the same.
+""",
+        "tags_json": ["python", "backend", "providers", "testing", "abstraction"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "Explain how you'd use async/await to make concurrent LLM API calls with rate limiting",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you understand the mechanics of async Python in I/O-bound scenarios, can reason about concurrency as a controlled resource rather than a performance switch, and know how to handle partial failures gracefully. Many candidates know `asyncio.gather` but do not mention rate limiting or timeout handling until prompted.
+
+## Why async matters for LLM calls
+
+LLM API calls spend most of their wall-clock time waiting on the network — the model inference on the provider's side, the TCP round trip, and the streaming response. While one call is waiting, an event loop can start and advance other calls. The result: 10 calls that would take 30 seconds serially can complete in 4–6 seconds concurrently.
+
+This is fundamentally different from CPU-bound work. Async does not help if you are doing a lot of local computation. It helps when you are waiting.
+
+## The basic pattern: asyncio.gather
+
+```python
+import asyncio
+
+async def call_llm(client, prompt: str) -> str:
+    response = await client.generate(prompt)
+    return response.text
+
+async def batch_calls(client, prompts: list[str]) -> list[str]:
+    tasks = [call_llm(client, p) for p in prompts]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return [r for r in results if isinstance(r, str)]
+```
+
+`return_exceptions=True` is critical: without it, a single failure cancels all remaining tasks. With it, exceptions are returned as values alongside successful results, and you can handle each one.
+
+## Rate limiting with asyncio.Semaphore
+
+Concurrent does not mean unlimited. Provider APIs enforce rate limits (requests per minute, tokens per minute). A semaphore bounds how many requests are in flight at once:
+
+```python
+import asyncio
+
+async def rate_limited_batch(
+    client,
+    prompts: list[str],
+    max_concurrent: int = 5,
+) -> list[dict | Exception]:
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def _one(prompt: str) -> dict:
+        async with semaphore:
+            return await call_llm(client, prompt)
+
+    return await asyncio.gather(*[_one(p) for p in prompts], return_exceptions=True)
+```
+
+The semaphore acts as a gate: only `max_concurrent` tasks can be inside the `async with semaphore` block at the same time. Others wait their turn. The gather still fans out all tasks immediately — they just queue at the semaphore instead of all hitting the API simultaneously.
+
+## Per-call timeouts
+
+A provider that starts hanging instead of returning errors will stall tasks indefinitely without a timeout:
+
+```python
+import asyncio
+
+async def call_with_timeout(client, prompt: str, timeout_s: float = 30.0) -> str:
+    try:
+        return await asyncio.wait_for(client.generate(prompt), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        raise TimeoutError(f"LLM call timed out after {timeout_s}s for prompt: {prompt[:50]}")
+```
+
+In practice, set a per-call timeout (30–60s for generation) and optionally a total batch timeout.
+
+## Exponential backoff for retries
+
+Transient 429 and 500 errors are common on high-traffic provider APIs. Retry with exponential backoff and jitter:
+
+```python
+import asyncio
+import random
+
+async def call_with_retry(client, prompt: str, max_attempts: int = 3) -> str:
+    last_exc = None
+    for attempt in range(max_attempts):
+        try:
+            return await asyncio.wait_for(client.generate(prompt), timeout=30.0)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_attempts - 1:
+                delay = (2 ** attempt) * 0.5 + random.uniform(0, 0.3)
+                await asyncio.sleep(delay)
+    raise last_exc
+```
+
+The jitter prevents thundering herd when many retries fire simultaneously after a rate limit burst.
+
+## What to watch out for
+
+**Blocking calls inside async functions.** `time.sleep()`, `requests.get()`, or any synchronous I/O inside `async def` blocks the entire event loop — no other coroutine runs while it is blocked. Use `asyncio.sleep()`, `httpx.AsyncClient`, or `asyncio.to_thread()` for blocking work.
+
+**Missing `return_exceptions=True`.** Without it, one exception in a gather cancels all pending tasks silently.
+
+**No concurrency limit.** Firing 100 requests simultaneously on a tier with a 60 RPM rate limit will cause a wave of 429 errors. Start conservative (5–10) and tune based on observed error rates.
+
+## What to say in the interview
+
+Structure the answer in three parts: why async works here (I/O bound), how to implement it correctly (gather + semaphore + timeout), and what can go wrong (blocking calls, missing rate limits, no error handling). Mention that `max_concurrent` is an operational decision based on provider tier, not a number to maximize.
+
+## Interview takeaway
+
+Async concurrency for LLM calls is valuable when it is controlled. The semaphore is the rate limiter. The timeout is the safety valve. The `return_exceptions=True` is the partial failure handler. All three are necessary in production.
+""",
+        "tags_json": ["python", "async", "concurrency", "rate-limiting", "llm-ops"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "What Pydantic patterns do you use when validating LLM outputs that might be malformed?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer is checking whether you treat LLM outputs as trusted data (bad) or as untrusted external input that must be validated (good). Strong candidates know that LLMs can return anything — valid JSON, almost-valid JSON, JSON wrapped in markdown, correct structure with wrong types — and have a systematic approach to handling each case.
+
+## The core problem
+
+When you ask an LLM to return structured JSON, it might return:
+
+1. Valid JSON that matches your schema — the happy path.
+2. Valid JSON that does not match your schema — a type or field name error.
+3. Almost-valid JSON — trailing commas, unquoted keys, truncated output.
+4. Valid JSON wrapped in markdown code fences — ` ```json\n{...}\n``` `.
+5. JSON embedded in prose — "Here is the result: {...}".
+6. Something completely different — an apology, a question for clarification, a hallucinated format.
+
+Your validation layer needs to handle all of these.
+
+## Pattern 1: Extract JSON before validating
+
+Strip common LLM formatting artifacts before passing to Pydantic:
+
+```python
+import json
+import re
+from pydantic import BaseModel, ValidationError
+from typing import Optional
+
+
+def extract_json(text: str) -> Optional[dict]:
+    # Strip markdown code fences
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\\n?", "", text)
+        text = re.sub(r"\\n?```$", "", text)
+        text = text.strip()
+
+    # Find the outermost JSON object or array
+    match = re.search(r"(\\{[^{}]*(?:\\{[^{}]*\\}[^{}]*)*\\}|\\[[^\\[\\]]*\\])", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Last attempt: try the whole string
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+```
+
+## Pattern 2: Validate with a typed model, return None on failure
+
+Never let a `ValidationError` propagate uncaught to the user. Wrap validation in a function that returns a typed model or `None`:
+
+```python
+class ExtractedEntities(BaseModel):
+    names: list[str] = []
+    dates: list[str] = []
+    locations: list[str] = []
+    confidence: float = 0.0
+
+
+def parse_entities(llm_output: str) -> Optional[ExtractedEntities]:
+    raw = extract_json(llm_output)
+    if raw is None:
+        return None
+    try:
+        return ExtractedEntities.model_validate(raw)
+    except ValidationError:
+        return None
+```
+
+The caller handles `None` explicitly rather than catching exceptions deep in call chains.
+
+## Pattern 3: Coerce types at the boundary
+
+LLMs often return numbers as strings ("confidence": "0.8") or booleans as strings ("is_valid": "true"). Pydantic's default behavior rejects these in strict mode. Use permissive mode for LLM outputs:
+
+```python
+from pydantic import BaseModel
+
+
+class LLMAnalysis(BaseModel):
+    score: float
+    label: str
+    is_relevant: bool
+
+    model_config = {"coerce_numbers_to_str": False}
+
+
+# Permissive parsing for LLM outputs:
+result = LLMAnalysis.model_validate({"score": "0.8", "label": "positive", "is_relevant": "true"})
+# score=0.8, is_relevant=True — Pydantic coerces by default
+```
+
+This is intentional for LLM boundaries. The coercion produces the right type even when the model returns a string instead of a number.
+
+## Pattern 4: Field validators for domain constraints
+
+LLM outputs often pass structural validation but fail domain constraints. A field validator catches these:
+
+```python
+from pydantic import BaseModel, field_validator
+
+
+class DocumentSummary(BaseModel):
+    title: str
+    summary: str
+    key_points: list[str]
+    word_count: int
+
+    @field_validator("summary")
+    @classmethod
+    def summary_must_be_substantive(cls, v: str) -> str:
+        stripped = v.strip()
+        if len(stripped) < 20:
+            raise ValueError(f"Summary too short: {len(stripped)} chars")
+        return stripped
+
+    @field_validator("key_points")
+    @classmethod
+    def must_have_at_least_one_point(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("key_points cannot be empty")
+        return [p.strip() for p in v if p.strip()]
+```
+
+## Pattern 5: Model retry on validation failure
+
+If the first LLM output fails validation, retry with a corrective prompt that includes the validation error:
+
+```python
+async def generate_with_validation(client, prompt: str, model_class: type[BaseModel], max_attempts: int = 2):
+    for attempt in range(max_attempts):
+        raw_output = await client.generate(prompt)
+        parsed = parse_with_model(raw_output, model_class)
+        if parsed is not None:
+            return parsed
+        if attempt < max_attempts - 1:
+            prompt = (
+                f"{prompt}\\n\\nYour previous response could not be parsed as valid JSON "
+                f"matching the required schema. Please return only a JSON object with no "
+                f"additional text or formatting."
+            )
+    return None
+```
+
+## What to say in the interview
+
+Walk through the failure modes first — code fences, embedded prose, type coercion, domain constraint violations — then describe your defense at each layer. Interviewers appreciate candidates who treat LLM outputs as untrusted by default.
+
+## Interview takeaway
+
+LLM output validation is a layered problem: extract JSON from the raw text, validate structure with Pydantic, apply domain validators for business rules, and retry with corrective prompting when validation fails. Each layer catches a different class of failure.
+""",
+        "tags_json": ["python", "pydantic", "validation", "llm-outputs", "robustness"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How do you handle memory efficiently when processing large document collections for RAG ingestion?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you understand the memory characteristics of Python data structures and can reason about trade-offs between throughput and memory pressure when operating at scale. Strong candidates describe specific techniques — generators, streaming I/O, explicit deletion, token budgeting — rather than vague principles like "use efficient data structures."
+
+## The core problem
+
+A typical RAG ingestion pipeline:
+
+1. Load documents from disk or a remote source.
+2. Parse and clean each document.
+3. Split into chunks.
+4. Generate embeddings (batched API calls).
+5. Write vectors and metadata to a vector database.
+
+Naively implemented, steps 1–5 load everything into memory before step 5 starts. For 100K documents averaging 5KB each, that is 500MB of raw text before you even start chunking or embedding. After chunking (10 chunks per document), you have 1M chunk objects. After embedding (1536 floats per chunk for OpenAI's ada-002), you have 1M × 1536 × 8 bytes ≈ 12GB of float64 data. None of this fits comfortably in a 16GB machine alongside the rest of the process.
+
+## Technique 1: Generator pipelines
+
+The fundamental fix: never materialize intermediate lists. Use generators at every stage so only one record exists in memory at a time.
+
+```python
+from pathlib import Path
+from typing import Iterator
+import json
+
+
+def read_documents(paths: list[Path]) -> Iterator[dict]:
+    for path in paths:
+        try:
+            yield {"id": path.stem, "body": path.read_text(encoding="utf-8")}
+        except Exception as exc:
+            print(f"Failed to read {path}: {exc}")
+
+
+def chunk_documents(docs: Iterator[dict], max_chars: int = 1000) -> Iterator[dict]:
+    for doc in docs:
+        body = doc["body"]
+        for i, start in enumerate(range(0, len(body), max_chars)):
+            yield {"doc_id": doc["id"], "chunk_index": i, "text": body[start : start + max_chars]}
+
+
+def stream_embeddings(chunks: Iterator[dict], client, batch_size: int = 100) -> Iterator[dict]:
+    batch = []
+    for chunk in chunks:
+        batch.append(chunk)
+        if len(batch) >= batch_size:
+            texts = [c["text"] for c in batch]
+            embeddings = client.embed(texts)
+            for chunk, emb in zip(batch, embeddings):
+                yield {**chunk, "embedding": emb}
+            batch = []
+    if batch:
+        texts = [c["text"] for c in batch]
+        embeddings = client.embed(texts)
+        for chunk, emb in zip(batch, embeddings):
+            yield {**chunk, "embedding": emb}
+```
+
+This pipeline processes documents one at a time. Memory footprint is O(batch_size) — the current embedding batch — not O(corpus_size).
+
+## Technique 2: Explicit deletion of large intermediates
+
+Python's garbage collector is not always timely. When you are done with a large object, delete it explicitly:
+
+```python
+def process_document(path: Path, client) -> list[dict]:
+    raw_text = path.read_text()          # potentially large
+    chunks = split_into_chunks(raw_text)
+    del raw_text                          # release immediately — not needed anymore
+    embeddings = client.embed([c["text"] for c in chunks])
+    result = [{"text": c["text"], "embedding": e} for c, e in zip(chunks, embeddings)]
+    del chunks                            # release chunk list
+    return result
+```
+
+This is most valuable inside loops: without `del`, the previous document's `raw_text` may stay in memory until the next garbage collection cycle, doubling peak memory usage.
+
+## Technique 3: Streaming writes to avoid accumulation
+
+Write results to disk or a database as they are produced rather than accumulating them for a final bulk write:
+
+```python
+def ingest_to_jsonl(pipeline: Iterator[dict], output_path: Path) -> int:
+    count = 0
+    with output_path.open("w", encoding="utf-8") as f:
+        for record in pipeline:
+            f.write(json.dumps(record, ensure_ascii=False) + "\\n")
+            count += 1
+    return count
+```
+
+For vector databases, use the client's streaming upsert if available rather than collecting all vectors in a list first.
+
+## Technique 4: Token budget management to limit context size
+
+For embedding and generation, tracking tokens prevents submitting oversized batches that hit API limits or cause truncation:
+
+```python
+def fit_chunks_to_budget(chunks: list[str], max_tokens: int, reserve: int = 500) -> list[str]:
+    available = max_tokens - reserve
+    selected, used = [], 0
+    for chunk in chunks:
+        cost = len(chunk) // 4  # rough: 1 token ~ 4 chars
+        if used + cost > available:
+            break
+        selected.append(chunk)
+        used += cost
+    return selected
+```
+
+This ensures no single batch exceeds the token budget, preventing silent truncation and hard API errors.
+
+## Technique 5: Process in bounded batches, not all at once
+
+When you must buffer (for example, embedding API calls are faster in batches), use a fixed batch size rather than accumulating everything:
+
+```python
+def batched(items: Iterator, size: int) -> Iterator[list]:
+    batch = []
+    for item in items:
+        batch.append(item)
+        if len(batch) >= size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+```
+
+Batches of 50–200 chunks give you the API throughput benefit without the memory cost of accumulating the entire corpus.
+
+## What to emphasize in the interview
+
+Describe the problem quantitatively first (show you understand the scale), then describe your techniques in layers: generator pipeline for O(1) memory, explicit deletion for GC help, streaming writes to avoid accumulation, token budgets for API safety. Mention that you would profile memory usage in production with `tracemalloc` or `memory_profiler` to verify the approach works as expected.
+
+## Common follow-up question
+
+"How would you handle a document that exceeds the embedding model's token limit?" — truncate at the model's context window, or split the document into smaller chunks and embed each separately. Store which chunks came from which document in metadata so retrieval can reassemble context.
+
+## Interview takeaway
+
+Memory-efficient RAG ingestion is primarily a data flow architecture problem. The answer is generator pipelines that process one record at a time, bounded batch sizes for API calls, and streaming writes to external storage. Do not load everything into memory before processing anything.
+""",
+        "tags_json": ["python", "memory", "rag-ingestion", "generators", "performance"],
     },
     {
         "category": "rag",
