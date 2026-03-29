@@ -92,7 +92,7 @@ def generate_variation(
         "explanation_md": exercise.explanation_md,
     }
 
-    result = svc.generate_exercise_variation(seed, variation_type)
+    result = svc.generate_exercise_variation(seed, variation_type, db=db, user_id=user_id)
     if result is None:
         raise HTTPException(502, "Failed to generate variation — try again")
 

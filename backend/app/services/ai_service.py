@@ -368,6 +368,30 @@ class AIService:
         self,
         seed_exercise: Dict[str, Any],
         variation_type: str = "scenario",
+        db=None,
+        user_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Generate a variation, using agent loop if db context available, else direct."""
+        if self.is_available and db is not None and user_id is not None:
+            try:
+                from app.services.agent_loop import AgentLoop
+                agent = AgentLoop(db=db, user_id=user_id, client=self.client, model=self.model)
+                result = agent.run(
+                    task="generate_variation",
+                    context={"seed_exercise": seed_exercise, "variation_type": variation_type},
+                    max_rounds=3,
+                )
+                if result:
+                    return result
+            except Exception:
+                pass  # fall through to direct generation
+
+        return self._direct_generate_variation(seed_exercise, variation_type)
+
+    def _direct_generate_variation(
+        self,
+        seed_exercise: Dict[str, Any],
+        variation_type: str = "scenario",
     ) -> Optional[Dict[str, Any]]:
         """Generate an exercise variation using Claude. Returns variation dict or None."""
         prompt = self._build_variation_prompt(seed_exercise, variation_type)
