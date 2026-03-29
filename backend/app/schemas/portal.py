@@ -398,3 +398,25 @@ class DeepDiveResponse(BaseModel):
     output_tokens: Optional[int] = None
     latency_ms: Optional[int] = None
     created_at: Optional[str] = None
+
+
+class CoachingRequest(BaseModel):
+    """Request body for interview answer coaching."""
+    answer: str
+
+
+class CoachingResponse(BaseModel):
+    """Response from AI interview coaching."""
+    id: int
+    question_id: int
+    overall_score: int
+    strengths: List[str]
+    gaps: List[str]
+    improvements: List[str]
+    example_answer_section: str
+    ready_for_interview: bool
+    model: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    latency_ms: Optional[int] = None
+    created_at: Optional[str] = None

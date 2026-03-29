@@ -398,6 +398,111 @@ class AIService:
 
         return parsed
 
-    def coach_interview_answer(self, question: str, user_answer: str) -> Dict:
-        """[Future] Coach a user on their interview answer."""
-        raise NotImplementedError("Interview coaching coming in next iteration")
+    # --- Interview coaching ---
+
+    def _build_coaching_prompt(
+        self,
+        user_answer: str,
+        question_context: Dict[str, Any],
+    ) -> Dict[str, str]:
+        """Build prompt for coaching a user on their interview answer."""
+        system = (
+            "You are an interview coach for an AI engineering candidate.\n\n"
+            "## Who you are coaching\n"
+            "A senior full-stack engineer transitioning to AI engineering on the APPLICATION side — "
+            "they build production systems with LLMs and agents, not ML research. They already know "
+            "Python, APIs, and system design. They are preparing for AI engineering roles that require "
+            "expertise in: tool design, agent orchestration, RAG patterns, evaluation, prompt engineering, "
+            "cost optimization, and production reliability.\n\n"
+            "## This is self-study interview prep\n"
+            "This is NOT template-drilling for FAANG interviews — the AI engineering field evolves too fast "
+            "for that approach. Focus on whether the candidate demonstrates genuine understanding of the "
+            "current AI engineering landscape: agents, RAG, tool use, evaluation, deployment, MCP, "
+            "structured outputs. Depth over buzzwords. Real-world applicability over theory.\n\n"
+            "## Coaching style\n"
+            "- Supportive but honest — acknowledge what they got right before addressing gaps\n"
+            "- Identify specific gaps: missing concepts, vague explanations, outdated approaches\n"
+            "- Give concrete improvement suggestions with example phrasing they can use\n"
+            "- For weak areas, show a better answer section in markdown — teach by example\n"
+            "- Be direct about interview readiness: do not give false confidence\n\n"
+            "## Output format\n"
+            "Respond with ONLY valid JSON (no markdown fences, no commentary):\n"
+            '{\n'
+            '  "overall_score": 0-100,\n'
+            '  "strengths": ["specific things the answer got right"],\n'
+            '  "gaps": ["important points missing from the answer"],\n'
+            '  "improvements": ["specific suggestions with example phrasing"],\n'
+            '  "example_answer_section": "markdown showing how to answer the weakest part better",\n'
+            '  "ready_for_interview": true/false\n'
+            '}\n\n'
+            "Score guide: 85+ interview-ready, 70-84 good foundation needs polish, "
+            "50-69 significant gaps, <50 needs more study."
+        )
+
+        user = (
+            f"## Interview Question\n"
+            f"**Category:** {question_context.get('category', '')}\n"
+            f"**Difficulty:** {question_context.get('difficulty', '')}\n\n"
+            f"### Question\n{question_context.get('question', '')}\n\n"
+            f"### Answer Outline (what a strong answer covers)\n"
+            f"{question_context.get('answer_outline', '')}\n\n"
+            f"## Candidate's Answer\n{user_answer}"
+        )
+
+        return {"system": system, "user": user}
+
+    def _parse_coaching_response(self, raw: str) -> Optional[Dict[str, Any]]:
+        """Parse Claude's JSON response into coaching feedback dict. Returns None on failure."""
+        try:
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.split("\n")
+                cleaned = "\n".join(lines[1:-1])
+            data = json.loads(cleaned)
+            overall_score = data.get("overall_score")
+            if overall_score is None:
+                return None
+            return {
+                "overall_score": int(overall_score),
+                "strengths": data.get("strengths", []) if isinstance(data.get("strengths"), list) else [],
+                "gaps": data.get("gaps", []) if isinstance(data.get("gaps"), list) else [],
+                "improvements": data.get("improvements", []) if isinstance(data.get("improvements"), list) else [],
+                "example_answer_section": data.get("example_answer_section", ""),
+                "ready_for_interview": bool(data.get("ready_for_interview", False)),
+            }
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def coach_interview_answer(
+        self,
+        user_answer: str,
+        question_context: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Coach a user on their interview answer using Claude. Returns dict with _meta or None."""
+        prompt = self._build_coaching_prompt(user_answer, question_context)
+        start = time.time()
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=2000,
+                system=prompt["system"],
+                messages=[{"role": "user", "content": prompt["user"]}],
+            )
+        except (anthropic.APITimeoutError, anthropic.APIConnectionError):
+            return None
+
+        latency_ms = int((time.time() - start) * 1000)
+        raw_text = response.content[0].text
+        parsed = self._parse_coaching_response(raw_text)
+
+        if parsed:
+            parsed["_meta"] = {
+                "model": self.model,
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "latency_ms": latency_ms,
+                "prompt_template": prompt["system"],
+            }
+
+        return parsed
