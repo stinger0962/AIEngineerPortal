@@ -1605,11 +1605,1009 @@ Write the design doc for one narrow LLM feature you could build in a weekend. Pi
         "level": "intermediate",
         "estimated_hours": 18,
         "lessons": [
-            {"title": "Why retrieval fails in practice", "summary": "Separate indexing, chunking, ranking, and prompting failures.", "content_md": "## Retrieval failures\n\nMost bad RAG answers come from the pipeline before generation even starts.", "estimated_minutes": 40},
-            {"title": "Chunking and metadata design", "summary": "Choose chunk size and metadata fields to support retrieval and evaluation later.", "content_md": "## Chunking\n\nChunk boundaries should preserve meaning and provenance.", "estimated_minutes": 45},
-            {"title": "Ranking, re-ranking, and citations", "summary": "Improve answer grounding with better document selection and explicit provenance.", "content_md": "## Ranking\n\nGood citations depend on both retrieval quality and prompt structure.", "estimated_minutes": 40},
-            {"title": "Evaluation loops for RAG", "summary": "Measure answer quality, faithfulness, and retrieval usefulness separately.", "content_md": "## Evaluation\n\nInspect retrieval traces, not just final answers.", "estimated_minutes": 40},
-            {"title": "Portfolio slice: domain research assistant", "summary": "Turn RAG into a credible product artifact with sources and review controls.", "content_md": "## Portfolio move\n\nA strong RAG project shows ingestion, retrieval transparency, and evaluation discipline.", "estimated_minutes": 35},
+            {
+                "title": "Document ingestion and chunking",
+                "summary": "Choose chunking strategies, extract metadata, and handle different file formats so retrieval has clean, meaningful inputs.",
+                "estimated_minutes": 45,
+                "content_md": """\
+## Document ingestion and chunking
+
+### Why this matters
+
+The most common reason a RAG system gives bad answers has nothing to do with the LLM and nothing to do with your vector database. It is because the chunks entering the retrieval index are either too big, too small, semantically broken in the middle of a sentence, or stripped of the metadata that would let the retrieval layer make good decisions.
+
+Chunking is the first place where the entire system can go wrong silently. The vector DB will happily index garbage chunks and return them with high cosine similarity scores. The model will faithfully summarize whatever text it receives. Nobody throws an exception. You just get bad answers and no signal about why.
+
+As a full-stack engineer, think of chunking like normalization in relational databases: the decisions you make here constrain everything downstream. Get them right early and retrieval becomes tractable. Get them wrong and you will spend weeks chasing phantom quality problems.
+
+### Core concepts
+
+**Fixed-size chunking.** Split text every N characters or tokens with an optional overlap. Fast, simple, predictable. Works well for structured documents where content density is uniform — think product catalogs, legal clauses, or FAQ entries where each item is roughly the same size.
+
+The catch: fixed splits cut sentences in half. A chunk boundary mid-sentence means neither chunk contains a complete thought, and retrieval may return the second half without the premise.
+
+**Recursive character chunking.** Split on natural boundaries first (paragraphs, then sentences, then words) until chunks reach the target size. This is what LangChain's `RecursiveCharacterTextSplitter` implements. Better than fixed-size for most prose text because it respects sentence and paragraph structure.
+
+**Semantic chunking.** Use embedding similarity between consecutive sentences to detect topic shifts, then split at boundaries where similarity drops. Expensive to compute but produces chunks that each contain a single coherent idea — which is exactly what retrieval needs. Worth the cost for high-stakes content like medical or legal documents.
+
+**Chunk overlap.** The overlap parameter copies the last N tokens of one chunk into the start of the next. This prevents key context from disappearing when a relevant passage spans a chunk boundary. A 15–20% overlap is a common starting point. Too much overlap bloats your index; too little causes boundary blindness.
+
+**Metadata extraction.** Every chunk should carry metadata that answers: where did this come from? (source, page, section), when was it created? (timestamp, version), what type is it? (heading, body, code, table). This metadata is not used for semantic search — it is used for filtering, citations, and debugging. Without it, you cannot answer "show me the source" or "only search docs from this year."
+
+**Handling different file formats.** PDFs are the worst. A PDF is a visual layout format, not a text format. Extraction tools often produce column-order confusion, header/footer noise, and broken hyphenation. Markdown and HTML are better because structure is explicit. For code, respect function and class boundaries rather than splitting mid-function. For tables, keep the header row in every chunk that contains table data.
+
+### Working example
+
+```python
+from __future__ import annotations
+import re
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+@dataclass
+class Chunk:
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+def fixed_chunker(
+    text: str,
+    chunk_size: int = 512,
+    overlap: int = 64,
+    source: str = "",
+) -> list[Chunk]:
+    \"\"\"
+    Simple fixed-size chunker with overlap.
+    chunk_size and overlap are measured in characters.
+    \"\"\"
+    chunks = []
+    start = 0
+    doc_index = 0
+
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        chunk_text = text[start:end].strip()
+        if chunk_text:
+            chunks.append(Chunk(
+                text=chunk_text,
+                metadata={
+                    "source": source,
+                    "chunk_index": doc_index,
+                    "char_start": start,
+                    "char_end": end,
+                },
+            ))
+            doc_index += 1
+        start += chunk_size - overlap  # step forward by (size - overlap)
+
+    return chunks
+
+
+def recursive_chunker(
+    text: str,
+    max_size: int = 512,
+    overlap: int = 64,
+    source: str = "",
+) -> list[Chunk]:
+    \"\"\"
+    Recursive chunker: splits on paragraphs, then sentences, then words.
+    Prefers natural boundaries over arbitrary character counts.
+    \"\"\"
+    separators = ["\\n\\n", "\\n", ". ", " ", ""]
+
+    def split(text: str, sep_index: int) -> list[str]:
+        if len(text) <= max_size or sep_index >= len(separators):
+            return [text]
+        sep = separators[sep_index]
+        parts = text.split(sep) if sep else list(text)
+        result, current = [], ""
+        for part in parts:
+            candidate = (current + sep + part).strip() if current else part
+            if len(candidate) <= max_size:
+                current = candidate
+            else:
+                if current:
+                    result.append(current)
+                # If this single part is still too big, recurse
+                if len(part) > max_size:
+                    result.extend(split(part, sep_index + 1))
+                    current = ""
+                else:
+                    current = part
+        if current:
+            result.append(current)
+        return result
+
+    raw_chunks = split(text, 0)
+    chunks = []
+    for i, chunk_text in enumerate(raw_chunks):
+        if chunk_text.strip():
+            chunks.append(Chunk(
+                text=chunk_text.strip(),
+                metadata={"source": source, "chunk_index": i},
+            ))
+    return chunks
+
+
+# --- Demonstrate on a sample document ---
+sample = \"\"\"
+Introduction to Vector Databases
+
+Vector databases store high-dimensional embeddings and enable semantic search. Unlike traditional databases, they find the nearest neighbors by distance, not exact match.
+
+Why this matters for AI applications is straightforward: language models convert text into dense vectors. To retrieve the most relevant context, you need a store that can find the closest vectors efficiently.
+
+Common vector databases include Pinecone, Chroma, Weaviate, and pgvector. Each makes different tradeoffs between query speed, accuracy, and operational complexity.
+\"\"\"
+
+chunks = recursive_chunker(sample, max_size=200, source="intro.md")
+for c in chunks:
+    print(f"[{c.metadata['chunk_index']}] ({len(c.text)} chars) {c.text[:80]}...")
+```
+
+Running this produces chunks aligned to paragraph boundaries rather than arbitrary character positions — so each chunk contains a complete thought.
+
+### Common mistakes
+
+1. **Ignoring chunk size distribution.** A healthy corpus has a tight distribution of chunk sizes. If you have some chunks that are 50 tokens and others that are 2000 tokens, retrieval will systematically prefer longer chunks (they contain more terms) even when shorter chunks are more relevant. Visualize your chunk size histogram before indexing.
+
+2. **No overlap for dense technical content.** For API documentation or legal text where every sentence matters, zero overlap means context at chunk boundaries is lost. Start with 10–20% overlap.
+
+3. **Stripping all metadata.** Engineers often write a fast ingestion script that extracts the text and ignores headers, page numbers, section titles, and timestamps. Then they realize they cannot answer "what page is this from" or filter by date range.
+
+4. **Chunking PDFs without cleaning first.** Raw PDF extraction often includes headers, footers, page numbers, and navigation text in the middle of content. Clean before chunking, not after.
+
+5. **One chunk size for all document types.** A FAQ answer and a technical specification are different shapes of text. Use smaller chunks (256–512 tokens) for factual lookups and larger chunks (512–1024 tokens) for explanatory content where context matters more.
+
+### Try it yourself
+
+Take a document you use at work — a README, an internal wiki page, or a PDF spec sheet. Run both the fixed-size and recursive chunkers on it. Print each chunk with its character count. Count how many chunks are cut mid-sentence in the fixed-size version. Now add a metadata field for the section heading by detecting lines that end with a colon or match a heading pattern. Can you filter chunks by section heading in a retrieval step?
+""",
+            },
+            {
+                "title": "Embedding and vector storage",
+                "summary": "Choose embedding models and vector databases, understand similarity metrics, and build an index you can actually query.",
+                "estimated_minutes": 45,
+                "content_md": """\
+## Embedding and vector storage
+
+### Why this matters
+
+Embeddings are the translation layer between human language and mathematical retrieval. Every time you call a RAG pipeline and ask "find me the most relevant chunks for this query," that question is answered in embedding space — not in keyword space. If your embeddings are bad, or if you choose the wrong similarity metric, or if your vector database is misconfigured, retrieval will fail in ways that are extremely hard to debug because everything looks like it is working.
+
+For a full-stack engineer, the practical question is: which embedding model do I choose, which vector database do I choose, and how do I wire them together without painting myself into a corner? This lesson gives you the mental model to answer those questions on a real project.
+
+### Core concepts
+
+**What an embedding is.** An embedding model takes a string of text and returns a fixed-length float vector — typically 768, 1024, or 1536 dimensions. The geometry of the space is trained so that semantically similar texts land close together. "The contract was signed in March" and "The agreement was executed in Q1" will have vectors that are close to each other even though they share no words.
+
+**Embedding model choices.** OpenAI's `text-embedding-3-small` and `text-embedding-3-large` are the easiest starting point — one API call, consistent quality, no infrastructure. Cohere's Embed v3 supports embedding types (search_document vs. search_query), which means the model can optimize separately for what goes in the index versus what a query looks like. Open-source options like `BAAI/bge-large-en-v1.5` or `sentence-transformers/all-MiniLM-L6-v2` run locally or on-device, which matters for privacy-sensitive workloads.
+
+Key factors when choosing:
+- **Dimensionality vs. quality tradeoff.** Higher dimensions capture more semantic nuance but cost more storage and are slower to search. `text-embedding-3-small` (1536-d, can be reduced to 256) outperforms the old `ada-002` at half the cost.
+- **Matryoshka embeddings.** Some modern models (OpenAI's v3 series, BGE) support dimensionality reduction while preserving most quality. You can store 256-d vectors in development and 1536-d in production, using the same model.
+- **Domain fit.** A general-purpose model will underperform on domain-specific content (medical, legal, code). Consider fine-tuning or using a domain-specialized model.
+
+**Vector databases.** The market has converged on a few major options:
+
+- **Chroma**: Local-first, embedded (no server required), ideal for prototypes and single-user applications. Write vectors to disk in seconds.
+- **Pinecone**: Managed cloud service. No infrastructure to operate. Strong filtering and metadata support. Best for production at small-to-medium scale.
+- **pgvector**: A PostgreSQL extension. If your application already runs Postgres, adding vector search means one fewer service to operate. Query performance is slightly lower than specialized databases at large scale.
+- **Weaviate, Qdrant, Milvus**: Open-source specialized databases with self-hosted and managed options. Better for high-throughput or complex filtering scenarios.
+
+**Similarity metrics.** The three common options are:
+- **Cosine similarity**: Measures angle between vectors, ignoring magnitude. Most embedding models are trained for cosine. Use this by default.
+- **Dot product**: Cosine similarity multiplied by vector magnitude. Some models like Cohere's Embed v3 are trained for dot product. Faster to compute.
+- **Euclidean (L2) distance**: Measures straight-line distance. Sensitive to vector magnitude. Less common for text embeddings.
+
+**Always normalize vectors before indexing** if your vector DB uses dot product internally but your model is trained for cosine. Mismatched metrics silently degrade retrieval quality.
+
+### Working example
+
+```python
+from __future__ import annotations
+import os
+import json
+from typing import Optional
+from dataclasses import dataclass
+
+import chromadb
+from openai import OpenAI
+
+
+@dataclass
+class SearchResult:
+    text: str
+    metadata: dict
+    distance: float
+
+
+class RAGIndex:
+    \"\"\"
+    A simple RAG index backed by Chroma (local) and OpenAI embeddings.
+    Drop-in replaceable: swap embed_text for a different model,
+    swap the collection for a different vector DB.
+    \"\"\"
+
+    def __init__(
+        self,
+        collection_name: str = "knowledge",
+        persist_dir: str = "./chroma_db",
+        embedding_model: str = "text-embedding-3-small",
+        embedding_dims: int = 256,  # Matryoshka reduction
+    ):
+        self.openai = OpenAI()
+        self.model = embedding_model
+        self.dims = embedding_dims
+
+        # Persistent local Chroma
+        self.client = chromadb.PersistentClient(path=persist_dir)
+        self.collection = self.client.get_or_create_collection(
+            name=collection_name,
+            metadata={"hnsw:space": "cosine"},  # Explicit metric
+        )
+
+    def embed_text(self, text: str) -> list[float]:
+        \"\"\"Embed a single string. In production, batch these calls.\"\"\"
+        response = self.openai.embeddings.create(
+            model=self.model,
+            input=text,
+            dimensions=self.dims,
+        )
+        return response.data[0].embedding
+
+    def add_documents(self, chunks: list[dict]) -> None:
+        \"\"\"
+        Add chunks to the index.
+        Each chunk: {"id": str, "text": str, "metadata": dict}
+        \"\"\"
+        if not chunks:
+            return
+
+        # Batch embedding is cheaper and faster
+        texts = [c["text"] for c in chunks]
+        response = self.openai.embeddings.create(
+            model=self.model,
+            input=texts,
+            dimensions=self.dims,
+        )
+        embeddings = [item.embedding for item in response.data]
+
+        self.collection.add(
+            ids=[c["id"] for c in chunks],
+            embeddings=embeddings,
+            documents=texts,
+            metadatas=[c.get("metadata", {}) for c in chunks],
+        )
+        print(f"Indexed {len(chunks)} chunks.")
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        where: Optional[dict] = None,  # Metadata filter
+    ) -> list[SearchResult]:
+        \"\"\"Semantic search over the index.\"\"\"
+        query_embedding = self.embed_text(query)
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            where=where,
+        )
+        output = []
+        for text, meta, distance in zip(
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0],
+        ):
+            output.append(SearchResult(text=text, metadata=meta, distance=distance))
+        return output
+
+
+# --- Usage ---
+index = RAGIndex(collection_name="docs_v1")
+
+# Add chunks (normally these come from your chunking pipeline)
+chunks = [
+    {"id": "doc1-0", "text": "Vector databases store high-dimensional embeddings.", "metadata": {"source": "intro.md", "section": "overview"}},
+    {"id": "doc1-1", "text": "Cosine similarity measures the angle between two vectors.", "metadata": {"source": "intro.md", "section": "metrics"}},
+    {"id": "doc2-0", "text": "pgvector is a PostgreSQL extension for vector search.", "metadata": {"source": "databases.md", "section": "options"}},
+]
+
+index.add_documents(chunks)
+
+# Search with optional metadata filter
+results = index.search("How do I measure similarity between embeddings?", top_k=3)
+for r in results:
+    print(f"[dist={r.distance:.3f}] {r.text}")
+
+# Search with metadata filter (only docs from intro.md)
+filtered = index.search("similarity", where={"source": "intro.md"})
+```
+
+### Common mistakes
+
+1. **Embedding queries the same way you embed documents.** Some models (Cohere Embed v3) have different modes for `search_document` vs. `search_query`. Using the wrong mode for queries silently degrades recall. Read the model card.
+
+2. **Not batching embeddings.** Calling `embed_text` once per chunk in a loop is 10–100x slower and more expensive than batching. OpenAI supports up to 2048 inputs per batch call.
+
+3. **Changing the embedding model mid-project without re-indexing.** Vector spaces are model-specific. If you switch from `ada-002` to `text-embedding-3-small`, old vectors are meaningless in the new space. You must re-embed everything.
+
+4. **Storing embeddings but losing the original text.** Always store the source text alongside the vector. Chroma stores it in the `documents` field. Without the original text, you cannot serve it to the LLM.
+
+5. **Ignoring index size at production scale.** 1 million chunks × 1536 dimensions × 4 bytes = 6GB of raw vectors. Matryoshka reduction to 256 dimensions brings this to 1GB. Plan storage before you discover it at launch.
+
+### Try it yourself
+
+Set up a local Chroma collection. Embed 10 sentences on a topic you know well. Query it with paraphrases of those sentences. Then query it with something completely unrelated and look at the distances. What distance threshold would you use to discard irrelevant results? Now try changing `embedding_dims` from 1536 to 256 — does retrieval quality change for your queries?
+""",
+            },
+            {
+                "title": "Retrieval patterns",
+                "summary": "Implement semantic search, hybrid BM25 plus vector retrieval, reranking, and diversity strategies to maximize context quality.",
+                "estimated_minutes": 45,
+                "content_md": """\
+## Retrieval patterns
+
+### Why this matters
+
+Pure semantic search fails in predictable ways. If a user asks about "GPT-4 pricing changes in March 2024," a vector search will retrieve semantically similar content about LLM pricing in general — but might miss the specific document that contains the exact date and model name, because exact keyword match is not what embedding similarity optimizes for.
+
+Production RAG systems use layered retrieval strategies. The goal is not to pick the best single retrieval method; it is to combine methods in a way that finds the right chunks reliably across the full range of query types your users will send. This lesson covers the practical patterns that separate toy demos from production systems.
+
+### Core concepts
+
+**Semantic search.** Query and document embeddings are compared by cosine similarity. Best for natural language questions where the user does not know the exact terminology in the source document. Weak for queries with specific named entities, model numbers, dates, or code identifiers.
+
+**BM25 (keyword search).** Classic TF-IDF-based ranking that scores documents by exact term overlap, adjusting for document length and term frequency. BM25 does not understand meaning but it is reliable for specific terms. It will find a document containing "GPT-4o-mini rate limit" when that exact phrase is in the text.
+
+**Hybrid search.** Combine BM25 and vector scores using Reciprocal Rank Fusion (RRF) or a weighted blend. RRF is the most practical approach: each method produces a ranked list, and the final score for each document is the sum of `1/(k + rank)` across methods (k=60 is a common default). This handles diverse query types without needing to tune weights per query.
+
+**Reranking.** A cross-encoder model takes each (query, chunk) pair and scores them jointly. This is more expensive than embedding similarity (which uses independent encodings) but much more accurate. Cohere's Rerank API and cross-encoder models from `sentence-transformers` are common choices. Typical pattern: retrieve the top 20 chunks cheaply, rerank to find the best 5.
+
+**Maximum Marginal Relevance (MMR).** When multiple retrieved chunks say the same thing (near-duplicate passages), your context window fills with redundant information. MMR adds a diversity penalty to reduce repetition: each new chunk is selected based on its relevance to the query minus its similarity to already-selected chunks. Use MMR when your source documents are repetitive (multiple versions of the same content, FAQs with overlapping answers).
+
+**Metadata filtering.** Pre-filter by metadata before semantic search. A query like "find contract terms from agreements signed after 2023" should filter `year > 2023` first, then do semantic search within that subset. Filtering reduces noise and speeds up retrieval. This requires good metadata at ingestion time.
+
+### Working example
+
+```python
+from __future__ import annotations
+import math
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Callable
+
+from openai import OpenAI
+import chromadb
+
+
+@dataclass
+class RetrievedChunk:
+    id: str
+    text: str
+    metadata: dict
+    score: float
+
+
+def reciprocal_rank_fusion(
+    ranked_lists: list[list[RetrievedChunk]],
+    k: int = 60,
+) -> list[RetrievedChunk]:
+    \"\"\"
+    Merge multiple ranked lists using Reciprocal Rank Fusion.
+    Returns a single merged list sorted by combined RRF score.
+    \"\"\"
+    scores: dict[str, float] = defaultdict(float)
+    chunks_by_id: dict[str, RetrievedChunk] = {}
+
+    for ranked_list in ranked_lists:
+        for rank, chunk in enumerate(ranked_list):
+            scores[chunk.id] += 1.0 / (k + rank + 1)
+            chunks_by_id[chunk.id] = chunk
+
+    merged = sorted(chunks_by_id.values(), key=lambda c: scores[c.id], reverse=True)
+    # Attach final RRF score for inspection
+    for chunk in merged:
+        chunk.score = scores[chunk.id]
+    return merged
+
+
+def mmr_rerank(
+    query_embedding: list[float],
+    candidates: list[RetrievedChunk],
+    embed_fn: Callable[[str], list[float]],
+    top_k: int = 5,
+    diversity_weight: float = 0.3,
+) -> list[RetrievedChunk]:
+    \"\"\"
+    Maximum Marginal Relevance: balance relevance with diversity.
+    diversity_weight: 0.0 = pure relevance, 1.0 = pure diversity.
+    \"\"\"
+    def cosine(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        mag_a = math.sqrt(sum(x**2 for x in a))
+        mag_b = math.sqrt(sum(x**2 for x in b))
+        return dot / (mag_a * mag_b + 1e-9)
+
+    candidate_embeddings = {c.id: embed_fn(c.text) for c in candidates}
+    selected: list[RetrievedChunk] = []
+    remaining = list(candidates)
+
+    while len(selected) < top_k and remaining:
+        scores = []
+        for chunk in remaining:
+            relevance = cosine(query_embedding, candidate_embeddings[chunk.id])
+            if not selected:
+                redundancy = 0.0
+            else:
+                redundancy = max(
+                    cosine(candidate_embeddings[chunk.id], candidate_embeddings[s.id])
+                    for s in selected
+                )
+            mmr_score = (1 - diversity_weight) * relevance - diversity_weight * redundancy
+            scores.append((chunk, mmr_score))
+
+        best_chunk, _ = max(scores, key=lambda x: x[1])
+        selected.append(best_chunk)
+        remaining.remove(best_chunk)
+
+    return selected
+
+
+class HybridRetriever:
+    \"\"\"
+    Combines vector (semantic) and keyword (BM25-approximate) retrieval
+    using Reciprocal Rank Fusion, with optional reranking.
+    \"\"\"
+
+    def __init__(self, collection: chromadb.Collection, openai_client: OpenAI):
+        self.collection = collection
+        self.openai = openai_client
+        # Simple in-memory BM25 approximation via Chroma full-text (real
+        # production would use Elasticsearch or a dedicated BM25 lib)
+        self._texts: list[dict] = []
+
+    def add_chunks(self, chunks: list[dict]) -> None:
+        texts = [c["text"] for c in chunks]
+        resp = self.openai.embeddings.create(
+            model="text-embedding-3-small", input=texts, dimensions=256
+        )
+        self.collection.add(
+            ids=[c["id"] for c in chunks],
+            embeddings=[item.embedding for item in resp.data],
+            documents=texts,
+            metadatas=[c.get("metadata", {}) for c in chunks],
+        )
+        self._texts.extend(chunks)
+
+    def _vector_search(self, query: str, top_k: int = 20) -> list[RetrievedChunk]:
+        resp = self.openai.embeddings.create(
+            model="text-embedding-3-small", input=query, dimensions=256
+        )
+        results = self.collection.query(
+            query_embeddings=[resp.data[0].embedding], n_results=top_k
+        )
+        return [
+            RetrievedChunk(id=id_, text=text, metadata=meta, score=1 - dist)
+            for id_, text, meta, dist in zip(
+                results["ids"][0],
+                results["documents"][0],
+                results["metadatas"][0],
+                results["distances"][0],
+            )
+        ]
+
+    def _keyword_search(self, query: str, top_k: int = 20) -> list[RetrievedChunk]:
+        \"\"\"Approximate keyword search: score by term overlap with query words.\"\"\"
+        query_terms = set(query.lower().split())
+        scored = []
+        for chunk in self._texts:
+            chunk_terms = set(chunk["text"].lower().split())
+            overlap = len(query_terms & chunk_terms)
+            if overlap > 0:
+                scored.append((chunk, overlap))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [
+            RetrievedChunk(id=c["id"], text=c["text"], metadata=c.get("metadata", {}), score=s)
+            for c, s in scored[:top_k]
+        ]
+
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        where: dict | None = None,
+    ) -> list[RetrievedChunk]:
+        vector_results = self._vector_search(query, top_k=20)
+        keyword_results = self._keyword_search(query, top_k=20)
+
+        # Apply metadata filter after retrieval
+        if where:
+            def matches(chunk: RetrievedChunk) -> bool:
+                return all(chunk.metadata.get(k) == v for k, v in where.items())
+            vector_results = [c for c in vector_results if matches(c)]
+            keyword_results = [c for c in keyword_results if matches(c)]
+
+        merged = reciprocal_rank_fusion([vector_results, keyword_results])
+        return merged[:top_k]
+```
+
+### Common mistakes
+
+1. **Only using vector search.** For anything with specific entities, codes, dates, or technical identifiers, pure vector search misses. Add keyword search before your launch date, not after users complain.
+
+2. **Not reranking when you have budget.** Retrieving top-20 cheaply and reranking to top-5 is standard practice. The quality improvement is significant; the cost is a Cohere Rerank call per query.
+
+3. **Skipping metadata filtering.** If users can scope queries ("only show me content from the 2024 handbook"), build metadata filtering into the retrieval layer on day one. Adding it later requires schema migrations.
+
+4. **Retrieving too few candidates.** If you retrieve top-3 and one is irrelevant, you only have 2 useful chunks in context. Retrieve top-10 or top-20, filter for quality, then pass the best 3-5 to the model.
+
+5. **Never looking at what was retrieved.** Log the chunks returned for a sample of queries. You will immediately see what is broken. Most engineers skip this step and chase quality problems in the wrong layer.
+
+### Try it yourself
+
+Build a retrieval harness that logs both the query and every chunk returned, with its distance score. Run 10 queries from your domain. Identify the query types where vector search succeeds and where it fails. Try adding a keyword boost for exact entity matches. Measure how often the chunk that should answer the question appears in the top-3 results versus the top-10 results.
+""",
+            },
+            {
+                "title": "RAG evaluation and debugging",
+                "summary": "Measure faithfulness, context relevance, and answer quality separately, then diagnose why a RAG pipeline is giving wrong answers.",
+                "estimated_minutes": 45,
+                "content_md": """\
+## RAG evaluation and debugging
+
+### Why this matters
+
+A RAG system fails in three distinct ways that require three distinct fixes: wrong documents were retrieved, the right documents were retrieved but the model ignored them, or the model answered correctly but cited the wrong sources. If you do not measure these layers separately, you will spend weeks prompt-engineering when the real problem is chunking, or rewriting ingestion pipelines when the real problem is the prompt.
+
+This lesson gives you the evaluation framework and debugging workflow to tell these failures apart before you spend a day investigating the wrong thing.
+
+### Core concepts
+
+**Faithfulness.** Does the model's answer follow from the retrieved context? A faithful answer makes only claims that are supported by the retrieved chunks. An unfaithful answer adds information from the model's parametric knowledge — which might be correct, but is not grounded and cannot be cited. Measure faithfulness with an LLM judge that checks each claim in the answer against the provided chunks.
+
+**Context relevance.** Are the retrieved chunks actually relevant to the question? You can have a perfectly faithful answer but a terrible RAG system if the chunks are irrelevant — the model is just doing its best with garbage input. Measure context relevance as the fraction of retrieved chunks that contain information useful for answering the query.
+
+**Answer relevance.** Does the final answer address what the user actually asked? A system can be faithful and context-relevant but still produce an answer that talks around the question without directly addressing it.
+
+**The evaluation-retrieval-generation framework.** When debugging, always isolate the layer that is failing:
+1. Sample 20 queries from real or realistic usage.
+2. For each query, retrieve and log the top-k chunks.
+3. Ask: does any chunk contain the correct answer? (Retrieval quality check.)
+4. If yes, ask: does the model use that information in its answer? (Generation quality check.)
+5. If the chunk is not retrieved, ask: is the document in the index? (Ingestion check.) Was it chunked in a way that separates the relevant information? (Chunking check.)
+
+**RAGAS.** The open-source RAGAS library automates faithfulness, answer relevance, and context precision/recall measurement using an LLM-as-judge approach. Useful for batch evaluation over a test set.
+
+### Working example
+
+```python
+from __future__ import annotations
+import json
+from openai import OpenAI
+
+client = OpenAI()
+
+
+def evaluate_faithfulness(
+    question: str,
+    answer: str,
+    retrieved_chunks: list[str],
+    model: str = "gpt-4o-mini",
+) -> dict:
+    \"\"\"
+    LLM-as-judge: check if each claim in the answer is supported
+    by the retrieved chunks. Returns a score 0-1 and a reasoning trace.
+    \"\"\"
+    context = "\\n\\n---\\n\\n".join(
+        f"[Chunk {i+1}]: {chunk}" for i, chunk in enumerate(retrieved_chunks)
+    )
+
+    prompt = f\"\"\"You are evaluating a RAG system answer for faithfulness.
+
+Question: {question}
+
+Retrieved Context:
+{context}
+
+Answer to evaluate:
+{answer}
+
+Task: Identify each factual claim in the answer. For each claim, determine whether it is:
+- SUPPORTED: Directly stated or clearly implied by the retrieved context
+- UNSUPPORTED: Not present in the context (may be from model knowledge or hallucinated)
+
+Return a JSON object with:
+- "claims": list of {{claim: str, verdict: "SUPPORTED" | "UNSUPPORTED", evidence: str}}
+- "faithfulness_score": fraction of claims that are SUPPORTED (0.0 to 1.0)
+- "summary": one sentence explaining the result
+
+Respond with only the JSON object.\"\"\"
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+    )
+
+    return json.loads(response.choices[0].message.content)
+
+
+def evaluate_context_relevance(
+    question: str,
+    retrieved_chunks: list[str],
+    model: str = "gpt-4o-mini",
+) -> dict:
+    \"\"\"
+    For each retrieved chunk, score whether it is relevant to the question.
+    Returns per-chunk verdicts and an overall precision score.
+    \"\"\"
+    results = []
+    for i, chunk in enumerate(retrieved_chunks):
+        prompt = f\"\"\"Is the following text relevant to answering this question?
+
+Question: {question}
+
+Text: {chunk}
+
+Respond with JSON: {{"relevant": true/false, "reason": "brief explanation"}}\"\"\"
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        verdict = json.loads(response.choices[0].message.content)
+        results.append({"chunk_index": i, **verdict})
+
+    precision = sum(1 for r in results if r["relevant"]) / len(results) if results else 0.0
+    return {"chunks": results, "context_precision": precision}
+
+
+def run_eval_suite(
+    test_cases: list[dict],
+    rag_pipeline,  # callable: query -> (answer, retrieved_chunks)
+) -> dict:
+    \"\"\"
+    Run a batch evaluation over a test set.
+    Each test case: {"question": str, "expected_answer": str (optional)}
+    \"\"\"
+    results = []
+    for case in test_cases:
+        question = case["question"]
+        answer, chunks = rag_pipeline(question)
+
+        faithfulness = evaluate_faithfulness(question, answer, chunks)
+        relevance = evaluate_context_relevance(question, chunks)
+
+        results.append({
+            "question": question,
+            "answer": answer,
+            "faithfulness_score": faithfulness["faithfulness_score"],
+            "context_precision": relevance["context_precision"],
+            "unsupported_claims": [
+                c for c in faithfulness["claims"]
+                if c["verdict"] == "UNSUPPORTED"
+            ],
+        })
+
+    avg_faithfulness = sum(r["faithfulness_score"] for r in results) / len(results)
+    avg_precision = sum(r["context_precision"] for r in results) / len(results)
+
+    return {
+        "results": results,
+        "summary": {
+            "n": len(results),
+            "avg_faithfulness": round(avg_faithfulness, 3),
+            "avg_context_precision": round(avg_precision, 3),
+        },
+    }
+
+
+# --- Debugging workflow ---
+def debug_retrieval_failure(
+    question: str,
+    index,  # Your vector index
+    expected_source: str,
+    top_k: int = 10,
+) -> None:
+    \"\"\"
+    When a known question is not being answered correctly,
+    diagnose whether it is a retrieval problem or a generation problem.
+    \"\"\"
+    print(f"Query: {question}")
+    print(f"Expected source: {expected_source}")
+    print()
+
+    chunks = index.search(question, top_k=top_k)
+
+    found_expected = False
+    for i, chunk in enumerate(chunks):
+        source = chunk.metadata.get("source", "unknown")
+        is_expected = expected_source in source
+        marker = "<<< TARGET" if is_expected else ""
+        found_expected = found_expected or is_expected
+        print(f"  [{i+1}] dist={chunk.distance:.3f} source={source} {marker}")
+        print(f"       {chunk.text[:100]}...")
+        print()
+
+    if not found_expected:
+        print("DIAGNOSIS: Target document not in top results.")
+        print("  -> Check: Is the document in the index?")
+        print("  -> Check: Are chunks too large (semantic dilution)?")
+        print("  -> Check: Does the query use different terminology than the document?")
+        print("  -> Try: Hybrid search to catch exact term matches")
+    else:
+        print("DIAGNOSIS: Target document WAS retrieved.")
+        print("  -> Problem is likely in generation (model not using the context)")
+        print("  -> Check: Is the relevant chunk in the top-3 or only in 7-10?")
+        print("  -> Try: Move relevant chunk higher via reranking")
+        print("  -> Try: Check if your prompt instructs the model to use context")
+```
+
+### Common mistakes
+
+1. **Evaluating only the final answer.** If the answer is wrong, you do not know if retrieval failed or generation failed without inspecting retrieved chunks. Always log what the model received.
+
+2. **Using the same LLM that generates answers to judge them.** A judge model should ideally be different from (or more capable than) the generation model. Otherwise you are asking the model whether its own output is good.
+
+3. **Measuring faithfulness without measuring context relevance.** A system can score 100% on faithfulness (all claims are in context) while having terrible context relevance (the context is irrelevant and the model says "I don't know"). Both metrics together tell the full story.
+
+4. **Building an eval suite with only easy queries.** Test with ambiguous queries, queries that span multiple documents, and queries that have no answer in the corpus. The hard cases reveal where the system breaks down.
+
+5. **Not tracking evaluation scores over time.** Run your eval suite on every significant change to chunking, embedding model, or retrieval parameters. Without regression tracking, improvements and regressions are invisible.
+
+### Try it yourself
+
+Take your RAG pipeline (or build a minimal one) and create a test set of 10 questions where you know what the correct answer source is. Run the `debug_retrieval_failure` function for any question where the answer is wrong. Determine for each failure whether it is a retrieval problem (right chunk not retrieved) or a generation problem (right chunk retrieved but not used). This diagnostic tells you whether to invest in retrieval improvements or prompt improvements.
+""",
+            },
+            {
+                "title": "Production RAG",
+                "summary": "Handle caching, latency optimization, incremental indexing, cost at scale, and monitoring in a RAG system that real users depend on.",
+                "estimated_minutes": 45,
+                "content_md": """\
+## Production RAG
+
+### Why this matters
+
+A RAG prototype that works on 1000 documents and 10 queries per day is a very different engineering problem from a RAG system serving 50,000 documents, 500 queries per minute, incremental document updates, and users who notice when answers take 4 seconds. The gap between demo and production is almost entirely in the operational concerns: caching, latency budgets, incremental indexing, cost visibility, and the monitoring that tells you when something is drifting before users notice.
+
+If you are building RAG at work — even internal tooling — you will hit these problems faster than you expect. This lesson covers the patterns that turn a RAG script into a system you can actually operate.
+
+### Core concepts
+
+**Latency budget.** A typical RAG call has this latency stack: embedding the query (50–200ms), vector search (10–100ms), optional reranking (100–500ms), LLM generation (300ms–3s). Total: 500ms to 4s. Identify which step dominates your latency, then optimize that step first. For most systems, the LLM generation step is the bottleneck. For very large indexes, vector search can become significant.
+
+**Query caching.** Identical or near-identical queries should not hit the embedding model and vector DB every time. Cache the retrieved chunks (and optionally the final answer) keyed by a hash of the query. Redis with a TTL is the simplest implementation. For semantic deduplication, you can cache the embedding itself and use it to find cache-hit candidates by similarity.
+
+**Streaming.** For end-user interfaces, stream the LLM response token-by-token instead of waiting for the full answer. Users tolerate 4 seconds of total response time much better when they see tokens arriving immediately. Most LLM clients support streaming with a few lines of code. Streaming does not reduce total latency but it dramatically improves perceived performance.
+
+**Incremental indexing.** A naive approach is to re-index the entire corpus every time a document changes. For large corpora, this is hours of work and significant cost. Production systems use incremental indexing: track which documents have changed (by hash or modification timestamp), re-embed only changed documents, delete old vectors by document ID, and insert new vectors. This requires a document store alongside the vector DB to track state.
+
+**Cost at scale.** At 1000 queries/day with 5 chunks of 512 tokens each retrieved per query: that is ~2.5M context tokens per day. At $0.10/1M tokens input, that is $0.25/day — negligible. But if your LLM generation uses a full 8K context window for each query, you are at 8M tokens/day, or $0.80/day — still fine. The costs compound when you add reranking API calls, expensive embedding models, and when query volume scales. Monitor cost per query from day one so you know what a 10x traffic spike costs before it happens.
+
+**Monitoring.** The metrics that matter in production:
+- Retrieval latency P50/P95 (separate from generation latency)
+- Vector DB query time by index size
+- Embedding API error rate and latency
+- Cache hit rate (if you have query caching)
+- Answer quality score from automated eval (sampled, not every query)
+- User feedback signals (thumbs down, correction submissions)
+
+### Working example
+
+```python
+from __future__ import annotations
+import hashlib
+import json
+import time
+from dataclasses import dataclass
+from typing import Optional, Iterator
+
+import redis
+from openai import OpenAI
+
+
+@dataclass
+class RAGResponse:
+    answer: str
+    chunks: list[dict]
+    from_cache: bool
+    latency_ms: dict  # {step: ms}
+
+
+class ProductionRAGPipeline:
+    \"\"\"
+    A production-grade RAG pipeline with:
+    - Query result caching (Redis)
+    - Streaming generation
+    - Per-step latency tracking
+    - Incremental document indexing support
+    \"\"\"
+
+    def __init__(
+        self,
+        index,             # Your RAGIndex from previous lesson
+        redis_client: redis.Redis,
+        cache_ttl_seconds: int = 3600,
+        top_k: int = 5,
+        system_prompt: str = "Answer the question using only the provided context.",
+    ):
+        self.index = index
+        self.redis = redis_client
+        self.cache_ttl = cache_ttl_seconds
+        self.top_k = top_k
+        self.system_prompt = system_prompt
+        self.openai = OpenAI()
+
+    def _cache_key(self, query: str, where: Optional[dict] = None) -> str:
+        payload = json.dumps({"q": query, "w": where or {}}, sort_keys=True)
+        return "rag:v1:" + hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+    def query(
+        self,
+        question: str,
+        where: Optional[dict] = None,
+        use_cache: bool = True,
+    ) -> RAGResponse:
+        latencies: dict[str, float] = {}
+        cache_key = self._cache_key(question, where)
+
+        # Check cache
+        if use_cache:
+            t0 = time.monotonic()
+            cached = self.redis.get(cache_key)
+            latencies["cache_check_ms"] = (time.monotonic() - t0) * 1000
+            if cached:
+                data = json.loads(cached)
+                return RAGResponse(
+                    answer=data["answer"],
+                    chunks=data["chunks"],
+                    from_cache=True,
+                    latency_ms=latencies,
+                )
+
+        # Retrieve chunks
+        t0 = time.monotonic()
+        results = self.index.search(question, top_k=self.top_k, where=where)
+        latencies["retrieval_ms"] = (time.monotonic() - t0) * 1000
+
+        context = "\\n\\n---\\n\\n".join(
+            f"[Source: {r.metadata.get('source', 'unknown')}]\\n{r.text}"
+            for r in results
+        )
+        chunks_data = [
+            {"text": r.text, "metadata": r.metadata, "score": r.score}
+            for r in results
+        ]
+
+        # Generate answer
+        t0 = time.monotonic()
+        response = self.openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {
+                    "role": "user",
+                    "content": f"Context:\\n{context}\\n\\nQuestion: {question}",
+                },
+            ],
+            temperature=0.1,
+            max_tokens=512,
+        )
+        latencies["generation_ms"] = (time.monotonic() - t0) * 1000
+        answer = response.choices[0].message.content
+
+        # Cache and return
+        if use_cache:
+            self.redis.setex(
+                cache_key,
+                self.cache_ttl,
+                json.dumps({"answer": answer, "chunks": chunks_data}),
+            )
+
+        return RAGResponse(
+            answer=answer,
+            chunks=chunks_data,
+            from_cache=False,
+            latency_ms=latencies,
+        )
+
+    def stream_query(self, question: str, where: Optional[dict] = None) -> Iterator[str]:
+        \"\"\"Stream the answer token-by-token. Yields tokens as they arrive.\"\"\"
+        results = self.index.search(question, top_k=self.top_k, where=where)
+        context = "\\n\\n---\\n\\n".join(r.text for r in results)
+
+        stream = self.openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": f"Context:\\n{context}\\n\\nQuestion: {question}"},
+            ],
+            stream=True,
+        )
+        for chunk in stream:
+            token = chunk.choices[0].delta.content
+            if token:
+                yield token
+
+
+class IncrementalIndexer:
+    \"\"\"
+    Track document versions and only re-index changed documents.
+    Uses a simple file-hash approach.
+    \"\"\"
+
+    def __init__(self, index, state_file: str = ".index_state.json"):
+        self.index = index
+        self.state_file = state_file
+        self._state: dict[str, str] = self._load_state()
+
+    def _load_state(self) -> dict:
+        try:
+            with open(self.state_file) as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return {}
+
+    def _save_state(self) -> None:
+        with open(self.state_file, "w") as f:
+            json.dump(self._state, f)
+
+    def _doc_hash(self, content: str) -> str:
+        return hashlib.sha256(content.encode()).hexdigest()
+
+    def upsert_document(
+        self,
+        doc_id: str,
+        content: str,
+        chunks: list[dict],  # Pre-chunked from your chunking pipeline
+    ) -> bool:
+        \"\"\"
+        Index document only if content has changed.
+        Returns True if document was (re)indexed, False if skipped.
+        \"\"\"
+        new_hash = self._doc_hash(content)
+        if self._state.get(doc_id) == new_hash:
+            return False  # Not changed — skip
+
+        # Delete old vectors for this document
+        try:
+            # Chroma: delete by where filter on metadata
+            self.index.collection.delete(where={"source_doc_id": doc_id})
+        except Exception:
+            pass  # New document — nothing to delete
+
+        # Add chunks with doc_id in metadata
+        for chunk in chunks:
+            chunk.setdefault("metadata", {})["source_doc_id"] = doc_id
+
+        self.index.add_documents(chunks)
+        self._state[doc_id] = new_hash
+        self._save_state()
+        return True
+```
+
+### Common mistakes
+
+1. **Re-indexing everything on every deploy.** If you rebuild the index from scratch each time you update the ingestion pipeline, you will have downtime. Separate the index lifecycle from the deployment lifecycle. Production systems keep the old index live while the new one builds.
+
+2. **Not caching at all until it is a problem.** Query caching is 3 lines of code (hash query, check Redis, set if miss). Add it before launch, not when latency becomes a user complaint.
+
+3. **Ignoring streaming for user-facing features.** If users are waiting for answers, stream the generation. The perceived latency difference is dramatic and the implementation is trivial.
+
+4. **No cost attribution per feature.** If multiple features share a RAG pipeline, you cannot tell which one is expensive without per-feature cost tagging. Add a `feature` label to every LLM call from day one.
+
+5. **Treating the index as append-only.** Documents change. Employees leave. Contracts expire. Without soft-delete or document-level replacement, your index accumulates stale content that degrades answer quality over months.
+
+### Try it yourself
+
+Add timing instrumentation to your RAG pipeline that logs retrieval latency, generation latency, and total latency for every query. Run 50 queries and compute P50 and P95. Which step is the bottleneck? Now add a simple in-memory cache (a dict keyed by query hash with a 5-minute TTL) and re-run the same 50 queries. What is your cache hit rate if queries repeat? What does this tell you about the query distribution for your use case?
+""",
+            },
         ],
     },
     {
@@ -6466,6 +7464,1244 @@ This pattern is how most production chat UIs handle streaming — the frontend a
 """,
         "tags_json": ["llm-foundations", "streaming", "anthropic-sdk", "ux-patterns"],
     },
+    # ── RAG Systems exercises ────────────────────────────────────────
+    {
+        "title": "Implement semantic chunking with overlap",
+        "slug": "semantic-chunking-with-overlap",
+        "category": "rag-systems",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement Semantic Chunking with Overlap
+
+Fixed-size chunking is fast but blind to sentence boundaries — it cuts paragraphs in half, splits mid-sentence, and produces chunks where neither half carries the full context. Semantic chunking detects topic shifts using embedding similarity, then splits at the boundaries where meaning changes. Combined with overlap, this produces index-ready chunks that each contain a coherent unit of thought.
+
+### What you are building
+
+Create a `SemanticChunker` class that:
+
+1. **Splits text into sentences** using a simple rule-based splitter (sentence-ending punctuation followed by whitespace and a capital letter, or end-of-string).
+2. **Groups consecutive sentences** into a window of size `window_size` and computes an embedding for each window.
+3. **Detects topic shift boundaries** where the cosine similarity between consecutive windows drops below a configurable threshold.
+4. **Merges sentences into chunks** between detected boundaries, up to a `max_chunk_size` character limit.
+5. **Adds overlap** by copying the last `overlap_sentences` sentences from each chunk into the start of the next chunk.
+6. **Attaches metadata** to each chunk: source identifier, chunk index, character start/end, and the sentences it contains.
+
+### Why this matters
+
+Semantic chunking is the approach used in production systems where chunk quality directly affects answer quality — legal documents, medical content, technical specifications. Understanding how it works means you can tune the threshold and window size for your corpus rather than accepting a library default.
+
+### Constraints
+
+- Mock the embedding call with a simple hash-based fake that returns a deterministic vector — the exercise is about the chunking logic, not the API.
+- All type hints required.
+- The `chunk` method should accept a plain string and return `list[Chunk]`.
+- Test with a multi-paragraph document where topic shifts are visible.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class Chunk:
+    \"\"\"A text chunk with provenance metadata.\"\"\"
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    \"\"\"Compute cosine similarity between two equal-length float vectors.\"\"\"
+    # TODO: implement dot product / (|a| * |b|)
+    raise NotImplementedError
+
+
+def split_into_sentences(text: str) -> list[str]:
+    \"\"\"
+    Split text into sentences on '.', '!', '?' followed by whitespace + capital,
+    or end of string. Returns non-empty stripped sentences.
+    \"\"\"
+    # TODO: use re.split with a lookahead pattern
+    raise NotImplementedError
+
+
+class SemanticChunker:
+    def __init__(
+        self,
+        embed_fn: Callable[[str], list[float]],
+        similarity_threshold: float = 0.85,
+        window_size: int = 2,
+        max_chunk_size: int = 800,
+        overlap_sentences: int = 1,
+    ):
+        self.embed_fn = embed_fn
+        self.similarity_threshold = similarity_threshold
+        self.window_size = window_size
+        self.max_chunk_size = max_chunk_size
+        self.overlap_sentences = overlap_sentences
+
+    def chunk(self, text: str, source: str = "") -> list[Chunk]:
+        \"\"\"
+        Chunk text using semantic boundary detection.
+        Returns a list of Chunk objects with metadata.
+        \"\"\"
+        sentences = split_into_sentences(text)
+        if not sentences:
+            return []
+
+        # TODO: compute a sliding window embedding for each sentence position
+        # window at index i covers sentences[i : i + window_size]
+        # embed the joined window text
+
+        # TODO: compute cosine similarity between consecutive window embeddings
+
+        # TODO: identify boundary positions where similarity < threshold
+
+        # TODO: group sentences into chunks between boundaries
+        # respect max_chunk_size by splitting further if needed
+
+        # TODO: add overlap_sentences from end of previous chunk to start of next
+
+        # TODO: build Chunk objects with metadata
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class Chunk:
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    mag_a = math.sqrt(sum(x**2 for x in a))
+    mag_b = math.sqrt(sum(x**2 for x in b))
+    return dot / (mag_a * mag_b + 1e-9)
+
+
+def split_into_sentences(text: str) -> list[str]:
+    parts = re.split(r'(?<=[.!?])\\s+(?=[A-Z])', text.strip())
+    return [s.strip() for s in parts if s.strip()]
+
+
+class SemanticChunker:
+    def __init__(
+        self,
+        embed_fn: Callable[[str], list[float]],
+        similarity_threshold: float = 0.85,
+        window_size: int = 2,
+        max_chunk_size: int = 800,
+        overlap_sentences: int = 1,
+    ):
+        self.embed_fn = embed_fn
+        self.similarity_threshold = similarity_threshold
+        self.window_size = window_size
+        self.max_chunk_size = max_chunk_size
+        self.overlap_sentences = overlap_sentences
+
+    def chunk(self, text: str, source: str = "") -> list[Chunk]:
+        sentences = split_into_sentences(text)
+        if not sentences:
+            return []
+
+        window_embeddings = []
+        for i in range(len(sentences)):
+            window = " ".join(sentences[i : i + self.window_size])
+            window_embeddings.append(self.embed_fn(window))
+
+        boundaries = set()
+        for i in range(1, len(window_embeddings)):
+            sim = cosine_similarity(window_embeddings[i - 1], window_embeddings[i])
+            if sim < self.similarity_threshold:
+                boundaries.add(i)
+
+        groups: list[list[str]] = []
+        current_group: list[str] = []
+        for i, sentence in enumerate(sentences):
+            if i in boundaries and current_group:
+                groups.append(current_group)
+                current_group = []
+            current_group.append(sentence)
+        if current_group:
+            groups.append(current_group)
+
+        chunks: list[Chunk] = []
+        char_pos = 0
+        for group_idx, group in enumerate(groups):
+            if group_idx > 0 and chunks:
+                prev_sentences = split_into_sentences(chunks[-1].text)
+                overlap = prev_sentences[-self.overlap_sentences :]
+                group = overlap + group
+
+            sub_text = " ".join(group)
+            while len(sub_text) > self.max_chunk_size:
+                split_at = sub_text.rfind(" ", 0, self.max_chunk_size)
+                if split_at == -1:
+                    split_at = self.max_chunk_size
+                part = sub_text[:split_at].strip()
+                chunks.append(Chunk(
+                    text=part,
+                    metadata={
+                        "source": source,
+                        "chunk_index": len(chunks),
+                        "char_start": char_pos,
+                        "char_end": char_pos + len(part),
+                    },
+                ))
+                char_pos += len(part)
+                sub_text = sub_text[split_at:].strip()
+
+            if sub_text:
+                chunks.append(Chunk(
+                    text=sub_text,
+                    metadata={
+                        "source": source,
+                        "chunk_index": len(chunks),
+                        "char_start": char_pos,
+                        "char_end": char_pos + len(sub_text),
+                    },
+                ))
+                char_pos += len(sub_text)
+
+        return chunks
+""",
+        "explanation_md": """\
+## Walkthrough: Semantic Chunking with Overlap
+
+The sliding window detects topic shifts by comparing embeddings of consecutive sentence groups. When similarity drops below the threshold, we place a chunk boundary. Overlap ensures transitional context is not lost at boundaries. In production, replace the mock embedding with a real model and batch all embedding calls to minimize API cost.
+""",
+        "tags_json": ["rag-systems", "chunking", "embeddings", "nlp"],
+    },
+    {
+        "title": "Build a hybrid retrieval pipeline",
+        "slug": "hybrid-retrieval-pipeline",
+        "category": "rag-systems",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a Hybrid Retrieval Pipeline
+
+Pure vector search misses documents with specific entity names, codes, or technical identifiers. Pure keyword search misses paraphrases and synonyms. Hybrid search combines both and consistently outperforms either alone across real-world query distributions.
+
+The standard approach is **Reciprocal Rank Fusion (RRF)**: each method ranks candidate documents independently, then RRF merges the rankings using `score(doc) = sum(1 / (k + rank))` across all lists.
+
+### What you are building
+
+Create a `HybridRetriever` class that:
+
+1. **Stores documents** in two parallel indices: a vector index (cosine similarity) and a keyword index (TF-IDF term scoring).
+2. **Retrieves candidates** from both indices independently for a given query, returning the top-N from each.
+3. **Merges ranked lists** using Reciprocal Rank Fusion.
+4. **Returns the top-k results** by final RRF score with source attribution (which method(s) found each document).
+5. **Supports metadata filtering** applied after retrieval but before merging.
+
+### Why this matters
+
+Every serious production RAG system uses hybrid retrieval. Understanding RRF means you can tune the constant `k` (controls how much top positions are rewarded) and extend to three or more retrieval methods.
+
+### Constraints
+
+- Use only the Python standard library. Implement TF-IDF scoring directly.
+- Type-hint everything. Return `list[RetrievedDoc]` with score and `source_methods` fields.
+- The embedding function should be injectable (for testing with mocks).
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import math
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Callable, Optional
+
+
+@dataclass
+class Document:
+    id: str
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class RetrievedDoc:
+    id: str
+    text: str
+    metadata: dict
+    rrf_score: float
+    source_methods: list[str]  # e.g. ["vector", "keyword"]
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    # TODO: implement
+    raise NotImplementedError
+
+
+class KeywordIndex:
+    \"\"\"TF-IDF style keyword index.\"\"\"
+
+    def __init__(self):
+        self._docs: dict[str, Document] = {}
+        self._term_df: dict[str, int] = defaultdict(int)
+
+    def add(self, doc: Document) -> None:
+        # TODO: store doc, update term document frequencies
+        raise NotImplementedError
+
+    def search(self, query: str, top_k: int = 20) -> list[tuple[str, float]]:
+        \"\"\"Return (doc_id, score) pairs sorted by TF-IDF score descending.\"\"\"
+        # TODO: tokenize query, score each doc by sum of TF-IDF for query terms
+        raise NotImplementedError
+
+
+class VectorIndex:
+    def __init__(self, embed_fn: Callable[[str], list[float]]):
+        self.embed_fn = embed_fn
+        self._docs: dict[str, Document] = {}
+        self._embeddings: dict[str, list[float]] = {}
+
+    def add(self, doc: Document) -> None:
+        # TODO: store doc and its embedding
+        raise NotImplementedError
+
+    def search(self, query: str, top_k: int = 20) -> list[tuple[str, float]]:
+        \"\"\"Return (doc_id, score) pairs sorted by cosine similarity descending.\"\"\"
+        # TODO: embed query, compute cosine similarity against all stored embeddings
+        raise NotImplementedError
+
+
+class HybridRetriever:
+    def __init__(self, embed_fn: Callable[[str], list[float]]):
+        self.vector_index = VectorIndex(embed_fn)
+        self.keyword_index = KeywordIndex()
+        self._docs: dict[str, Document] = {}
+
+    def add_documents(self, docs: list[Document]) -> None:
+        # TODO: add to both indices
+        raise NotImplementedError
+
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        candidate_k: int = 20,
+        rrf_k: int = 60,
+        where: Optional[dict] = None,
+    ) -> list[RetrievedDoc]:
+        \"\"\"Retrieve using vector + keyword search, merge with RRF.\"\"\"
+        # TODO: get candidates from both indices
+        # TODO: apply metadata filter if provided
+        # TODO: apply RRF fusion
+        # TODO: return top_k RetrievedDoc objects
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import math
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Callable, Optional
+
+
+@dataclass
+class Document:
+    id: str
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class RetrievedDoc:
+    id: str
+    text: str
+    metadata: dict
+    rrf_score: float
+    source_methods: list[str]
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    mag_a = math.sqrt(sum(x**2 for x in a))
+    mag_b = math.sqrt(sum(x**2 for x in b))
+    return dot / (mag_a * mag_b + 1e-9)
+
+
+def tokenize(text: str) -> list[str]:
+    return text.lower().split()
+
+
+class KeywordIndex:
+    def __init__(self):
+        self._docs: dict[str, Document] = {}
+        self._term_df: dict[str, int] = defaultdict(int)
+        self._doc_terms: dict[str, list[str]] = {}
+
+    def add(self, doc: Document) -> None:
+        terms = tokenize(doc.text)
+        self._docs[doc.id] = doc
+        self._doc_terms[doc.id] = terms
+        for term in set(terms):
+            self._term_df[term] += 1
+
+    def _tfidf_score(self, doc_id: str, query_terms: list[str]) -> float:
+        doc_terms = self._doc_terms.get(doc_id, [])
+        n_docs = len(self._docs)
+        score = 0.0
+        for term in query_terms:
+            tf = doc_terms.count(term) / (len(doc_terms) + 1)
+            df = self._term_df.get(term, 0)
+            idf = math.log((n_docs + 1) / (df + 1))
+            score += tf * idf
+        return score
+
+    def search(self, query: str, top_k: int = 20) -> list[tuple[str, float]]:
+        query_terms = tokenize(query)
+        scored = [(id_, self._tfidf_score(id_, query_terms)) for id_ in self._docs]
+        scored = [(id_, s) for id_, s in scored if s > 0]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_k]
+
+
+class VectorIndex:
+    def __init__(self, embed_fn: Callable[[str], list[float]]):
+        self.embed_fn = embed_fn
+        self._docs: dict[str, Document] = {}
+        self._embeddings: dict[str, list[float]] = {}
+
+    def add(self, doc: Document) -> None:
+        self._docs[doc.id] = doc
+        self._embeddings[doc.id] = self.embed_fn(doc.text)
+
+    def search(self, query: str, top_k: int = 20) -> list[tuple[str, float]]:
+        query_vec = self.embed_fn(query)
+        scored = [(id_, cosine_similarity(query_vec, emb)) for id_, emb in self._embeddings.items()]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_k]
+
+
+class HybridRetriever:
+    def __init__(self, embed_fn: Callable[[str], list[float]]):
+        self.vector_index = VectorIndex(embed_fn)
+        self.keyword_index = KeywordIndex()
+        self._docs: dict[str, Document] = {}
+
+    def add_documents(self, docs: list[Document]) -> None:
+        for doc in docs:
+            self._docs[doc.id] = doc
+            self.vector_index.add(doc)
+            self.keyword_index.add(doc)
+
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 5,
+        candidate_k: int = 20,
+        rrf_k: int = 60,
+        where: Optional[dict] = None,
+    ) -> list[RetrievedDoc]:
+        vector_results = self.vector_index.search(query, top_k=candidate_k)
+        keyword_results = self.keyword_index.search(query, top_k=candidate_k)
+
+        def matches(doc_id: str) -> bool:
+            if not where:
+                return True
+            doc = self._docs.get(doc_id)
+            return doc is not None and all(doc.metadata.get(k) == v for k, v in where.items())
+
+        rrf_scores: dict[str, float] = defaultdict(float)
+        source_map: dict[str, set] = defaultdict(set)
+
+        for rank, (doc_id, _) in enumerate(vector_results):
+            if matches(doc_id):
+                rrf_scores[doc_id] += 1.0 / (rrf_k + rank + 1)
+                source_map[doc_id].add("vector")
+
+        for rank, (doc_id, _) in enumerate(keyword_results):
+            if matches(doc_id):
+                rrf_scores[doc_id] += 1.0 / (rrf_k + rank + 1)
+                source_map[doc_id].add("keyword")
+
+        sorted_ids = sorted(rrf_scores, key=lambda d: rrf_scores[d], reverse=True)
+        return [
+            RetrievedDoc(
+                id=doc_id,
+                text=self._docs[doc_id].text,
+                metadata=self._docs[doc_id].metadata,
+                rrf_score=rrf_scores[doc_id],
+                source_methods=sorted(source_map[doc_id]),
+            )
+            for doc_id in sorted_ids[:top_k]
+        ]
+""",
+        "explanation_md": """\
+## Walkthrough: Hybrid Retrieval with RRF
+
+RRF does not care about absolute scores — only ranks. This eliminates the need to normalize vector cosine scores (0–1) against TF-IDF scores (unbounded). The constant k=60 controls rank reward steepness. Lower k amplifies differences between top ranks; higher k treats ranks more uniformly. The two-stage pattern (retrieve top-20, merge, return top-5) consistently outperforms retrieving top-5 from each method independently.
+""",
+        "tags_json": ["rag-systems", "retrieval", "hybrid-search", "rrf"],
+    },
+    {
+        "title": "Add reranking to retrieval results",
+        "slug": "add-reranking-to-retrieval",
+        "category": "rag-systems",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Add Reranking to Retrieval Results
+
+First-stage retrieval optimizes for recall: get the right documents into the candidate set. Reranking optimizes for precision: from that candidate set, find the documents most useful for this specific query. A cross-encoder reranker scores each (query, document) pair jointly — seeing both at once for finer-grained relevance signals.
+
+Typical production pattern: retrieve top-20 cheaply, rerank to find the best 5.
+
+### What you are building
+
+Create a `RerankedRetriever` that wraps an existing retriever and adds a reranking step:
+
+1. **Retrieve** a larger candidate set (e.g., top-20) from the wrapped retriever.
+2. **Rerank** candidates by calling a `rerank_fn(query, documents) -> list[float]`.
+3. **Return** the top-k documents by rerank score with original retrieval rank and rerank score attached.
+4. **Log rank changes** — compute average absolute position change to evaluate whether reranking is helping.
+5. **Handle reranker failures gracefully** — if the rerank function raises, fall back to original order and log the error.
+
+### Constraints
+
+- The `rerank_fn` is injected — works with Cohere API, local cross-encoder, or mock.
+- All methods type-hinted.
+- `RankedResult` objects must include `original_rank` and `rerank_score`.
+- Fallback returns original results with `rerank_failed: True` on the response.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from typing import Callable, Optional, Protocol
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Document:
+    id: str
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class RankedResult:
+    document: Document
+    original_rank: int
+    rerank_score: float
+    final_rank: int
+
+
+@dataclass
+class RetrievalResponse:
+    results: list[RankedResult]
+    rerank_failed: bool = False
+    rank_shift_avg: float = 0.0
+
+
+class FirstStageRetriever(Protocol):
+    def retrieve(self, query: str, top_k: int) -> list[Document]: ...
+
+
+class RerankedRetriever:
+    def __init__(
+        self,
+        base_retriever: FirstStageRetriever,
+        rerank_fn: Callable[[str, list[str]], list[float]],
+        candidate_k: int = 20,
+    ):
+        self.base_retriever = base_retriever
+        self.rerank_fn = rerank_fn
+        self.candidate_k = candidate_k
+
+    def retrieve(self, query: str, top_k: int = 5) -> RetrievalResponse:
+        \"\"\"Two-stage retrieve + rerank.\"\"\"
+        # TODO: retrieve candidate_k candidates from base_retriever
+        # TODO: call rerank_fn(query, [doc.text for doc in candidates])
+        # TODO: if rerank_fn raises, log and return original results with rerank_failed=True
+        # TODO: sort by rerank score descending, take top_k
+        # TODO: compute rank_shift_avg: mean of |original_rank - final_rank|
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from typing import Callable, Protocol
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Document:
+    id: str
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class RankedResult:
+    document: Document
+    original_rank: int
+    rerank_score: float
+    final_rank: int
+
+
+@dataclass
+class RetrievalResponse:
+    results: list[RankedResult]
+    rerank_failed: bool = False
+    rank_shift_avg: float = 0.0
+
+
+class FirstStageRetriever(Protocol):
+    def retrieve(self, query: str, top_k: int) -> list[Document]: ...
+
+
+class RerankedRetriever:
+    def __init__(
+        self,
+        base_retriever: FirstStageRetriever,
+        rerank_fn: Callable[[str, list[str]], list[float]],
+        candidate_k: int = 20,
+    ):
+        self.base_retriever = base_retriever
+        self.rerank_fn = rerank_fn
+        self.candidate_k = candidate_k
+
+    def retrieve(self, query: str, top_k: int = 5) -> RetrievalResponse:
+        candidates = self.base_retriever.retrieve(query, top_k=self.candidate_k)
+        if not candidates:
+            return RetrievalResponse(results=[])
+
+        try:
+            scores = self.rerank_fn(query, [doc.text for doc in candidates])
+        except Exception as exc:
+            logger.error("Reranker failed: %s", exc)
+            fallback = [
+                RankedResult(document=doc, original_rank=i, rerank_score=0.0, final_rank=i)
+                for i, doc in enumerate(candidates[:top_k])
+            ]
+            return RetrievalResponse(results=fallback, rerank_failed=True)
+
+        ranked = sorted(
+            zip(candidates, scores, range(len(candidates))),
+            key=lambda t: t[1],
+            reverse=True,
+        )
+        results = [
+            RankedResult(
+                document=doc,
+                original_rank=orig_rank,
+                rerank_score=score,
+                final_rank=final_rank,
+            )
+            for final_rank, (doc, score, orig_rank) in enumerate(ranked[:top_k])
+        ]
+        rank_shift_avg = (
+            sum(abs(r.original_rank - r.final_rank) for r in results) / len(results)
+            if results else 0.0
+        )
+        return RetrievalResponse(results=results, rank_shift_avg=rank_shift_avg)
+""",
+        "explanation_md": """\
+## Walkthrough: Reranking
+
+The two-stage pattern separates recall (first stage, cheap) from precision (second stage, accurate). The graceful fallback ensures users still get answers when the reranker is unavailable. `rank_shift_avg` near 0 means the reranker agrees with first-stage retrieval; high values mean significant reordering — validate this against ground truth to confirm the reranker is improving, not just changing, the order.
+""",
+        "tags_json": ["rag-systems", "reranking", "retrieval", "two-stage"],
+    },
+    {
+        "title": "Evaluate RAG faithfulness with citation tracking",
+        "slug": "evaluate-rag-faithfulness-citations",
+        "category": "rag-systems",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Evaluate RAG Faithfulness with Citation Tracking
+
+A RAG answer is only as trustworthy as its grounding. Faithfulness evaluation measures whether each claim in the answer is supported by the retrieved context. Citation tracking extends this: can you point to the exact chunk that each claim came from?
+
+### What you are building
+
+Create a `FaithfulnessEvaluator` that:
+
+1. **Extracts claims** from a generated answer (one per sentence).
+2. **Matches each claim** to the most relevant retrieved chunk using cosine similarity.
+3. **Classifies each claim** as `SUPPORTED` (similarity above threshold) or `UNSUPPORTED`.
+4. **Computes a faithfulness score** as the fraction of supported claims.
+5. **Builds a citation map** linking each supported claim to its best-matching chunk ID.
+6. **Generates a human-readable summary** of the evaluation result.
+
+### Why this matters
+
+This is the core evaluation loop in every production RAG system that cares about auditability. Building it yourself means you understand what faithfulness actually measures, how to tune thresholds, and how to debug low scores.
+
+### Constraints
+
+- Use cosine similarity for matching (inject the embedding function — no LLM judge).
+- No external evaluation libraries.
+- Return an `EvaluationResult` dataclass with all detail needed to debug a failing case.
+- Default similarity threshold: 0.75 (configurable).
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class RetrievedChunk:
+    id: str
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class ClaimVerdict:
+    claim: str
+    verdict: str           # "SUPPORTED" or "UNSUPPORTED"
+    best_chunk_id: str
+    similarity: float
+
+
+@dataclass
+class EvaluationResult:
+    question: str
+    answer: str
+    verdicts: list[ClaimVerdict]
+    faithfulness_score: float
+    citation_map: dict[str, str]   # claim -> chunk_id
+    summary: str
+
+
+class FaithfulnessEvaluator:
+    def __init__(
+        self,
+        embed_fn: Callable[[str], list[float]],
+        similarity_threshold: float = 0.75,
+    ):
+        self.embed_fn = embed_fn
+        self.threshold = similarity_threshold
+
+    def _extract_claims(self, text: str) -> list[str]:
+        # TODO: split on sentence boundaries, filter short fragments
+        raise NotImplementedError
+
+    def _cosine(self, a: list[float], b: list[float]) -> float:
+        # TODO: implement
+        raise NotImplementedError
+
+    def evaluate(
+        self,
+        question: str,
+        answer: str,
+        retrieved_chunks: list[RetrievedChunk],
+    ) -> EvaluationResult:
+        # TODO: extract claims, embed, match to chunks, classify, score
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class RetrievedChunk:
+    id: str
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class ClaimVerdict:
+    claim: str
+    verdict: str
+    best_chunk_id: str
+    similarity: float
+
+
+@dataclass
+class EvaluationResult:
+    question: str
+    answer: str
+    verdicts: list[ClaimVerdict]
+    faithfulness_score: float
+    citation_map: dict[str, str]
+    summary: str
+
+
+class FaithfulnessEvaluator:
+    def __init__(
+        self,
+        embed_fn: Callable[[str], list[float]],
+        similarity_threshold: float = 0.75,
+    ):
+        self.embed_fn = embed_fn
+        self.threshold = similarity_threshold
+
+    def _extract_claims(self, text: str) -> list[str]:
+        parts = re.split(r'(?<=[.!?])\\s+', text.strip())
+        return [p.strip() for p in parts if p.strip() and len(p.split()) > 2]
+
+    def _cosine(self, a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        mag_a = math.sqrt(sum(x**2 for x in a))
+        mag_b = math.sqrt(sum(x**2 for x in b))
+        return dot / (mag_a * mag_b + 1e-9)
+
+    def evaluate(
+        self,
+        question: str,
+        answer: str,
+        retrieved_chunks: list[RetrievedChunk],
+    ) -> EvaluationResult:
+        claims = self._extract_claims(answer)
+        if not claims or not retrieved_chunks:
+            return EvaluationResult(
+                question=question, answer=answer, verdicts=[],
+                faithfulness_score=0.0, citation_map={},
+                summary="No claims or chunks to evaluate.",
+            )
+
+        chunk_embeddings = {c.id: self.embed_fn(c.text) for c in retrieved_chunks}
+        verdicts: list[ClaimVerdict] = []
+        citation_map: dict[str, str] = {}
+
+        for claim in claims:
+            claim_emb = self.embed_fn(claim)
+            best_id, best_sim = "", -1.0
+            for chunk in retrieved_chunks:
+                sim = self._cosine(claim_emb, chunk_embeddings[chunk.id])
+                if sim > best_sim:
+                    best_sim, best_id = sim, chunk.id
+
+            verdict = "SUPPORTED" if best_sim >= self.threshold else "UNSUPPORTED"
+            verdicts.append(ClaimVerdict(claim=claim, verdict=verdict, best_chunk_id=best_id, similarity=round(best_sim, 4)))
+            if verdict == "SUPPORTED":
+                citation_map[claim] = best_id
+
+        supported = sum(1 for v in verdicts if v.verdict == "SUPPORTED")
+        score = supported / len(verdicts)
+        unsupported = [v.claim for v in verdicts if v.verdict == "UNSUPPORTED"]
+        summary = (
+            f"{supported}/{len(verdicts)} claims supported (faithfulness={score:.2f}). "
+            + (f"Unsupported: {unsupported[:2]}" if unsupported else "All claims grounded.")
+        )
+        return EvaluationResult(
+            question=question, answer=answer, verdicts=verdicts,
+            faithfulness_score=round(score, 4), citation_map=citation_map, summary=summary,
+        )
+""",
+        "explanation_md": """\
+## Walkthrough: Faithfulness Evaluation
+
+Faithfulness measures grounding (claims come from context), not factual correctness. The embedding similarity approach is fast and cheap; an LLM-judge approach is more accurate but more expensive. The citation_map enables "show sources" UI functionality — for each sentence in the displayed answer, you can highlight which chunk it came from. Validate your similarity threshold by manually labeling 20 (claim, chunk) pairs before relying on the automated score.
+""",
+        "tags_json": ["rag-systems", "evaluation", "faithfulness", "citations"],
+    },
+    {
+        "title": "Build an incremental document indexer",
+        "slug": "incremental-document-indexer",
+        "category": "rag-systems",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build an Incremental Document Indexer
+
+Re-indexing your entire corpus every time a document changes is wasteful and creates operational risk. Incremental indexing tracks which documents have changed by hashing their content, then only re-embeds and re-indexes what is new or updated.
+
+### What you are building
+
+Create an `IncrementalIndexer` that:
+
+1. **Tracks document state** in a persistent JSON file: `{doc_id: {"hash": str, "chunk_ids": list[str], "indexed_at": str}}`.
+2. **Detects changes** by comparing content hash to stored hash. A document is dirty if its hash changed or is absent from state.
+3. **Handles upserts**: for a changed document, delete old chunk vectors, re-chunk, embed, and add new chunks.
+4. **Handles deletes**: when a document is removed, delete its chunk vectors and remove from state.
+5. **Reports indexing results** via an `IndexSyncResult` dataclass.
+6. **Is idempotent**: calling `sync` twice with the same input makes no API calls on the second run.
+
+### Why this matters
+
+Without incremental indexing, every CI deploy triggers a full re-index that may take hours and cost thousands of API calls. With it, a corpus of 100K documents where 50 changed today only costs indexing those 50.
+
+### Constraints
+
+- State file is JSON (human-readable for debugging).
+- Chunker and embed+add functions are injected (testable in isolation).
+- Timestamps in ISO 8601 format.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Callable
+
+
+@dataclass
+class DocumentInput:
+    id: str
+    content: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class IndexSyncResult:
+    added: int = 0
+    updated: int = 0
+    skipped: int = 0
+    deleted: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+class IncrementalIndexer:
+    def __init__(
+        self,
+        state_file: str,
+        chunk_fn: Callable[[str, str], list[dict]],
+        index_add_fn: Callable[[list[dict]], None],
+        index_delete_fn: Callable[[list[str]], None],
+    ):
+        self.state_file = state_file
+        self.chunk_fn = chunk_fn
+        self.index_add_fn = index_add_fn
+        self.index_delete_fn = index_delete_fn
+        self._state: dict = self._load_state()
+
+    def _load_state(self) -> dict:
+        # TODO: load JSON from state_file; return {} if not found
+        raise NotImplementedError
+
+    def _save_state(self) -> None:
+        # TODO: write self._state to state_file as JSON
+        raise NotImplementedError
+
+    def _content_hash(self, content: str) -> str:
+        # TODO: return SHA-256 hex digest
+        raise NotImplementedError
+
+    def upsert(self, doc: DocumentInput) -> str:
+        \"\"\"Index or re-index a document if content changed. Returns 'added', 'updated', or 'skipped'.\"\"\"
+        raise NotImplementedError
+
+    def delete(self, doc_id: str) -> bool:
+        \"\"\"Remove a document from the index and state. Returns True if it existed.\"\"\"
+        raise NotImplementedError
+
+    def sync(self, documents: list[DocumentInput]) -> IndexSyncResult:
+        \"\"\"Sync a full list of documents. Documents not in input list will be deleted.\"\"\"
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Callable
+
+
+@dataclass
+class DocumentInput:
+    id: str
+    content: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class IndexSyncResult:
+    added: int = 0
+    updated: int = 0
+    skipped: int = 0
+    deleted: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+class IncrementalIndexer:
+    def __init__(
+        self,
+        state_file: str,
+        chunk_fn: Callable[[str, str], list[dict]],
+        index_add_fn: Callable[[list[dict]], None],
+        index_delete_fn: Callable[[list[str]], None],
+    ):
+        self.state_file = state_file
+        self.chunk_fn = chunk_fn
+        self.index_add_fn = index_add_fn
+        self.index_delete_fn = index_delete_fn
+        self._state: dict = self._load_state()
+
+    def _load_state(self) -> dict:
+        if os.path.exists(self.state_file):
+            with open(self.state_file) as f:
+                return json.load(f)
+        return {}
+
+    def _save_state(self) -> None:
+        with open(self.state_file, "w") as f:
+            json.dump(self._state, f, indent=2)
+
+    def _content_hash(self, content: str) -> str:
+        return hashlib.sha256(content.encode()).hexdigest()
+
+    def upsert(self, doc: DocumentInput) -> str:
+        new_hash = self._content_hash(doc.content)
+        current = self._state.get(doc.id, {})
+        if current.get("hash") == new_hash:
+            return "skipped"
+        if current.get("chunk_ids"):
+            self.index_delete_fn(current["chunk_ids"])
+        chunks = self.chunk_fn(doc.content, doc.id)
+        for chunk in chunks:
+            chunk.setdefault("metadata", {}).update(doc.metadata)
+            chunk["metadata"]["source_doc_id"] = doc.id
+        self.index_add_fn(chunks)
+        action = "updated" if current else "added"
+        self._state[doc.id] = {
+            "hash": new_hash,
+            "chunk_ids": [c["id"] for c in chunks],
+            "indexed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return action
+
+    def delete(self, doc_id: str) -> bool:
+        if doc_id not in self._state:
+            return False
+        chunk_ids = self._state[doc_id].get("chunk_ids", [])
+        if chunk_ids:
+            self.index_delete_fn(chunk_ids)
+        del self._state[doc_id]
+        return True
+
+    def sync(self, documents: list[DocumentInput]) -> IndexSyncResult:
+        result = IndexSyncResult()
+        input_ids = {doc.id for doc in documents}
+        for doc in documents:
+            try:
+                action = self.upsert(doc)
+                if action == "added":
+                    result.added += 1
+                elif action == "updated":
+                    result.updated += 1
+                else:
+                    result.skipped += 1
+            except Exception as exc:
+                result.errors.append(f"{doc.id}: {exc}")
+        for doc_id in list(self._state.keys()):
+            if doc_id not in input_ids:
+                self.delete(doc_id)
+                result.deleted += 1
+        self._save_state()
+        return result
+""",
+        "explanation_md": """\
+## Walkthrough: Incremental Indexer
+
+Content hashing is the most reliable change detection mechanism: same content always produces the same hash, and SHA-256 collisions are negligible in practice. Tracking chunk IDs in state enables precise deletion of old vectors when a document changes, without affecting unrelated documents. The `sync` pattern (declare desired state, reconcile against actual state) is idempotent by design — safe to re-run after partial failures.
+""",
+        "tags_json": ["rag-systems", "indexing", "incremental", "production"],
+    },
+    {
+        "title": "Implement retrieval with metadata filtering",
+        "slug": "retrieval-metadata-filtering",
+        "category": "rag-systems",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement Retrieval with Metadata Filtering
+
+Pure semantic search returns results regardless of when documents were created, who authored them, or what type they are. In production, users need scoped retrieval: "search only the 2024 handbook," "return only verified content," "find contract clauses from after 2023."
+
+Metadata filtering adds these constraints. Pre-filtering narrows the candidate set before semantic scoring; it requires understanding the tradeoffs of strict vs. permissive filtering.
+
+### What you are building
+
+Create a `FilterableIndex` that:
+
+1. **Stores documents with typed metadata** — strings, numbers, booleans.
+2. **Supports pre-filtering** via a filter expression: `{"field": {"op": value}}`. Supported operators: `eq`, `ne`, `gt`, `lt`, `gte`, `lte`, `in`, `contains`.
+3. **Supports AND logic** via `{"$and": [filter1, filter2]}`.
+4. **Returns results with metadata intact** for display alongside answers.
+5. **Raises `FilterError`** for unsupported operators.
+
+### Constraints
+
+- Filter matching in pure Python — no external libraries.
+- All metadata values stored as Python native types (str, int, float, bool).
+- `search(query, top_k, filters=None) -> list[SearchResult]`.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional
+
+
+@dataclass
+class Document:
+    id: str
+    text: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SearchResult:
+    document: Document
+    score: float
+
+
+class FilterError(Exception):
+    \"\"\"Raised for invalid or unsupported filter expressions.\"\"\"
+
+
+def evaluate_filter(doc: Document, filter_expr: dict) -> bool:
+    \"\"\"
+    Evaluate a filter expression against a document's metadata.
+    Supports: eq, ne, gt, lt, gte, lte, in, contains, $and
+    Raises FilterError for unsupported operators.
+    \"\"\"
+    # TODO: handle "$and" recursively
+    # TODO: for single-field filters, apply comparison operator
+    raise NotImplementedError
+
+
+class FilterableIndex:
+    def __init__(self, embed_fn: Callable[[str], list[float]]):
+        self.embed_fn = embed_fn
+        self._docs: dict[str, Document] = {}
+        self._embeddings: dict[str, list[float]] = {}
+
+    def _cosine(self, a: list[float], b: list[float]) -> float:
+        raise NotImplementedError
+
+    def add(self, doc: Document) -> None:
+        raise NotImplementedError
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        filters: Optional[dict] = None,
+    ) -> list[SearchResult]:
+        \"\"\"Semantic search with optional pre-filtering.\"\"\"
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional
+
+
+@dataclass
+class Document:
+    id: str
+    text: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SearchResult:
+    document: Document
+    score: float
+
+
+class FilterError(Exception):
+    pass
+
+
+SUPPORTED_OPS = {"eq", "ne", "gt", "lt", "gte", "lte", "in", "contains"}
+
+
+def evaluate_filter(doc: Document, filter_expr: dict) -> bool:
+    if "$and" in filter_expr:
+        return all(evaluate_filter(doc, sub) for sub in filter_expr["$and"])
+    for field_name, condition in filter_expr.items():
+        if not isinstance(condition, dict):
+            raise FilterError(f"Filter value for '{field_name}' must be a dict")
+        if field_name not in doc.metadata:
+            return False
+        actual = doc.metadata[field_name]
+        for op, expected in condition.items():
+            if op not in SUPPORTED_OPS:
+                raise FilterError(f"Unsupported operator: '{op}'")
+            if op == "eq" and actual != expected: return False
+            elif op == "ne" and actual == expected: return False
+            elif op == "gt" and not (actual > expected): return False
+            elif op == "lt" and not (actual < expected): return False
+            elif op == "gte" and not (actual >= expected): return False
+            elif op == "lte" and not (actual <= expected): return False
+            elif op == "in" and actual not in expected: return False
+            elif op == "contains" and expected not in str(actual): return False
+    return True
+
+
+class FilterableIndex:
+    def __init__(self, embed_fn: Callable[[str], list[float]]):
+        self.embed_fn = embed_fn
+        self._docs: dict[str, Document] = {}
+        self._embeddings: dict[str, list[float]] = {}
+
+    def _cosine(self, a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        mag_a = math.sqrt(sum(x**2 for x in a))
+        mag_b = math.sqrt(sum(x**2 for x in b))
+        return dot / (mag_a * mag_b + 1e-9)
+
+    def add(self, doc: Document) -> None:
+        self._docs[doc.id] = doc
+        self._embeddings[doc.id] = self.embed_fn(doc.text)
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        filters: Optional[dict] = None,
+    ) -> list[SearchResult]:
+        candidates = list(self._docs.values())
+        if filters:
+            candidates = [d for d in candidates if evaluate_filter(d, filters)]
+        if not candidates:
+            return []
+        query_emb = self.embed_fn(query)
+        scored = [
+            SearchResult(document=doc, score=self._cosine(query_emb, self._embeddings[doc.id]))
+            for doc in candidates
+        ]
+        scored.sort(key=lambda r: r.score, reverse=True)
+        return scored[:top_k]
+""",
+        "explanation_md": """\
+## Walkthrough: Metadata Filtering
+
+Pre-filtering narrows the candidate set before embedding comparison — ensuring results strictly match the filter and reducing unnecessary similarity computations. The field-absent-means-no-match rule is intentional: if a user filters by year and a document has no year, it should not appear. In production vector DBs (Chroma, Pinecone, Weaviate), metadata filtering is implemented at the index level for far better performance than this in-memory version — but the filter expression design is conceptually identical.
+""",
+        "tags_json": ["rag-systems", "retrieval", "metadata-filtering", "search"],
+    },
 ]
 
 EXERCISE_DRILLS = [
@@ -7887,6 +10123,311 @@ Mention that you want trace data and a small benchmark set before you start twea
 The point is disciplined diagnosis. Production RAG debugging is mostly about making hidden layers inspectable.
 """,
         "tags_json": ["rag", "debugging", "evaluation"],
+    },
+    {
+        "category": "rag",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How would you design a RAG system for a company's internal knowledge base with 100K+ documents?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see system design thinking across the full RAG pipeline — from ingestion to evaluation to cost at scale — applied to a realistic enterprise constraint. The 100K document scale is deliberate: it is large enough that naive approaches break, but small enough that you do not need a distributed system. Strong candidates structure their answer as a pipeline with tradeoffs at each layer.
+
+## Start with the hard constraints
+
+Before designing anything, name the constraints that change the answer:
+- **Access control**: can all users see all documents? If not, you need per-document ACLs enforced at retrieval time, not at generation time.
+- **Freshness requirements**: how often do documents change? Daily updates require incremental indexing, not weekly full re-indexes.
+- **Query latency budget**: is 2-3 seconds acceptable, or do you need sub-second retrieval? This determines whether you can afford reranking.
+- **Document diversity**: are all documents the same type (PDFs, markdown), or do you have PDFs, PowerPoints, Slack exports, and Confluence pages? Each format needs different preprocessing.
+
+## Ingestion and indexing layer
+
+For 100K documents, the ingestion layer must be batch-processed offline, not on the request path. The pipeline:
+
+1. **Document parsing**: format-specific parsers per type. PDF extraction with a library like `pdfminer` or `unstructured`. Markdown is trivial. Office formats need conversion. Deduplicate by content hash before chunking.
+2. **Chunking**: recursive character splitting at 512 tokens with 64-token overlap works for most prose. For structured documents (HR policies, technical specifications), respect section boundaries using heading detection. Use smaller chunks (256 tokens) for factual documents where precision matters.
+3. **Metadata extraction**: extract document date, author, department/team, document type, and access control list. These become filter fields at retrieval time.
+4. **Embedding**: batch-embed chunks (OpenAI's API supports 2048 inputs per call). At 100K documents with average 10 chunks each, you are embedding 1M chunks. At 512 tokens each, that is roughly 500M tokens. At $0.02/1M tokens, the initial indexing costs $10. Incremental updates for daily changes are cents.
+5. **Incremental indexing**: track document content hashes. Only re-embed changed documents. Store chunk IDs per document for deletion on update.
+
+## Retrieval layer
+
+At 1M chunks, pure in-memory search is still feasible but a managed vector DB is cleaner operationally. Pinecone or pgvector are reasonable choices — pgvector if you already run Postgres.
+
+Use hybrid retrieval: vector search for semantic queries, BM25 for exact product names, document IDs, and acronyms that are common in internal knowledge bases. RRF merges both ranked lists.
+
+**Access control enforcement**: filter by the requesting user's department/team or document ACL before semantic scoring. Never return documents the user should not see, even if they are the most semantically similar.
+
+Add a cross-encoder reranker for the final 20-to-5 reduction. Cohere Rerank or a local cross-encoder. This is the single highest-leverage quality improvement after getting the basic pipeline working.
+
+## Generation layer
+
+System prompt structure: place retrieved chunks in a `<context>` block with source citations. Instruct the model to answer using only provided context and to say "I don't have information about this" when the context does not contain the answer. This prevents parametric hallucination on internal company specifics.
+
+Chunk citations: include `[Source: document_title, section]` per chunk so the model can reference them in the answer.
+
+## Evaluation and monitoring
+
+For a 100K-document knowledge base, you need:
+- A golden eval set of 50–100 question/answer pairs covering key document types
+- Automated faithfulness scoring sampled on live queries (not every query — too expensive)
+- A retrieval quality dashboard tracking recall@5 against the golden set
+- Human thumbs-up/thumbs-down on answers in the UI, piped to a review queue
+- Latency monitoring split by retrieval, reranking, and generation steps
+
+## Cost estimate
+
+At 500 queries/day, 5 chunks per query, 512 tokens per chunk, GPT-4o-mini:
+- Context tokens: 500 × 5 × 512 = 1.28M tokens/day → $0.13/day
+- Generation: 500 × 300 output tokens = 150K tokens/day → $0.09/day
+- Embedding (new queries): 500 × 512 tokens = 256K tokens/day → $0.005/day
+- Reranking (Cohere Rerank): 500 × 20 docs = 10K calls → ~$1/day
+
+Total: ~$1.25/day at that query volume. Scale linearly with queries.
+
+## Common mistakes to avoid in the interview
+
+- Saying "I would use LangChain" without explaining what it does
+- Ignoring access control (this question often comes with a security follow-up)
+- Not separating retrieval quality from answer quality
+- Skipping evaluation — production systems need feedback loops
+
+## Self-study prompts
+
+- Build a minimal version with 100 documents and a local Chroma DB
+- Implement the incremental indexer from scratch before using a framework
+- Add metadata filtering for document type and verify it changes retrieval results
+
+## Interview takeaway
+
+The right answer is a pipeline with named tradeoffs at each layer, not a list of tools. Show that you know why hybrid retrieval exists, how access control must be enforced at the retrieval layer, and that evaluation is designed in from the start rather than bolted on later.
+""",
+        "tags_json": ["rag", "system-design", "scale", "enterprise"],
+    },
+    {
+        "category": "rag",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "Explain the tradeoffs between different chunking strategies and when to use each",
+        "answer_outline_md": """\
+## What this question tests
+
+Chunking decisions are made early and are expensive to change later. The interviewer wants to see that you understand the tradeoffs — not just that fixed-size chunking exists, but when each approach fails and what signals tell you to switch strategies.
+
+## The three main strategies and their tradeoffs
+
+**Fixed-size chunking** splits at a fixed token or character count, optionally with overlap.
+
+- Pros: fast, predictable, no dependencies, easy to tune
+- Cons: cuts sentences mid-phrase, splits tables in half, has no semantic awareness
+- When to use: uniform documents (FAQ entries, product catalog rows, short logs) where each item is roughly the same length and the split points matter less than the absolute chunk size
+- Failure mode: a sentence spans a chunk boundary. "The contract was signed in" appears in chunk N, "March 2024 by both parties" in chunk N+1. Neither chunk retrieves well for "when was the contract signed?"
+
+**Recursive character splitting** splits on paragraph then sentence then word boundaries, stopping when the chunk is under the target size.
+
+- Pros: respects natural language structure, works for most prose without extra configuration
+- Cons: still size-based, does not understand topic changes, paragraph boundaries are not always topic boundaries
+- When to use: the default for most RAG projects with mixed document types. Better than fixed-size for almost everything; good enough for most cases
+- Failure mode: a long section on one topic produces one giant chunk that gets truncated, while a different section with short paragraphs produces many tiny chunks. Retrieval favors the length that matches your target size
+
+**Semantic chunking** uses embedding similarity between consecutive sentences to detect topic shifts and split there.
+
+- Pros: chunks contain a single coherent idea, which is what retrieval actually needs
+- Cons: computationally expensive (one embedding per sentence-window), threshold tuning required, can produce chunks of very uneven size
+- When to use: high-stakes content (legal contracts, medical documentation, technical RFCs) where a wrong split in the middle of a clause has real consequences. Use when retrieval quality is the primary optimization target and cost is secondary
+
+## The overlap question
+
+Overlap copies the last N tokens from chunk N into the start of chunk N+1. It costs storage and increases index size, but it prevents context loss at boundaries. Rules of thumb:
+- For factual reference documents: 10–15% overlap
+- For narrative or explanatory text where context builds: 20–25% overlap
+- For short, atomic chunks (FAQ entries, code comments): 0 overlap
+
+## Chunk size: the retrieval-context tradeoff
+
+Small chunks (128–256 tokens): high precision, many chunks needed per answer, context assembly is harder
+Large chunks (1024–2048 tokens): more context per chunk, but higher chance of irrelevant content diluting the relevant passage, and harder to cite specific sources
+
+The right chunk size depends on what users ask: precise factual lookups favor smaller chunks; summary or synthesis questions favor larger chunks. Some systems use multi-granularity indexing: index both 256-token and 1024-token chunks and let the retriever pick.
+
+## How to validate your chunking decision
+
+1. Print chunk size histograms — the distribution should be relatively tight
+2. For 20 representative queries, manually inspect which chunks are retrieved and whether they contain the answer
+3. Count how many relevant passages are split across two chunks (boundary hit rate)
+4. Track whether the answer is available in the top-3 retrieved chunks (recall@3)
+
+## Self-study prompts
+
+- Run fixed-size and recursive chunking on the same document and compare the top-5 results for 5 queries
+- Visualize the size distribution of your chunks before indexing
+- Implement a simple boundary hit detector that flags chunks ending mid-sentence
+
+## Interview takeaway
+
+The question behind this question is "how do you make technical decisions when there is no single right answer?" Show that you pick a chunking strategy based on your document types and query patterns, validate it with real retrieval tests, and change it when the evidence points to a better approach.
+""",
+        "tags_json": ["rag", "chunking", "architecture", "tradeoffs"],
+    },
+    {
+        "category": "rag",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you evaluate whether a RAG system is retrieving the right context?",
+        "answer_outline_md": """\
+## What this question tests
+
+This question separates engineers who have actually debugged a RAG system from those who have only read about it. The answer requires knowing the specific metrics, how to build a test harness, and how to interpret results. Vague answers ("I would check the quality of the outputs") signal that the candidate has not shipped a RAG system under real quality pressure.
+
+## The fundamental distinction
+
+Retrieval quality and answer quality are not the same thing. You can have excellent retrieval (right chunks returned) and bad answers (model ignores them or misuses them). You can have bad retrieval (wrong chunks returned) and accidentally good answers (model uses its parametric knowledge). Measuring them separately is essential for knowing where to invest engineering effort.
+
+## Recall@K: the primary retrieval metric
+
+For each test query, you need to know: is the relevant chunk in the top K results?
+
+Recall@K = (fraction of queries where at least one relevant chunk appears in the top K)
+
+To compute this, you need a labeled test set: a list of (query, relevant_document_or_chunk) pairs. Build this by:
+1. Taking 50–100 real or realistic queries from your domain
+2. Manually identifying which source documents contain the correct answer
+3. Checking whether those documents (or chunks from them) appear in the top-K retrieval results
+
+A Recall@5 of 0.6 means 40% of your queries are failing retrieval before the model even sees the relevant content. That is a retrieval problem, not a prompt problem.
+
+## Context precision: are the retrieved chunks relevant?
+
+Even if the relevant chunk is retrieved, the other K-1 chunks might be irrelevant noise that dilutes the context window and confuses the model. Context precision measures the fraction of retrieved chunks that are relevant to the query.
+
+Low context precision means your retrieval is broad but noisy. Improvements: add metadata filtering to narrow the candidate scope, tune the similarity threshold to be more selective, or add reranking to promote the most relevant chunks.
+
+## Building the evaluation harness
+
+```python
+# Structure for a test case
+{
+    "query": "What is the maximum upload size per file?",
+    "relevant_sources": ["faq.pdf#section-uploads", "docs/limits.md"],
+    "expected_answer_contains": ["10MB", "10 megabytes"]
+}
+```
+
+Run retrieval for each test case. Check whether any retrieved chunk has `source` in `relevant_sources`. Log the rank at which the relevant chunk first appears.
+
+## What to do with low recall
+
+If recall is low:
+1. Check whether the relevant document is in the index at all (ingestion failure)
+2. Inspect the chunk containing the answer — is the relevant content split across two chunks? (chunking failure)
+3. Check whether the query terminology matches the document terminology (semantic gap — the query says "upload limit" but the document says "maximum file size")
+4. For specific entity queries, add keyword/BM25 retrieval alongside vector search
+
+## How to report results to stakeholders
+
+Do not just report an average score. Report:
+- Recall@3 and Recall@10 (how much does expanding the window help?)
+- By query category (factual lookups vs. explanatory questions behave differently)
+- Fail cases with the retrieved chunks visible (makes the problem concrete)
+
+## Self-study prompts
+
+- Build a 20-query labeled test set for a domain you know
+- Implement a Recall@K calculator and run it on your current retrieval setup
+- Intentionally break chunking (make chunks too small) and watch Recall@3 drop
+
+## Interview takeaway
+
+Strong candidates propose a concrete evaluation methodology: labeled test set, Recall@K measurement, per-category analysis, and a diagnosis loop that connects low recall to a specific pipeline layer (ingestion, chunking, or retrieval). The key phrase is "I measure retrieval quality separately from answer quality, and I have a labeled test set that tells me which layer needs work."
+""",
+        "tags_json": ["rag", "evaluation", "recall", "metrics"],
+    },
+    {
+        "category": "rag",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "Your RAG system has high latency in production. Walk through your debugging approach.",
+        "answer_outline_md": """\
+## What this question tests
+
+Latency debugging is a structured engineering discipline. The interviewer wants to see that you decompose the problem systematically, measure before changing anything, and identify the actual bottleneck rather than optimizing the wrong layer.
+
+## Step 1: Measure the latency stack before changing anything
+
+A RAG query has 4–5 distinct steps, each with its own latency budget:
+
+1. **Query embedding** — embed the user's question (50–200ms for an API call, 5–20ms for a local model)
+2. **Vector search** — query the index (10–100ms for a managed DB, can be higher for large indexes without HNSW tuning)
+3. **Reranking** — cross-encoder scoring of candidates (100–500ms for Cohere API, 50–200ms for local)
+4. **Context assembly** — retrieve chunk texts, format the prompt (usually <10ms, but large metadata payloads can add up)
+5. **LLM generation** — the model produces the answer (300ms–5s+ depending on model and output length)
+
+Instrument each step separately with timing logs. Do not guess which step is slow. A typical mistake is to optimize embedding latency (which might be 150ms) when the real problem is LLM generation (which is 3s). You saved 5% and spent a week.
+
+## Step 2: Identify the dominant bottleneck
+
+With timing data, look at P50 and P95 for each step. Common patterns:
+
+**LLM generation is the bottleneck (most common).** The generation step takes 2–4x longer than retrieval. Fix options:
+- Switch to a faster/cheaper model for low-complexity queries (gpt-4o-mini is 3–5x faster than gpt-4o)
+- Reduce max_tokens — if you set max_tokens=2048 but average output is 300 tokens, you are being charged for potential length, not actual length
+- Add streaming — does not reduce total latency but dramatically improves perceived latency; users see tokens within 300ms instead of waiting for the full response
+- Cache repeated queries — if 20% of queries are identical or near-identical, a Redis cache with 1-hour TTL eliminates the entire pipeline for those hits
+
+**Vector search is the bottleneck (large indexes).** If your index has 10M+ vectors and query time is >200ms:
+- Check that your vector DB is using HNSW (approximate nearest neighbor) and not brute-force search
+- Reduce dimensionality with Matryoshka truncation (1536 → 256 dimensions can be 5x faster with minimal quality loss)
+- Use metadata pre-filtering to narrow the search space before HNSW
+- Check that your vector DB has sufficient memory to keep the HNSW graph hot
+
+**Reranking is the bottleneck.** A Cohere Rerank API call on 20 candidates is 200–500ms:
+- Reduce candidate count from 20 to 10 — if your first-stage retrieval is good, you lose little precision
+- Cache reranking results for common queries
+- Switch to a local cross-encoder if you have GPU inference available
+
+**Embedding is the bottleneck.** Usually not the issue unless you are calling the embedding API synchronously per query without batching. Fix: batch queries if possible, or use a local embedding model.
+
+## Step 3: Apply targeted fixes in order of impact
+
+After identifying the bottleneck, apply fixes in order of impact per implementation cost:
+
+1. Query caching (Redis, 1 day TTL) — highest ROI, works for any bottleneck
+2. Streaming (removes perceived latency for the generation step)
+3. Model switching for simple queries (route to a cheaper model based on query classification)
+4. Reducing retrieval candidate count
+5. Dimensionality reduction
+6. Local embedding model (if volume justifies the infrastructure)
+
+## Step 4: Validate the fix does not degrade quality
+
+Latency optimizations can degrade answer quality. After any significant change:
+- Run your Recall@K test set to check retrieval quality has not dropped
+- Run your faithfulness eval on a sample of 50 queries
+- Deploy to a percentage of traffic and compare latency + quality metrics side by side
+
+## What to say if you have no data yet
+
+If you are joining a team and the production system has no instrumentation: your first action is to add timing logs at each pipeline step and run them for 24 hours to build a baseline. Never optimize without a baseline.
+
+## Common traps to avoid in the interview
+
+- "I would switch to a faster model" without first measuring whether generation is the bottleneck
+- "I would cache everything" without explaining what the cache key is and what the invalidation policy is
+- Optimizing embedding before measuring whether it is actually slow
+
+## Self-study prompts
+
+- Add timing instrumentation to a RAG pipeline and run 50 queries; compute P50 and P95 per step
+- Implement query caching with Redis and measure the cache hit rate over 100 queries
+- Compare streaming vs. non-streaming perceived latency by having someone time the first token appearance vs. full response
+
+## Interview takeaway
+
+The diagnostic discipline is: measure first, identify the actual bottleneck, apply the highest-leverage fix, validate that quality did not degrade. Engineers who skip measurement and jump straight to "switch the model" or "add a cache" are optimizing based on intuition rather than data. Show that you know the difference.
+""",
+        "tags_json": ["rag", "production", "latency", "debugging", "performance"],
     },
     {
         "category": "evaluation",
