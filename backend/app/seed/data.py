@@ -4019,11 +4019,1238 @@ Create a test suite of 5 cases for an agent you are building (or plan to build).
         "level": "advanced",
         "estimated_hours": 18,
         "lessons": [
-            {"title": "Deployment shapes for AI products", "summary": "Compare monolith APIs, workers, queues, and evaluation jobs.", "content_md": "## Deployment shapes\n\nChoose the simplest runtime that still respects latency and reliability needs.", "estimated_minutes": 35},
-            {"title": "Secrets, environments, and provider configuration", "summary": "Manage credentials, feature flags, and environment drift safely.", "content_md": "## Configuration\n\nAI systems often fail because environments are ambiguous.", "estimated_minutes": 35},
-            {"title": "Caching and throughput management", "summary": "Use caching where it reduces cost without hiding bugs.", "content_md": "## Throughput\n\nCaching is powerful only if invalidation and observability remain clear.", "estimated_minutes": 35},
-            {"title": "Scheduled jobs and background processing", "summary": "Separate user-facing APIs from indexing, evaluation, and ingestion work.", "content_md": "## Background work\n\nQueues and scheduled jobs protect UX and make operations predictable.", "estimated_minutes": 40},
-            {"title": "Portfolio slice: deployable AI service", "summary": "Show that your project survives outside localhost.", "content_md": "## Portfolio move\n\nA production-shaped deployment story increases credibility immediately.", "estimated_minutes": 30},
+            {
+                "title": "Containerizing AI applications",
+                "summary": "Docker for LLM apps, managing large dependencies, multi-stage builds, GPU containers, and model weight management.",
+                "estimated_minutes": 50,
+                "content_md": """## Why this matters
+
+You already know Docker. The gap when moving to AI workloads is not container basics — it is the operational realities that make naive Docker usage painful: model weights that are gigabytes, Python dependencies that take ten minutes to install, GPU drivers that conflict, and images that bloat to 15 GB because someone ran `pip install torch` in the wrong layer.
+
+This lesson covers the patterns that keep AI containers fast to build, small to ship, and correct to run.
+
+## Core concepts
+
+### The dependency problem
+
+A standard Flask API image might be 200 MB. An LLM application that pulls in `torch`, `transformers`, `sentence-transformers`, and a vector client easily reaches 6–10 GB before you add your own code. That has concrete consequences:
+
+- Cold start time on serverless or new nodes: 3–8 minutes pulling the image
+- CI pipeline time dominated by layer pulls
+- Storage costs at scale
+- Dependency conflicts between CUDA versions and library expectations
+
+The fix is to treat AI dependencies as a separate concern from application code.
+
+### Multi-stage builds for AI applications
+
+Multi-stage builds let you separate the heavy installation phase from the final runtime image. The canonical pattern for an LLM application:
+
+```dockerfile
+# Stage 1: dependency builder
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+COPY requirements.txt .
+
+# Install build tools in this stage only
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    build-essential git \\
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Stage 2: runtime image
+FROM python:3.11-slim AS runtime
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+
+WORKDIR /app
+COPY src/ ./src/
+
+# Non-root user for production
+RUN useradd --create-home appuser
+USER appuser
+
+CMD ["python", "-m", "src.server"]
+```
+
+The builder stage installs everything. The runtime stage copies only the installed packages — no build tools, no apt cache, no pip cache. This typically saves 300–500 MB.
+
+### GPU containers
+
+If your workload runs local inference (vLLM, Ollama, llama.cpp), you need a CUDA base image and GPU access at runtime. The key decisions:
+
+**CUDA version pinning.** The CUDA version in your image must be compatible with the driver version on your host. Check with `nvidia-smi` — the output shows the maximum supported CUDA version. Mismatches cause silent runtime failures.
+
+```dockerfile
+# For PyTorch inference with CUDA 12.1
+FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends python3.11 python3-pip \\
+    && rm -rf /var/lib/apt/lists/*
+
+# torch with CUDA support — must match the base image CUDA version
+RUN pip install torch==2.1.0+cu121 --index-url https://download.pytorch.org/whl/cu121
+```
+
+Docker Compose for local GPU development:
+
+```yaml
+services:
+  inference:
+    build: .
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+```
+
+### Model weight management
+
+Model weights should not be in your Docker image. A 7B parameter model in float16 is ~14 GB. That would make your image effectively unshippable and would rebuild from scratch every time your application code changes.
+
+The correct pattern is to separate model weights from application code entirely:
+
+**Option 1: Volume mount at runtime.** Pull weights to a host directory or network volume, mount at `/models`. The container expects `MODEL_PATH=/models/llama-3-8b` from the environment.
+
+**Option 2: Sidecar init container.** A small init container downloads the model at pod startup to a shared volume. The main container waits until the model file exists.
+
+**Option 3: Model server as a separate service.** Run Ollama or vLLM as their own service. Your application calls their HTTP API. This is the cleanest boundary for most production deployments.
+
+```python
+import os
+from pathlib import Path
+
+
+def get_model_path() -> Path:
+    '''Resolve model path from environment, with a local fallback for development.'''
+    model_path = Path(os.environ.get("MODEL_PATH", "/models/default"))
+    if not model_path.exists():
+        raise RuntimeError(
+            f"Model not found at {model_path}. "
+            "Set MODEL_PATH or mount the models volume."
+        )
+    return model_path
+```
+
+### Requirements file hygiene
+
+AI requirements files grow organic complexity fast. Three practices that keep them manageable:
+
+1. **Pin exact versions for stability.** `torch==2.1.0` not `torch>=2`. Provider SDKs change APIs between minor versions.
+
+2. **Split by concern.** Keep `requirements.txt` for production dependencies and `requirements-dev.txt` for testing tools. This stops pytest and black from inflating your production image.
+
+3. **Use a `.dockerignore` that excludes model files.** If you have any model weights in your repo (for tests), make sure they are in `.dockerignore`.
+
+```
+# .dockerignore
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+*.gguf
+*.bin
+models/
+```
+
+## Working example
+
+A complete multi-stage Dockerfile for an LLM API that calls an external provider (no local model, no GPU requirement):
+
+```dockerfile
+FROM python:3.11-slim AS builder
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+FROM python:3.11-slim AS runtime
+COPY --from=builder /install /usr/local
+
+# Security: no root at runtime
+RUN useradd --create-home --shell /bin/bash appuser
+WORKDIR /app
+COPY src/ ./src/
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \\
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+Build with `docker build --target runtime -t myapp:latest .` to ensure only the runtime stage is tagged and shipped.
+
+## Common mistakes
+
+**Putting model weights in the image.** Every image rebuild redownloads gigabytes. The image cannot be deployed to environments without the model baked in. Use volumes or a separate model service.
+
+**Running as root.** Many LLM libraries default-assume they can write to home directories. Running as a non-root user with explicit write permissions to the paths you need is a small step that removes a whole class of security exposure.
+
+**Not pinning the CUDA version.** A CUDA version mismatch between image and host produces cryptic errors or silent CPU-only fallback. Always pin and document the required driver version in your README.
+
+**Using the full `nvidia/cuda:*-devel` image in production.** The devel image includes compilers and headers needed to build CUDA extensions. At runtime you only need the runtime image — it is significantly smaller.
+
+**Installing dev tools in the production layer.** `pip install pytest mypy black` in your production Dockerfile adds 200+ MB with no runtime value.
+
+## Try it yourself
+
+1. Take an existing Python project and write a multi-stage Dockerfile that separates dependency installation from the final runtime image. Measure the size difference with `docker images`.
+2. Add a `.dockerignore` file and verify that your build context drops to under 1 MB using `docker build --no-cache 2>&1 | grep "Sending build context"`.
+3. Add a `HEALTHCHECK` instruction to your Dockerfile and test that `docker inspect` reports health status after startup.
+""",
+            },
+            {
+                "title": "Scaling LLM inference",
+                "summary": "Load balancing, request queuing, batching for throughput, GPU sharing, and model serving frameworks including vLLM, TGI, and Ollama.",
+                "estimated_minutes": 55,
+                "content_md": """## Why this matters
+
+A single LLM API call is easy. Handling 500 concurrent users, each expecting responses in under two seconds, is a different engineering problem. The naive approach — one model process, one request at a time — falls apart immediately. This lesson covers the serving architecture decisions that let you scale LLM inference without buying ten times more hardware than you need.
+
+## Core concepts
+
+### The throughput problem
+
+LLM inference is GPU-bound and memory-bound simultaneously. A single A100 GPU can only hold a certain number of KV-cache entries. If you serve one request at a time, you are leaving GPU compute idle during memory fetches. If you over-subscribe memory, you get OOM crashes. The art of LLM serving is maximizing utilization within memory constraints.
+
+The key insight: **batching**. If five users send requests within 50 milliseconds of each other, you can process them together in a single GPU forward pass and return results to all five in roughly the same time it takes to process one. This is the fundamental lever behind all the serving frameworks.
+
+### Continuous batching
+
+Traditional batching waits for a fixed batch to fill before processing. This adds latency when traffic is low. Continuous batching (also called dynamic batching or iteration-level scheduling) processes requests as they arrive, adding new requests to the in-flight batch at each iteration step.
+
+This is what makes vLLM and TGI significantly more efficient than naively running a model:
+
+```
+Traditional:   [req1, req2, -, -, -] -> process -> [req1, req2, -, -, -] next batch
+Continuous:    [req1, req2, -, -, -] -> step -> [req1, req2, req3, req4, -] next step
+               (req3 and req4 joined mid-generation)
+```
+
+### vLLM
+
+vLLM is the most production-adopted high-throughput serving framework. It implements PagedAttention — managing KV cache as paged memory similar to OS virtual memory — which dramatically improves GPU memory utilization.
+
+Running vLLM as a service:
+
+```bash
+python -m vllm.entrypoints.openai.api_server \\
+    --model meta-llama/Llama-3-8B-Instruct \\
+    --tensor-parallel-size 2 \\  # split across 2 GPUs
+    --max-model-len 8192 \\
+    --port 8000
+```
+
+vLLM exposes an OpenAI-compatible API. Your application code calls `http://localhost:8000/v1/chat/completions` — no SDK changes required when switching from the OpenAI API.
+
+### Text Generation Inference (TGI)
+
+TGI is Hugging Face's serving framework, optimized for Hugging Face model hub compatibility and enterprise deployments. It supports tensor parallelism, quantization, and streaming.
+
+```bash
+docker run --gpus all --shm-size 1g -p 8080:80 \\
+    -v /models:/data \\
+    ghcr.io/huggingface/text-generation-inference:latest \\
+    --model-id /data/llama-3-8b \\
+    --max-input-length 4096 \\
+    --max-total-tokens 8192
+```
+
+### Ollama
+
+Ollama is the right choice for local development and single-server deployments. It handles model downloading, quantization selection, and process management. For a side project or internal tool serving tens of requests per day, Ollama removes complexity.
+
+```bash
+ollama pull llama3.2
+ollama serve  # starts API at localhost:11434
+```
+
+Call it exactly like OpenAI:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+response = client.chat.completions.create(
+    model="llama3.2",
+    messages=[{"role": "user", "content": "What is 2 + 2?"}]
+)
+```
+
+### Request queuing
+
+At moderate scale, you need a queue in front of your inference service. The queue serves three purposes:
+
+1. **Backpressure**: requests pile up in the queue rather than hammering your GPU service
+2. **Priority routing**: paying customers can jump the queue
+3. **Retries**: failed requests can be re-enqueued without client retries
+
+A simple Redis-backed queue with priority routing:
+
+```python
+import asyncio
+import redis.asyncio as aioredis
+import json
+
+
+class InferenceQueue:
+    def __init__(self, redis_url: str):
+        self.redis = aioredis.from_url(redis_url)
+        self.high_priority_key = "inference:queue:high"
+        self.normal_priority_key = "inference:queue:normal"
+
+    async def enqueue(self, request: dict, priority: str = "normal") -> str:
+        request_id = request["request_id"]
+        queue_key = self.high_priority_key if priority == "high" else self.normal_priority_key
+        await self.redis.rpush(queue_key, json.dumps(request))
+        return request_id
+
+    async def dequeue(self, timeout: int = 5) -> dict | None:
+        # Try high priority first, then normal
+        result = await self.redis.blpop(
+            [self.high_priority_key, self.normal_priority_key],
+            timeout=timeout
+        )
+        if result is None:
+            return None
+        _, payload = result
+        return json.loads(payload)
+
+    async def queue_depth(self) -> dict:
+        high = await self.redis.llen(self.high_priority_key)
+        normal = await self.redis.llen(self.normal_priority_key)
+        return {"high": high, "normal": normal, "total": high + normal}
+```
+
+### Load balancing multiple model replicas
+
+When a single GPU is not enough, you run multiple model replicas behind a load balancer. The load balancer should be aware of replica health and queue depth, not just round-robin:
+
+```python
+import random
+
+
+class ModelReplicaPool:
+    def __init__(self, replicas: list[dict]):
+        # replicas: [{"url": "http://...", "weight": 1, "healthy": True}]
+        self.replicas = replicas
+
+    def select_replica(self) -> str:
+        healthy = [r for r in self.replicas if r["healthy"]]
+        if not healthy:
+            raise RuntimeError("No healthy replicas available")
+        # Weighted selection
+        total_weight = sum(r["weight"] for r in healthy)
+        pick = random.uniform(0, total_weight)
+        running = 0
+        for replica in healthy:
+            running += replica["weight"]
+            if pick <= running:
+                return replica["url"]
+        return healthy[-1]["url"]
+
+    def mark_unhealthy(self, url: str) -> None:
+        for r in self.replicas:
+            if r["url"] == url:
+                r["healthy"] = False
+                break
+```
+
+## Working example
+
+A complete request router that queues work, selects a replica, calls the inference service, and handles timeouts:
+
+```python
+import asyncio
+import httpx
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class InferenceRouter:
+    def __init__(self, pool: ModelReplicaPool, timeout_seconds: float = 30.0):
+        self.pool = pool
+        self.timeout = timeout_seconds
+
+    async def complete(self, messages: list[dict], model: str = "default") -> str:
+        replica_url = self.pool.select_replica()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{replica_url}/v1/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "max_tokens": 1024,
+                    }
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+        except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+            logger.warning("replica_failed", extra={"url": replica_url, "error": str(exc)})
+            self.pool.mark_unhealthy(replica_url)
+            raise
+```
+
+## Common mistakes
+
+**Serving one request at a time.** Even without a dedicated serving framework, you can run multiple async workers. A single synchronous Flask endpoint tied to a model object will serialize every request.
+
+**Not setting KV cache memory limits.** vLLM will claim all available GPU memory for KV cache by default. Set `--gpu-memory-utilization 0.85` to leave headroom for OS and CUDA runtime operations.
+
+**Mixing quantization levels without benchmarking.** INT4 quantization cuts memory usage by 4x but can degrade quality significantly for instruction-following tasks. Always run your evaluation suite against the quantized model before deploying.
+
+**No timeout on inference calls.** A single stuck request with no timeout can hold a GPU forward pass indefinitely. Always set a timeout that is roughly 2x your P99 latency.
+
+**Ignoring batching for embedding workloads.** Embedding generation scales extremely well with batching. Sending 100 texts in one request versus 100 individual requests can be 20x faster with the same hardware.
+
+## Try it yourself
+
+1. Run Ollama locally and use the OpenAI-compatible API to call it from Python. Measure the latency difference between serial calls and `asyncio.gather` with five concurrent requests.
+2. Implement a simple health-check polling loop that marks a replica as unhealthy after two consecutive timeouts and re-enables it after a successful probe.
+3. Extend the `InferenceQueue` to add a result store using Redis hashes so callers can poll for their result by `request_id`.
+""",
+            },
+            {
+                "title": "CI/CD for AI features",
+                "summary": "Testing LLM features in CI, eval gates, golden tests, prompt version control, canary deployments, and feature flags for AI.",
+                "estimated_minutes": 50,
+                "content_md": """## Why this matters
+
+AI features break in ways that standard test suites do not catch. A code change that does not touch any test can still degrade output quality because the underlying model was updated, a retrieved document changed, or a subtle interaction between prompt components changed behavior. CI/CD for AI requires layering quality gates on top of the standard test pipeline — not replacing it.
+
+The engineering challenge: LLM outputs are non-deterministic and expensive to evaluate. You cannot run ten thousand evaluation cases on every commit. This lesson covers the patterns that give you meaningful quality signals within CI time and budget constraints.
+
+## Core concepts
+
+### The evaluation gate pattern
+
+An eval gate is a CI step that runs a subset of your evaluation suite and blocks the merge if quality drops below a threshold. The gate should be:
+
+- **Fast enough for CI**: run in under 5 minutes, meaning 50–200 cases, not the full thousand
+- **Representative**: the cases should cover your most common failure modes, not just happy paths
+- **Deterministic enough**: use `temperature=0` for all CI evaluations so the same prompt gives the same output
+
+```python
+import json
+import sys
+from pathlib import Path
+
+
+def run_eval_gate(
+    cases_path: Path,
+    threshold: float = 0.85,
+) -> bool:
+    '''Return True if quality meets threshold. Exit with code 1 if not.'''
+    cases = [json.loads(line) for line in cases_path.read_text().splitlines() if line.strip()]
+    passed = 0
+
+    for case in cases:
+        result = evaluate_case(case)
+        if result["passed"]:
+            passed += 1
+        else:
+            print(f"FAIL [{case['id']}]: {result['reason']}")
+
+    pass_rate = passed / len(cases) if cases else 0.0
+    print(f"Eval gate: {passed}/{len(cases)} passed ({pass_rate:.1%})")
+
+    if pass_rate < threshold:
+        print(f"BLOCKED: pass rate {pass_rate:.1%} below threshold {threshold:.1%}")
+        return False
+    return True
+
+
+if __name__ == "__main__":
+    ok = run_eval_gate(Path("eval/ci_cases.jsonl"), threshold=0.85)
+    sys.exit(0 if ok else 1)
+```
+
+In your CI pipeline:
+
+```yaml
+# .github/workflows/ai-quality.yml
+- name: Run eval gate
+  run: python scripts/eval_gate.py
+  env:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+### Golden tests
+
+Golden tests are input/expected-output pairs stored in version control. Unlike unit tests, the expected output is the actual model output from a known-good version. When output changes, the test fails — and you decide whether the change is an improvement or a regression.
+
+```python
+import json
+from pathlib import Path
+from typing import NamedTuple
+
+
+class GoldenCase(NamedTuple):
+    id: str
+    input: dict
+    expected_output: str
+    tolerance: float = 0.9  # semantic similarity threshold
+
+
+def load_golden_cases(path: Path) -> list[GoldenCase]:
+    cases = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        data = json.loads(line)
+        cases.append(GoldenCase(**data))
+    return cases
+
+
+def update_golden(case_id: str, new_output: str, path: Path) -> None:
+    '''Approve a new output as the golden reference.'''
+    lines = path.read_text().splitlines()
+    updated = []
+    for line in lines:
+        data = json.loads(line)
+        if data["id"] == case_id:
+            data["expected_output"] = new_output
+        updated.append(json.dumps(data))
+    path.write_text("\\n".join(updated) + "\\n")
+```
+
+The workflow: when a prompt change intentionally improves output, run `python scripts/update_golden.py --id case-123` to approve the new output. This creates a diff in version control that reviewers can see and approve.
+
+### Prompt version control
+
+Prompts are code. Store them in version-controlled files, not database strings or hardcoded f-strings. The pattern:
+
+```
+prompts/
+  summarize_v1.txt        # previous version (keep for rollback)
+  summarize_v2.txt        # current production version
+  summarize_v3.txt        # candidate in review
+```
+
+Load the active version from configuration:
+
+```python
+import os
+from pathlib import Path
+
+
+def load_prompt(name: str) -> str:
+    version = os.environ.get(f"PROMPT_VERSION_{name.upper()}", "v2")
+    prompt_path = Path("prompts") / f"{name}_{version}.txt"
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"Prompt not found: {prompt_path}")
+    return prompt_path.read_text().strip()
+```
+
+When you want to deploy `v3`, you update the environment variable. When you want to roll back, you update the environment variable again. No code deployment required.
+
+### Canary deployments for AI features
+
+A canary deployment routes a small percentage of traffic to the new version while the majority continues to use the old version. For AI features, the canary phase serves two purposes: detecting technical failures and detecting quality degradation.
+
+```python
+import random
+from dataclasses import dataclass
+
+
+@dataclass
+class PromptCanaryConfig:
+    canary_version: str
+    canary_pct: float  # 0.0 to 1.0
+    control_version: str
+
+
+def select_prompt_version(config: PromptCanaryConfig, user_id: str) -> str:
+    '''Deterministically assign users to canary or control based on user_id hash.'''
+    # Use hash for sticky assignment — same user always gets same version
+    user_bucket = hash(user_id) % 100 / 100
+    if user_bucket < config.canary_pct:
+        return config.canary_version
+    return config.control_version
+```
+
+During the canary phase, compare quality metrics between the two groups. If the canary group shows no quality regression after N requests, promote it to 100%.
+
+### Feature flags for AI features
+
+Feature flags let you decouple deploy from release. An AI feature that is deployed but flagged off can be enabled for internal users first, then gradually rolled out. This is especially important for AI features where you want to monitor production quality before full exposure.
+
+```python
+import os
+
+
+class AIFeatureFlags:
+    '''Read feature flag state from environment. Override in tests.'''
+
+    @staticmethod
+    def is_enabled(flag_name: str, user_id: str | None = None) -> bool:
+        env_key = f"FF_{flag_name.upper()}"
+        raw = os.environ.get(env_key, "disabled")
+
+        if raw == "enabled":
+            return True
+        if raw == "disabled":
+            return False
+
+        # Percentage rollout: "pct:25" enables for ~25% of users
+        if raw.startswith("pct:") and user_id is not None:
+            pct = float(raw.split(":")[1]) / 100
+            return (hash(f"{flag_name}:{user_id}") % 100) / 100 < pct
+
+        return False
+```
+
+## Working example
+
+A complete CI workflow that runs unit tests, then the eval gate, then updates golden references on approval:
+
+```yaml
+name: AI Feature Quality Gate
+
+on: [pull_request]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r requirements-dev.txt
+      - run: pytest tests/ -x -q
+
+  eval-gate:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r requirements.txt
+      - name: Run eval gate (CI subset, temperature=0)
+        run: python scripts/eval_gate.py --cases eval/ci_cases.jsonl --threshold 0.85
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PROMPT_VERSION_SUMMARIZE: ${{ github.event.pull_request.head.sha }}
+```
+
+## Common mistakes
+
+**No eval gate, only unit tests.** Unit tests confirm that your code runs. They do not confirm that your LLM outputs meet quality standards. Add at least 20–30 representative eval cases to your CI pipeline.
+
+**Running the full eval suite in every CI run.** A 5000-case eval suite at $0.002/case costs $10 per run. With 50 PRs per week that is $500/week. Use a representative 100-case CI subset and run the full suite nightly.
+
+**Storing prompts as database strings without version control.** A prompt change made in a database has no reviewer, no diff, and no rollback path. Prompts stored as files get all the benefits of your existing version control workflow.
+
+**Not using deterministic settings in CI.** `temperature=1.0` in CI will cause golden tests to flap randomly. Always use `temperature=0` and `seed` parameters when available in CI evaluation runs.
+
+**Canary deployments without quality metrics.** A canary that only monitors error rates and latency will not catch output quality regression. Define and track at least one quality metric during the canary phase.
+
+## Try it yourself
+
+1. Create a `prompts/` directory in one of your projects and move at least one hardcoded prompt into a versioned file. Load it with `os.environ.get("PROMPT_VERSION_...")`.
+2. Write five golden test cases for an LLM feature you own. Store them as JSONL. Write a test that loads them and checks semantic similarity between expected and actual output.
+3. Implement the `select_prompt_version` function above with sticky user assignment. Verify that the same user ID always returns the same version across multiple calls.
+""",
+            },
+            {
+                "title": "Cost management at scale",
+                "summary": "Token budgets, caching layers including semantic and exact-match cache, model routing for cost optimization, and monitoring spend.",
+                "estimated_minutes": 50,
+                "content_md": """## Why this matters
+
+LLM API costs scale with usage in a way that traditional compute costs do not. A popular feature that calls GPT-4o for every request can produce a $50,000 monthly bill before the team realizes what happened. The engineering response is not to avoid capable models — it is to use the right model for each request type, cache responses that can be reused, and enforce budget boundaries that trigger before costs spiral.
+
+## Core concepts
+
+### Token budgeting
+
+A token budget is a per-request or per-session constraint that caps how much of the context window you use. This matters for cost because LLM pricing is linear with tokens: a request with 8,000 prompt tokens costs 8x a request with 1,000 prompt tokens.
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class TokenBudget:
+    max_prompt_tokens: int
+    max_completion_tokens: int
+    reserved_system_tokens: int = 200
+
+    @property
+    def available_context_tokens(self) -> int:
+        return self.max_prompt_tokens - self.reserved_system_tokens
+
+
+def fit_context_to_budget(chunks: list[str], budget: TokenBudget) -> list[str]:
+    '''Greedily select chunks that fit within the token budget.'''
+    # Approximate: 1 token ≈ 4 characters
+    char_budget = budget.available_context_tokens * 4
+    selected = []
+    used = 0
+    for chunk in chunks:
+        chunk_chars = len(chunk)
+        if used + chunk_chars > char_budget:
+            break
+        selected.append(chunk)
+        used += chunk_chars
+    return selected
+```
+
+The `reserved_system_tokens` prevents the system prompt from being squeezed out by context chunks.
+
+### Exact-match caching
+
+The cheapest LLM call is one that never happens. For requests where the input is identical — the same user asking the same question again, a documentation lookup, a template rendering — an exact-match cache returns the stored response instantly.
+
+```python
+import hashlib
+import json
+import time
+from dataclasses import dataclass
+import redis
+
+
+@dataclass
+class CachedResponse:
+    content: str
+    model: str
+    cached_at: float
+    hit_count: int
+
+
+class ExactMatchCache:
+    def __init__(self, redis_client: redis.Redis, ttl_seconds: int = 3600):
+        self.redis = redis_client
+        self.ttl = ttl_seconds
+
+    def _key(self, messages: list[dict], model: str) -> str:
+        payload = json.dumps({"messages": messages, "model": model}, sort_keys=True)
+        return f"llm:exact:{hashlib.sha256(payload.encode()).hexdigest()}"
+
+    def get(self, messages: list[dict], model: str) -> CachedResponse | None:
+        key = self._key(messages, model)
+        raw = self.redis.get(key)
+        if raw is None:
+            return None
+        data = json.loads(raw)
+        data["hit_count"] += 1
+        self.redis.setex(key, self.ttl, json.dumps(data))
+        return CachedResponse(**data)
+
+    def set(self, messages: list[dict], model: str, content: str) -> None:
+        key = self._key(messages, model)
+        data = {
+            "content": content,
+            "model": model,
+            "cached_at": time.time(),
+            "hit_count": 0,
+        }
+        self.redis.setex(key, self.ttl, json.dumps(data))
+```
+
+Exact-match caching works well for FAQ-style features, help documentation, and any use case where user inputs cluster around a small set of common questions.
+
+### Semantic caching
+
+Semantic caching uses embedding similarity to return cached responses for semantically equivalent questions, even if they are phrased differently. "What is your return policy?" and "How do I return something?" might be different strings but should return the same cached answer.
+
+```python
+import numpy as np
+from dataclasses import dataclass, field
+
+
+@dataclass
+class SemanticCacheEntry:
+    question: str
+    answer: str
+    embedding: list[float]
+    model_used: str
+
+
+class SemanticCache:
+    def __init__(self, similarity_threshold: float = 0.92):
+        self.threshold = similarity_threshold
+        self._entries: list[SemanticCacheEntry] = []
+
+    def _cosine_similarity(self, a: list[float], b: list[float]) -> float:
+        va, vb = np.array(a), np.array(b)
+        denom = np.linalg.norm(va) * np.linalg.norm(vb)
+        return float(np.dot(va, vb) / denom) if denom > 0 else 0.0
+
+    def get(self, query_embedding: list[float]) -> SemanticCacheEntry | None:
+        best_score = 0.0
+        best_entry = None
+        for entry in self._entries:
+            score = self._cosine_similarity(query_embedding, entry.embedding)
+            if score > best_score:
+                best_score = score
+                best_entry = entry
+        if best_score >= self.threshold:
+            return best_entry
+        return None
+
+    def set(self, question: str, answer: str, embedding: list[float], model: str) -> None:
+        self._entries.append(SemanticCacheEntry(
+            question=question,
+            answer=answer,
+            embedding=embedding,
+            model_used=model,
+        ))
+```
+
+The threshold controls the tradeoff between cache hit rate and answer relevance. 0.92 is a reasonable starting point; calibrate against your specific use case.
+
+### Model routing for cost optimization
+
+Not every request needs your most expensive model. A model router inspects the incoming request and routes it to the appropriate tier:
+
+```python
+from enum import Enum
+
+
+class TaskComplexity(Enum):
+    simple = "simple"      # factual lookup, short answer, classification
+    moderate = "moderate"  # summarization, extraction, structured output
+    complex = "complex"    # reasoning, code generation, long-form writing
+
+
+MODEL_TIERS = {
+    TaskComplexity.simple: "gpt-4o-mini",      # ~$0.00015/1k tokens
+    TaskComplexity.moderate: "gpt-4o-mini",    # same — handle with prompt
+    TaskComplexity.complex: "gpt-4o",          # ~$0.0025/1k tokens
+}
+
+
+def classify_complexity(prompt: str, context_tokens: int) -> TaskComplexity:
+    '''Heuristic classifier — replace with a real classifier in production.'''
+    if context_tokens > 6000:
+        return TaskComplexity.complex
+    if len(prompt) < 120 and "?" in prompt:
+        return TaskComplexity.simple
+    return TaskComplexity.moderate
+
+
+def route_request(prompt: str, context_tokens: int) -> str:
+    complexity = classify_complexity(prompt, context_tokens)
+    return MODEL_TIERS[complexity]
+```
+
+A more sophisticated version uses a small, cheap classifier model to make the routing decision, costing fractions of a cent to avoid spending dollars on an expensive model.
+
+### Monitoring spend
+
+Track token usage and cost per request, per feature, and per user. This data is essential for spotting runaway costs before the monthly bill arrives.
+
+```python
+from dataclasses import dataclass, field
+from collections import defaultdict
+
+
+# Cost per 1000 tokens (input/output) — update as pricing changes
+MODEL_COSTS = {
+    "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
+    "gpt-4o": {"input": 0.0025, "output": 0.01},
+    "claude-3-5-haiku-20241022": {"input": 0.0008, "output": 0.004},
+    "claude-sonnet-4-5": {"input": 0.003, "output": 0.015},
+}
+
+
+@dataclass
+class CostEvent:
+    feature: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+
+    @property
+    def cost_usd(self) -> float:
+        if self.model not in MODEL_COSTS:
+            return 0.0
+        rates = MODEL_COSTS[self.model]
+        return (
+            self.input_tokens / 1000 * rates["input"] +
+            self.output_tokens / 1000 * rates["output"]
+        )
+
+
+class CostTracker:
+    def __init__(self):
+        self._events: list[CostEvent] = []
+        self._by_feature: dict[str, float] = defaultdict(float)
+
+    def record(self, event: CostEvent) -> None:
+        self._events.append(event)
+        self._by_feature[event.feature] += event.cost_usd
+
+    def report(self) -> dict:
+        return {
+            "total_usd": sum(e.cost_usd for e in self._events),
+            "by_feature": dict(self._by_feature),
+            "request_count": len(self._events),
+        }
+```
+
+## Working example
+
+A request handler that applies caching, model routing, and cost tracking together:
+
+```python
+async def handle_request(
+    query: str,
+    feature_name: str,
+    cache: ExactMatchCache,
+    tracker: CostTracker,
+) -> str:
+    messages = [{"role": "user", "content": query}]
+
+    # Try exact-match cache first
+    cached = cache.get(messages, model="any")
+    if cached:
+        return cached.content
+
+    # Route to appropriate model tier
+    model = route_request(query, context_tokens=len(query) // 4)
+
+    # Call the model
+    response = await call_provider(messages, model=model)
+
+    # Cache and track
+    cache.set(messages, model, response.content)
+    tracker.record(CostEvent(
+        feature=feature_name,
+        model=model,
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+    ))
+
+    return response.content
+```
+
+## Common mistakes
+
+**No token budget enforcement.** A user who pastes a 50,000-token document into a chat box can generate a $1 request. Set hard limits on prompt construction and truncate before calling the API.
+
+**Caching without TTL.** A semantic cache entry from three months ago may reference outdated information. Set expiration based on your content freshness requirements.
+
+**Model routing without evaluation.** Routing "simple" requests to a cheaper model only saves money if quality is maintained. Run your eval suite against the cheaper model before deploying routing.
+
+**Tracking tokens without tracking cost.** Token counts alone do not tell you your spending rate. Different models have dramatically different prices; track cost in dollars alongside token counts.
+
+**No spend alerts.** Set a budget alert in your cloud or provider billing console. A missing alert means the first signal of a cost problem is the monthly invoice.
+
+## Try it yourself
+
+1. Implement the `ExactMatchCache` above backed by a Python dict instead of Redis (for local testing). Add a `hit_rate()` method that returns the fraction of `get()` calls that returned a cached result.
+2. Build a cost tracker that groups by hour and returns hourly cost totals for the last 24 hours.
+3. Write a token budget function that, given a list of retrieved chunks and a budget, returns the maximum set of chunks that fits. Assert that the result never exceeds the budget.
+""",
+            },
+            {
+                "title": "Production reliability",
+                "summary": "Circuit breakers, fallback chains, graceful degradation, multi-provider failover, and SLAs for AI features.",
+                "estimated_minutes": 55,
+                "content_md": """## Why this matters
+
+LLM providers go down. Rate limits get hit. Models return unexpected outputs. A production AI feature that works 95% of the time and completely fails the other 5% delivers a terrible user experience. Reliability engineering for AI systems requires the same patterns as general distributed systems — circuit breakers, fallbacks, retry with backoff — plus AI-specific additions like quality-aware fallback chains and graceful degradation to non-AI responses.
+
+## Core concepts
+
+### Circuit breakers
+
+A circuit breaker monitors failure rates and, after a threshold is exceeded, stops sending requests to the failing service for a cooldown period. This prevents a slow or failed dependency from causing cascading failures in your own service.
+
+States: **Closed** (normal operation), **Open** (failures exceeded threshold, requests blocked), **Half-open** (cooldown passed, sending probe requests to test recovery).
+
+```python
+import time
+from enum import Enum
+from dataclasses import dataclass, field
+
+
+class CircuitState(Enum):
+    closed = "closed"
+    open = "open"
+    half_open = "half_open"
+
+
+@dataclass
+class CircuitBreaker:
+    name: str
+    failure_threshold: int = 5
+    recovery_timeout_seconds: float = 60.0
+    success_threshold: int = 2  # successes needed to close from half-open
+
+    _state: CircuitState = field(default=CircuitState.closed, init=False)
+    _failure_count: int = field(default=0, init=False)
+    _success_count: int = field(default=0, init=False)
+    _opened_at: float | None = field(default=None, init=False)
+
+    @property
+    def is_open(self) -> bool:
+        if self._state == CircuitState.open:
+            if time.monotonic() - self._opened_at >= self.recovery_timeout_seconds:
+                self._state = CircuitState.half_open
+                self._success_count = 0
+                return False
+            return True
+        return False
+
+    def record_success(self) -> None:
+        if self._state == CircuitState.half_open:
+            self._success_count += 1
+            if self._success_count >= self.success_threshold:
+                self._state = CircuitState.closed
+                self._failure_count = 0
+        elif self._state == CircuitState.closed:
+            self._failure_count = max(0, self._failure_count - 1)
+
+    def record_failure(self) -> None:
+        self._failure_count += 1
+        if self._failure_count >= self.failure_threshold:
+            self._state = CircuitState.open
+            self._opened_at = time.monotonic()
+
+    @property
+    def state(self) -> CircuitState:
+        _ = self.is_open  # trigger state transition check
+        return self._state
+```
+
+### Fallback chains
+
+A fallback chain tries a sequence of providers in order. If the primary fails (or the circuit is open), it falls through to the next. The chain should be ordered from fastest/cheapest to slowest/most capable, or from primary to backup depending on your goals.
+
+```python
+import asyncio
+import logging
+from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ProviderConfig:
+    name: str
+    client: object
+    model: str
+    circuit_breaker: CircuitBreaker
+
+
+class FallbackChain:
+    def __init__(self, providers: list[ProviderConfig]):
+        self.providers = providers
+
+    async def complete(self, messages: list[dict]) -> tuple[str, str]:
+        '''Returns (content, provider_name_used).'''
+        last_error = None
+
+        for provider in self.providers:
+            if provider.circuit_breaker.is_open:
+                logger.info("circuit_open_skipping", extra={"provider": provider.name})
+                continue
+
+            try:
+                content = await self._call(provider, messages)
+                provider.circuit_breaker.record_success()
+                return content, provider.name
+            except Exception as exc:
+                logger.warning(
+                    "provider_failed_trying_next",
+                    extra={"provider": provider.name, "error": str(exc)},
+                )
+                provider.circuit_breaker.record_failure()
+                last_error = exc
+
+        raise RuntimeError(f"All providers exhausted. Last error: {last_error}")
+
+    async def _call(self, provider: ProviderConfig, messages: list[dict]) -> str:
+        # Provider-specific call implementation
+        raise NotImplementedError
+```
+
+### Graceful degradation
+
+When all AI providers are unavailable, you have a choice: fail completely or return a degraded but useful response. Graceful degradation keeps your product functional in reduced-capability mode.
+
+Common degradation strategies:
+
+1. **Cached fallback**: return the most recent cached response for similar inputs
+2. **Template fallback**: return a structured response that tells the user the AI is temporarily unavailable
+3. **Non-AI fallback**: route to a simpler rule-based or search-based implementation
+4. **Queue for later**: accept the request, process it when the provider recovers, notify the user
+
+```python
+from enum import Enum
+
+
+class DegradationLevel(Enum):
+    full = "full"          # AI provider available
+    cached = "cached"      # using cached AI responses
+    template = "template"  # template responses only
+    unavailable = "unavailable"  # feature disabled
+
+
+async def handle_with_degradation(
+    query: str,
+    chain: FallbackChain,
+    cache: object,
+    degradation_level: DegradationLevel,
+) -> dict:
+
+    if degradation_level == DegradationLevel.full:
+        try:
+            content, provider = await chain.complete([{"role": "user", "content": query}])
+            return {"content": content, "source": "ai", "provider": provider}
+        except RuntimeError:
+            degradation_level = DegradationLevel.cached
+
+    if degradation_level == DegradationLevel.cached:
+        cached = cache.get_best_match(query)
+        if cached:
+            return {"content": cached.content, "source": "cache", "note": "AI temporarily unavailable"}
+
+    return {
+        "content": "Our AI assistant is temporarily unavailable. Please try again in a few minutes.",
+        "source": "fallback",
+    }
+```
+
+### Multi-provider failover
+
+Failover differs from fallback chains in that it is about switching to an equivalent provider, not a degraded alternative. Your primary is OpenAI; your failover is Anthropic or a self-hosted model. The responses should be comparable in quality.
+
+```python
+from abc import ABC, abstractmethod
+import asyncio
+
+
+class LLMProvider(ABC):
+    @abstractmethod
+    async def complete(self, messages: list[dict]) -> str: ...
+
+    @abstractmethod
+    async def health_check(self) -> bool: ...
+
+
+class MultiProviderClient:
+    def __init__(self, providers: list[LLMProvider], timeout: float = 10.0):
+        self.providers = providers
+        self.timeout = timeout
+
+    async def complete_with_fallback(self, messages: list[dict]) -> str:
+        for provider in self.providers:
+            try:
+                return await asyncio.wait_for(
+                    provider.complete(messages),
+                    timeout=self.timeout
+                )
+            except (asyncio.TimeoutError, Exception) as exc:
+                continue  # circuit breaker would be applied here in production
+
+        raise RuntimeError("All providers failed")
+```
+
+### SLAs for AI features
+
+AI features need two kinds of SLOs: system SLOs (latency, availability) and quality SLOs (output quality thresholds). Document both before launch.
+
+| SLO type | Metric | Typical target |
+|---|---|---|
+| System | P95 response latency | < 3 seconds |
+| System | API availability | > 99.5% |
+| System | Error rate | < 1% over 5 min |
+| Quality | Pass rate (eval) | > 90% rolling 24h |
+| Quality | Toxicity rate | < 0.1% sampled |
+| Quality | Provider fallback rate | < 5% |
+
+When a quality SLO is breached, the response is a product decision: degraded mode, feature rollback, or user communication. Unlike system SLOs, quality SLO breaches require human judgment about whether the degradation is temporary or structural.
+
+## Working example
+
+A production-hardened request handler combining circuit breaker, fallback chain, and quality threshold check:
+
+```python
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def reliable_complete(
+    messages: list[dict],
+    chain: FallbackChain,
+    quality_threshold: float = 0.8,
+) -> dict:
+    try:
+        content, provider = await asyncio.wait_for(
+            chain.complete(messages),
+            timeout=30.0
+        )
+    except asyncio.TimeoutError:
+        logger.error("all_providers_timed_out")
+        return {"content": None, "error": "timeout", "degraded": True}
+    except RuntimeError as exc:
+        logger.error("all_providers_failed", extra={"error": str(exc)})
+        return {"content": None, "error": "provider_failure", "degraded": True}
+
+    # Optional quality gate — only apply for high-stakes features
+    quality_score = assess_quality(content)
+    if quality_score < quality_threshold:
+        logger.warning(
+            "quality_below_threshold",
+            extra={"provider": provider, "score": quality_score}
+        )
+        return {
+            "content": content,
+            "provider": provider,
+            "quality_score": quality_score,
+            "flagged_for_review": True,
+        }
+
+    return {"content": content, "provider": provider, "quality_score": quality_score}
+
+
+def assess_quality(content: str) -> float:
+    '''Placeholder — replace with real quality assessment.'''
+    if not content or len(content.strip()) < 10:
+        return 0.0
+    return 1.0
+```
+
+## Common mistakes
+
+**No circuit breaker, only retry.** Retrying a consistently failing provider adds latency and burns your retry budget. A circuit breaker stops retrying after the threshold and recovers gracefully.
+
+**Fallback to a much weaker model without user communication.** If your fallback is a significantly worse model, users notice. Either communicate the degradation or ensure the fallback quality is acceptable for your feature.
+
+**SLOs defined only for system metrics.** An AI feature with 100% uptime and consistently low-quality responses is failing its users. Quality SLOs are as important as availability SLOs.
+
+**Circuit breaker with no monitoring.** A circuit breaker that opens silently is invisible. Alert when a circuit opens so the on-call engineer knows a dependency is degraded.
+
+**No graceful degradation path.** Discovering your degradation strategy during an incident is too late. Test your fallback paths in staging, including the circuit-open state.
+
+## Try it yourself
+
+1. Implement the `CircuitBreaker` above and write a test that drives it through the full state cycle: closed -> open (after N failures) -> half-open (after recovery timeout) -> closed (after M successes).
+2. Build a `FallbackChain` with two mock providers where the first always raises an exception. Verify that the second provider's response is returned.
+3. Define SLOs for an AI feature you are building or have built. Write down the metric, target value, measurement window, and the response procedure when the SLO is breached.
+""",
+            },
         ],
     },
     {
@@ -11055,6 +12282,744 @@ def find_bottleneck(timings: dict[str, float]) -> str:
 """,
         "tags_json": ["python-ai", "profiling", "performance", "token-management"],
     },
+    {
+        "title": "Write a multi-stage Dockerfile for an LLM application",
+        "slug": "multi-stage-dockerfile-llm-app",
+        "category": "deployment",
+        "difficulty": "medium",
+        "prompt_md": """\
+Write a multi-stage Dockerfile for a Python LLM application that:
+
+1. Uses a builder stage to install Python dependencies from `requirements.txt`
+2. Copies only the installed packages into a slim runtime stage
+3. Runs as a non-root user named `appuser`
+4. Exposes port 8000
+5. Adds a HEALTHCHECK that probes `http://localhost:8000/health` using Python's `urllib.request`
+6. Sets the default command to start a uvicorn server at `src.main:app`
+
+Your answer should be a complete, valid Dockerfile. Include comments explaining each stage.
+
+**Bonus:** Add a `.dockerignore` snippet that excludes `__pycache__`, `.env` files, and any `.gguf` or `.bin` model weight files.
+""",
+        "starter_code": """\
+# Stage 1: dependency builder
+FROM python:3.11-slim AS builder
+# TODO: install dependencies into a prefix directory
+
+# Stage 2: runtime
+FROM python:3.11-slim AS runtime
+# TODO: copy installed packages, set up non-root user, healthcheck, cmd
+""",
+        "solution_code": """\
+# Stage 1: dependency builder — installs all Python packages
+FROM python:3.11-slim AS builder
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Stage 2: runtime — contains only what is needed to run
+FROM python:3.11-slim AS runtime
+
+# Copy installed packages from builder stage only
+COPY --from=builder /install /usr/local
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser
+
+WORKDIR /app
+COPY src/ ./src/
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Health check: probe the /health endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \\
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# .dockerignore additions:
+# __pycache__/
+# *.pyc
+# .env
+# *.gguf
+# *.bin
+# models/
+""",
+        "explanation_md": """\
+The multi-stage pattern is the key insight here. By installing packages in a `builder` stage with `--prefix=/install` and then `COPY --from=builder /install /usr/local` in the runtime stage, you exclude build tools, apt caches, and pip caches from the final image. This typically saves 200-500 MB.
+
+Running as a non-root user (`appuser`) removes a whole class of security exposure. LLM libraries sometimes write to home directories, so creating the user with `--create-home` ensures those paths exist.
+
+The `HEALTHCHECK` uses Python's stdlib `urllib.request` to avoid needing `curl` in the image. If the health endpoint does not respond, Docker marks the container unhealthy and orchestration systems can restart it or stop routing traffic to it.
+
+In production, build with `docker build --target runtime -t myapp:latest .` to ensure only the runtime stage is tagged.
+""",
+        "tags_json": ["deployment", "docker", "containerization", "llm-ops"],
+    },
+    {
+        "title": "Build a request queue with priority routing",
+        "slug": "request-queue-priority-routing",
+        "category": "deployment",
+        "difficulty": "medium",
+        "prompt_md": """\
+Implement an in-memory `PriorityInferenceQueue` that:
+
+1. Accepts inference requests with a `priority` field: `"high"`, `"normal"`, or `"low"`
+2. Always dequeues high-priority requests before normal, and normal before low
+3. Returns `None` from `dequeue()` if the queue is empty
+4. Exposes a `depth()` method returning a dict with counts per priority level and a `total` key
+5. Is safe for use with `asyncio` (use `asyncio.Queue` or equivalent, not threading primitives)
+
+```python
+import asyncio
+from dataclasses import dataclass
+
+@dataclass
+class InferenceRequest:
+    request_id: str
+    messages: list[dict]
+    priority: str  # "high", "normal", "low"
+
+class PriorityInferenceQueue:
+    def __init__(self):
+        # TODO: initialize separate queues per priority level
+        pass
+
+    async def enqueue(self, request: InferenceRequest) -> None:
+        # TODO: add to the correct priority queue
+        raise NotImplementedError
+
+    async def dequeue(self) -> InferenceRequest | None:
+        # TODO: return highest-priority item, or None if empty
+        raise NotImplementedError
+
+    def depth(self) -> dict:
+        # TODO: return {"high": n, "normal": n, "low": n, "total": n}
+        raise NotImplementedError
+```
+""",
+        "starter_code": """\
+import asyncio
+from dataclasses import dataclass
+
+
+@dataclass
+class InferenceRequest:
+    request_id: str
+    messages: list[dict]
+    priority: str  # "high", "normal", "low"
+
+
+class PriorityInferenceQueue:
+    def __init__(self):
+        # TODO: initialize separate queues per priority level
+        pass
+
+    async def enqueue(self, request: InferenceRequest) -> None:
+        raise NotImplementedError
+
+    async def dequeue(self) -> InferenceRequest | None:
+        raise NotImplementedError
+
+    def depth(self) -> dict:
+        raise NotImplementedError
+""",
+        "solution_code": """\
+import asyncio
+from dataclasses import dataclass
+
+
+@dataclass
+class InferenceRequest:
+    request_id: str
+    messages: list[dict]
+    priority: str  # "high", "normal", "low"
+
+
+class PriorityInferenceQueue:
+    PRIORITY_ORDER = ["high", "normal", "low"]
+
+    def __init__(self):
+        self._queues = {level: asyncio.Queue() for level in self.PRIORITY_ORDER}
+
+    async def enqueue(self, request: InferenceRequest) -> None:
+        level = request.priority if request.priority in self._queues else "normal"
+        await self._queues[level].put(request)
+
+    async def dequeue(self) -> InferenceRequest | None:
+        for level in self.PRIORITY_ORDER:
+            if not self._queues[level].empty():
+                return self._queues[level].get_nowait()
+        return None
+
+    def depth(self) -> dict:
+        counts = {level: self._queues[level].qsize() for level in self.PRIORITY_ORDER}
+        counts["total"] = sum(counts.values())
+        return counts
+""",
+        "explanation_md": """\
+The key is maintaining separate `asyncio.Queue` objects per priority level rather than trying to sort a single queue. `dequeue()` iterates the priority levels in order and uses `get_nowait()` (non-blocking) on the first non-empty queue.
+
+This pattern is used in production inference services to ensure paid or latency-sensitive requests are not held behind a large batch of background jobs. In a Redis-backed production version, you would use `BLPOP` with a key list ordered by priority — Redis's `BLPOP` checks each key in order and returns from the first non-empty one.
+
+The `asyncio.Queue` approach (rather than threading queues) is important because LLM inference workers are typically `async` functions. Mixing threading and asyncio primitives causes subtle deadlocks.
+""",
+        "tags_json": ["deployment", "queuing", "async", "inference-serving"],
+    },
+    {
+        "title": "Implement a semantic cache for LLM responses",
+        "slug": "semantic-cache-llm-responses",
+        "category": "deployment",
+        "difficulty": "medium",
+        "prompt_md": """\
+Implement a `SemanticCache` class that caches LLM responses keyed by semantic similarity of the query embedding:
+
+1. `set(query: str, embedding: list[float], response: str) -> None` — store a response
+2. `get(embedding: list[float], threshold: float = 0.92) -> str | None` — return the cached response for the most similar query above the threshold, or `None`
+3. `hit_rate() -> float` — return the fraction of `get()` calls that returned a cached result (0.0 if no calls yet)
+4. Use cosine similarity for embedding comparison
+5. The cache should be in-memory (no external dependencies)
+
+Write tests that verify:
+- A query with high similarity (> threshold) returns the cached response
+- A query with low similarity (< threshold) returns `None`
+- `hit_rate()` returns the correct fraction after a mix of hits and misses
+""",
+        "starter_code": """\
+import math
+
+
+class SemanticCache:
+    def __init__(self):
+        # TODO: initialize storage
+        pass
+
+    def set(self, query: str, embedding: list[float], response: str) -> None:
+        raise NotImplementedError
+
+    def get(self, embedding: list[float], threshold: float = 0.92) -> str | None:
+        raise NotImplementedError
+
+    def hit_rate(self) -> float:
+        raise NotImplementedError
+
+    @staticmethod
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
+        # TODO: implement cosine similarity
+        raise NotImplementedError
+""",
+        "solution_code": """\
+import math
+from dataclasses import dataclass
+
+
+@dataclass
+class CacheEntry:
+    query: str
+    embedding: list[float]
+    response: str
+
+
+class SemanticCache:
+    def __init__(self):
+        self._entries: list[CacheEntry] = []
+        self._get_calls = 0
+        self._hit_calls = 0
+
+    def set(self, query: str, embedding: list[float], response: str) -> None:
+        self._entries.append(CacheEntry(query=query, embedding=embedding, response=response))
+
+    def get(self, embedding: list[float], threshold: float = 0.92) -> str | None:
+        self._get_calls += 1
+        best_score = 0.0
+        best_entry = None
+        for entry in self._entries:
+            score = self._cosine_similarity(embedding, entry.embedding)
+            if score > best_score:
+                best_score = score
+                best_entry = entry
+        if best_score >= threshold and best_entry is not None:
+            self._hit_calls += 1
+            return best_entry.response
+        return None
+
+    def hit_rate(self) -> float:
+        if self._get_calls == 0:
+            return 0.0
+        return self._hit_calls / self._get_calls
+
+    @staticmethod
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x * x for x in a))
+        norm_b = math.sqrt(sum(y * y for y in b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
+
+# Tests
+def test_semantic_cache():
+    cache = SemanticCache()
+    embedding_a = [1.0, 0.0, 0.0]
+    embedding_similar = [0.99, 0.14, 0.0]  # cosine ~0.99
+    embedding_different = [0.0, 1.0, 0.0]  # cosine = 0.0
+
+    cache.set("What is your return policy?", embedding_a, "You can return items within 30 days.")
+
+    # High similarity — should hit
+    result = cache.get(embedding_similar, threshold=0.92)
+    assert result == "You can return items within 30 days.", f"Expected hit, got: {result}"
+
+    # Low similarity — should miss
+    result = cache.get(embedding_different, threshold=0.92)
+    assert result is None, f"Expected miss, got: {result}"
+
+    # hit_rate: 1 hit out of 2 calls = 0.5
+    assert abs(cache.hit_rate() - 0.5) < 0.01, f"Expected 0.5, got: {cache.hit_rate()}"
+    print("All tests passed.")
+
+test_semantic_cache()
+""",
+        "explanation_md": """\
+Cosine similarity measures the angle between two vectors, ignoring magnitude. Two embeddings from the same embedding model have magnitude ~1, so the dot product alone approximates cosine similarity — but computing it explicitly handles edge cases.
+
+The threshold of 0.92 is appropriate for high-quality embeddings (text-embedding-3-small or similar). Lower-quality embeddings may require a lower threshold (0.85-0.88) to avoid false misses on paraphrased questions.
+
+In production, this in-memory cache would be replaced with a vector store (FAISS, pgvector, or Redis with vector search). The interface stays the same — the backing store is the only difference. This is why the cache interface is worth getting right in isolation before adding infrastructure.
+
+The `hit_rate()` metric is essential for evaluating whether your threshold is calibrated correctly. A hit rate below 20% suggests the threshold is too high or embeddings are not clustering well. A hit rate above 80% may indicate you are serving stale cached answers too aggressively.
+""",
+        "tags_json": ["deployment", "caching", "embeddings", "cost-optimization"],
+    },
+    {
+        "title": "Create an eval gate for CI/CD pipelines",
+        "slug": "eval-gate-cicd-pipeline",
+        "category": "deployment",
+        "difficulty": "medium",
+        "prompt_md": """\
+Implement a `EvalGate` class that can be used as a quality gate in a CI/CD pipeline:
+
+1. `run(cases: list[dict]) -> EvalGateResult` — evaluate all cases and return a result object
+2. Each case has: `id: str`, `input: str`, `expected: str`, `actual: str`
+3. A case passes if the actual output contains all key terms from the expected output (use a simple term overlap check: at least 60% of lowercased words in `expected` that are longer than 3 characters must appear in `actual`)
+4. `EvalGateResult` should have: `passed: bool`, `pass_rate: float`, `failed_cases: list[str]` (list of case IDs), `total: int`
+5. `EvalGate` takes a `threshold: float` (default 0.85) in its constructor — `passed` is True if `pass_rate >= threshold`
+6. Add a `to_ci_report() -> str` method on `EvalGateResult` that returns a human-readable summary suitable for CI log output
+
+Write a test that demonstrates a gate passing with 9/10 cases and blocking with 8/10 cases (threshold=0.85).
+""",
+        "starter_code": """\
+from dataclasses import dataclass, field
+
+
+@dataclass
+class EvalGateResult:
+    passed: bool
+    pass_rate: float
+    failed_cases: list[str]
+    total: int
+
+    def to_ci_report(self) -> str:
+        # TODO: return human-readable CI summary
+        raise NotImplementedError
+
+
+class EvalGate:
+    def __init__(self, threshold: float = 0.85):
+        self.threshold = threshold
+
+    def _case_passes(self, expected: str, actual: str) -> bool:
+        # TODO: check key term overlap
+        raise NotImplementedError
+
+    def run(self, cases: list[dict]) -> EvalGateResult:
+        # TODO: evaluate cases, return EvalGateResult
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from dataclasses import dataclass, field
+
+
+@dataclass
+class EvalGateResult:
+    passed: bool
+    pass_rate: float
+    failed_cases: list[str]
+    total: int
+
+    def to_ci_report(self) -> str:
+        status = "PASSED" if self.passed else "BLOCKED"
+        lines = [
+            f"Eval Gate: {status}",
+            f"Pass rate: {self.pass_rate:.1%} ({self.total - len(self.failed_cases)}/{self.total})",
+        ]
+        if self.failed_cases:
+            lines.append(f"Failed cases: {', '.join(self.failed_cases)}")
+        return "\\n".join(lines)
+
+
+class EvalGate:
+    def __init__(self, threshold: float = 0.85):
+        self.threshold = threshold
+
+    def _case_passes(self, expected: str, actual: str) -> bool:
+        key_terms = [w.lower() for w in expected.split() if len(w) > 3]
+        if not key_terms:
+            return True
+        actual_lower = actual.lower()
+        matches = sum(1 for term in key_terms if term in actual_lower)
+        return matches / len(key_terms) >= 0.60
+
+    def run(self, cases: list[dict]) -> EvalGateResult:
+        failed = []
+        for case in cases:
+            if not self._case_passes(case["expected"], case["actual"]):
+                failed.append(case["id"])
+        total = len(cases)
+        pass_rate = (total - len(failed)) / total if total else 0.0
+        return EvalGateResult(
+            passed=pass_rate >= self.threshold,
+            pass_rate=pass_rate,
+            failed_cases=failed,
+            total=total,
+        )
+
+
+# Tests
+def make_cases(n_pass: int, n_fail: int) -> list[dict]:
+    cases = []
+    for i in range(n_pass):
+        cases.append({
+            "id": f"pass-{i}",
+            "input": "test",
+            "expected": "The capital of France is Paris",
+            "actual": "Paris is the capital city of France",
+        })
+    for i in range(n_fail):
+        cases.append({
+            "id": f"fail-{i}",
+            "input": "test",
+            "expected": "The capital of France is Paris",
+            "actual": "I don't know the answer",
+        })
+    return cases
+
+gate = EvalGate(threshold=0.85)
+
+# 9/10 passes -> pass_rate = 0.9 >= 0.85 -> gate passes
+result_pass = gate.run(make_cases(9, 1))
+assert result_pass.passed, f"Expected gate to pass: {result_pass.to_ci_report()}"
+assert abs(result_pass.pass_rate - 0.9) < 0.01
+
+# 8/10 passes -> pass_rate = 0.8 < 0.85 -> gate blocks
+result_block = gate.run(make_cases(8, 2))
+assert not result_block.passed, f"Expected gate to block: {result_block.to_ci_report()}"
+assert abs(result_block.pass_rate - 0.8) < 0.01
+
+print(result_pass.to_ci_report())
+print()
+print(result_block.to_ci_report())
+""",
+        "explanation_md": """\
+The term-overlap check is intentionally simple — production eval gates use embedding similarity, LLM-as-judge scoring, or exact-match against structured outputs depending on the task type. The architecture (collect cases, score each, compute pass rate, compare to threshold, return structured result) is identical regardless of the scoring method used.
+
+The `to_ci_report()` method matters because CI output is the primary debugging interface during a pipeline failure. Engineers need to see immediately which cases failed and why, without digging into logs.
+
+The threshold should be calibrated against your quality baseline. Start at 0.85 (85% of cases must pass) and raise it as your golden test suite matures. A threshold of 1.0 means any regression blocks the merge — only appropriate for very stable features.
+
+In a real pipeline, the eval gate script exits with code 0 on pass and code 1 on block. CI treats a non-zero exit code as a failure that blocks the merge.
+""",
+        "tags_json": ["deployment", "evaluation", "ci-cd", "quality-gates"],
+    },
+    {
+        "title": "Build a multi-provider failover chain",
+        "slug": "multi-provider-failover-chain",
+        "category": "deployment",
+        "difficulty": "medium",
+        "prompt_md": """\
+Implement a `ProviderFailoverChain` that:
+
+1. Takes a list of provider callables (async functions with signature `async (messages: list[dict]) -> str`)
+2. `complete(messages: list[dict]) -> tuple[str, int]` — tries providers in order, returns `(response, provider_index)` for the first one that succeeds
+3. Skips providers whose circuit breaker is open (use a simple in-memory circuit breaker: open after 3 consecutive failures, auto-reset after 60 seconds)
+4. Raises `RuntimeError("all providers exhausted")` if every provider fails or has an open circuit
+5. Tracks which provider was last used and how many times each provider has been called
+
+Demonstrate with a test where provider 0 always raises an exception, provider 1 succeeds.
+
+```python
+import asyncio
+import time
+
+async def provider_always_fails(messages):
+    raise ConnectionError("Provider 0 is down")
+
+async def provider_always_succeeds(messages):
+    return "Hello from provider 1"
+```
+""",
+        "starter_code": """\
+import asyncio
+import time
+from dataclasses import dataclass, field
+
+
+@dataclass
+class SimpleCircuitBreaker:
+    failure_threshold: int = 3
+    reset_after_seconds: float = 60.0
+    _failures: int = field(default=0, init=False)
+    _opened_at: float | None = field(default=None, init=False)
+
+    @property
+    def is_open(self) -> bool:
+        # TODO: return True if open and cooldown has not elapsed
+        raise NotImplementedError
+
+    def record_failure(self) -> None:
+        # TODO: increment failure count and open if threshold reached
+        raise NotImplementedError
+
+    def record_success(self) -> None:
+        # TODO: reset state on success
+        raise NotImplementedError
+
+
+class ProviderFailoverChain:
+    def __init__(self, providers: list):
+        # TODO: initialize breakers and call counts
+        raise NotImplementedError
+
+    async def complete(self, messages: list[dict]) -> tuple[str, int]:
+        # TODO: try providers in order, respecting circuit breakers
+        raise NotImplementedError
+""",
+        "solution_code": """\
+import asyncio
+import time
+from dataclasses import dataclass, field
+
+
+@dataclass
+class SimpleCircuitBreaker:
+    failure_threshold: int = 3
+    reset_after_seconds: float = 60.0
+    _failures: int = field(default=0, init=False)
+    _opened_at: float | None = field(default=None, init=False)
+
+    @property
+    def is_open(self) -> bool:
+        if self._opened_at is None:
+            return False
+        if time.monotonic() - self._opened_at >= self.reset_after_seconds:
+            # Auto-reset after cooldown
+            self._failures = 0
+            self._opened_at = None
+            return False
+        return self._failures >= self.failure_threshold
+
+    def record_failure(self) -> None:
+        self._failures += 1
+        if self._failures >= self.failure_threshold:
+            self._opened_at = time.monotonic()
+
+    def record_success(self) -> None:
+        self._failures = 0
+        self._opened_at = None
+
+
+class ProviderFailoverChain:
+    def __init__(self, providers: list):
+        self.providers = providers
+        self.breakers = [SimpleCircuitBreaker() for _ in providers]
+        self.call_counts = [0] * len(providers)
+        self.last_used_index: int | None = None
+
+    async def complete(self, messages: list[dict]) -> tuple[str, int]:
+        last_error = None
+        for i, provider in enumerate(self.providers):
+            if self.breakers[i].is_open:
+                continue
+            try:
+                self.call_counts[i] += 1
+                result = await provider(messages)
+                self.breakers[i].record_success()
+                self.last_used_index = i
+                return result, i
+            except Exception as exc:
+                self.breakers[i].record_failure()
+                last_error = exc
+        raise RuntimeError(f"all providers exhausted. last error: {last_error}")
+
+
+# Test
+async def test_failover():
+    async def always_fails(messages):
+        raise ConnectionError("Provider 0 is down")
+
+    async def always_succeeds(messages):
+        return "Hello from provider 1"
+
+    chain = ProviderFailoverChain([always_fails, always_succeeds])
+    response, index = await chain.complete([{"role": "user", "content": "hi"}])
+    assert index == 1, f"Expected provider 1, got {index}"
+    assert response == "Hello from provider 1"
+    assert chain.call_counts[0] == 1  # provider 0 was tried and failed
+    assert chain.call_counts[1] == 1  # provider 1 succeeded
+    print(f"Used provider {index}: '{response}'")
+    print(f"Call counts: {chain.call_counts}")
+    print("Test passed.")
+
+asyncio.run(test_failover())
+""",
+        "explanation_md": """\
+The key design principle is that the chain does not give up on a provider permanently — it gives up temporarily. The circuit breaker auto-resets after 60 seconds, allowing recovery checks. This is what makes the system self-healing rather than requiring manual intervention.
+
+The `call_counts` tracking is important for operational visibility. In production, these counters feed into dashboards that show provider health over time. A sudden spike in provider 1 usage indicates that provider 0 has been degraded.
+
+Note that the chain logs nothing in this implementation — production versions add structured log events for each provider attempt and circuit state change. These logs are essential for diagnosing failover patterns during incidents.
+
+This pattern is directly applicable to multi-provider AI setups: OpenAI as primary, Anthropic as fallback, a self-hosted model as tertiary. The chain handles the routing automatically.
+""",
+        "tags_json": ["deployment", "reliability", "circuit-breaker", "failover"],
+    },
+    {
+        "title": "Implement a cost-aware model router",
+        "slug": "cost-aware-model-router",
+        "category": "deployment",
+        "difficulty": "medium",
+        "prompt_md": """\
+Implement a `CostAwareRouter` that selects the cheapest model capable of handling a request:
+
+1. Takes a list of `ModelOption` objects: `name: str`, `cost_per_1k_tokens: float`, `max_context_tokens: int`, `supports_json_mode: bool`
+2. `route(prompt_tokens: int, requires_json: bool = False) -> ModelOption` — returns the cheapest model that:
+   - Has `max_context_tokens >= prompt_tokens + 512` (leave headroom for completion)
+   - If `requires_json=True`, only consider models where `supports_json_mode=True`
+3. Raises `ValueError` if no model can handle the request
+4. `estimate_cost(model: ModelOption, input_tokens: int, output_tokens: int) -> float` — static method returning estimated cost in USD
+5. Track routing decisions and expose `routing_stats() -> dict` with counts per model name
+
+Test with three models: a cheap small model, a mid-tier model, and an expensive large model. Verify that simple requests route to the cheap model and long-context requests route to the only model that can handle them.
+""",
+        "starter_code": """\
+from dataclasses import dataclass, field
+from collections import defaultdict
+
+
+@dataclass
+class ModelOption:
+    name: str
+    cost_per_1k_tokens: float
+    max_context_tokens: int
+    supports_json_mode: bool = True
+
+
+class CostAwareRouter:
+    def __init__(self, models: list[ModelOption]):
+        self.models = models
+        # TODO: initialize routing stats
+
+    def route(self, prompt_tokens: int, requires_json: bool = False) -> ModelOption:
+        # TODO: return cheapest capable model
+        raise NotImplementedError
+
+    @staticmethod
+    def estimate_cost(model: ModelOption, input_tokens: int, output_tokens: int) -> float:
+        # TODO: compute cost using model.cost_per_1k_tokens
+        raise NotImplementedError
+
+    def routing_stats(self) -> dict:
+        # TODO: return call counts per model name
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from dataclasses import dataclass, field
+from collections import defaultdict
+
+
+@dataclass
+class ModelOption:
+    name: str
+    cost_per_1k_tokens: float  # combined input+output rate for simplicity
+    max_context_tokens: int
+    supports_json_mode: bool = True
+
+
+class CostAwareRouter:
+    COMPLETION_HEADROOM = 512
+
+    def __init__(self, models: list[ModelOption]):
+        self.models = sorted(models, key=lambda m: m.cost_per_1k_tokens)
+        self._stats: dict[str, int] = defaultdict(int)
+
+    def route(self, prompt_tokens: int, requires_json: bool = False) -> ModelOption:
+        required_context = prompt_tokens + self.COMPLETION_HEADROOM
+        candidates = [
+            m for m in self.models
+            if m.max_context_tokens >= required_context
+            and (not requires_json or m.supports_json_mode)
+        ]
+        if not candidates:
+            raise ValueError(
+                f"No model can handle {prompt_tokens} tokens "
+                f"(requires_json={requires_json})"
+            )
+        selected = candidates[0]  # cheapest first after sort
+        self._stats[selected.name] += 1
+        return selected
+
+    @staticmethod
+    def estimate_cost(model: ModelOption, input_tokens: int, output_tokens: int) -> float:
+        total_tokens = input_tokens + output_tokens
+        return total_tokens / 1000 * model.cost_per_1k_tokens
+
+    def routing_stats(self) -> dict:
+        return dict(self._stats)
+
+
+# Tests
+models = [
+    ModelOption("gpt-4o-mini", cost_per_1k_tokens=0.00015, max_context_tokens=8192, supports_json_mode=True),
+    ModelOption("gpt-4o", cost_per_1k_tokens=0.0025, max_context_tokens=128000, supports_json_mode=True),
+    ModelOption("claude-haiku", cost_per_1k_tokens=0.0004, max_context_tokens=16000, supports_json_mode=False),
+]
+
+router = CostAwareRouter(models)
+
+# Short request should route to cheapest (gpt-4o-mini)
+selected = router.route(prompt_tokens=500)
+assert selected.name == "gpt-4o-mini", f"Expected gpt-4o-mini, got {selected.name}"
+
+# Long request that only gpt-4o can handle
+selected = router.route(prompt_tokens=20000)
+assert selected.name == "gpt-4o", f"Expected gpt-4o, got {selected.name}"
+
+# JSON mode required — claude-haiku should be excluded
+selected = router.route(prompt_tokens=500, requires_json=True)
+assert selected.name == "gpt-4o-mini", f"Expected gpt-4o-mini for json, got {selected.name}"
+
+# Cost estimate
+cost = CostAwareRouter.estimate_cost(models[0], input_tokens=1000, output_tokens=500)
+assert abs(cost - 0.000225) < 0.000001, f"Unexpected cost: {cost}"
+
+stats = router.routing_stats()
+print(f"Routing stats: {stats}")
+print(f"Cost estimate for gpt-4o-mini (1500 tokens): ${cost:.6f}")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The router sorts models by cost once at initialization, so `route()` can return `candidates[0]` (cheapest) without re-sorting on every call. This is a common optimization when the model list is static.
+
+The 512-token completion headroom prevents routing to a model that technically fits the prompt but has no room for output. In practice, use your P95 output token length as the headroom value.
+
+The `supports_json_mode` filter is important in production. Some endpoints claim JSON support but silently return free-form text, causing downstream parsing failures. Track this as a capability flag and route accordingly.
+
+The routing stats enable cost attribution by model. In production, enrich this with actual token counts and dollar amounts so you can answer "how much did gpt-4o cost this week vs gpt-4o-mini?"
+""",
+        "tags_json": ["deployment", "cost-optimization", "model-routing", "llm-ops"],
+    },
 ]
 
 EXERCISE_DRILLS = [
@@ -14334,6 +16299,294 @@ Before trusting LLM-as-judge scores in production, calibrate your judge against 
 Deterministic metrics are precise, fast, and trustworthy for verifiable tasks. LLM-as-judge scales to nuanced quality assessment where human annotation would be required. The skill is knowing which failure modes each approach catches, combining them in a layered pipeline, and always calibrating judge-based metrics against human labels before trusting them to gate production deployments.
 """,
         "tags_json": ["evaluation", "llm-judge", "metrics", "testing"],
+    },
+    {
+        "category": "deployment",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How would you deploy an LLM-powered feature that needs to handle 1000 requests per minute?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see whether you understand the gap between "it works on my machine" and production throughput. A naive answer describes deploying one container. A strong answer decomposes the problem: request ingestion, inference serving, scaling mechanisms, and where the real bottlenecks are.
+
+## Start with back-of-envelope math
+
+1000 RPM = ~17 requests per second. If your P50 LLM latency is 1.5 seconds and each call is synchronous, a single worker can process roughly 0.67 requests per second. You need at least 25 concurrent workers just for average load, with headroom for spikes.
+
+But this framing assumes you are making individual API calls. The better approach is to think about the full architecture:
+
+## Layer 1: request ingestion
+
+Accept requests through a fast HTTP API (FastAPI or similar). Do not block on the LLM call. Instead, push the request into a queue and return a `202 Accepted` with a `job_id`. The client polls or subscribes to a result channel.
+
+This decouples your HTTP API from inference latency. Your API can absorb bursts well beyond 1000 RPM as long as the queue can buffer them.
+
+```python
+@app.post("/complete", status_code=202)
+async def submit_request(body: CompletionRequest) -> dict:
+    job_id = str(uuid4())
+    await queue.enqueue({"job_id": job_id, "messages": body.messages})
+    return {"job_id": job_id, "status_url": f"/jobs/{job_id}"}
+```
+
+## Layer 2: inference workers
+
+Run a pool of async workers that dequeue requests and call the LLM. Each worker is non-blocking and can handle multiple in-flight requests concurrently with `asyncio.gather`.
+
+For a managed API (OpenAI, Anthropic): rate limits are your primary constraint. At gpt-4o-mini's rate limits, 1000 RPM is achievable with careful rate limit management — use a semaphore to stay within your TPM and RPM allowances.
+
+For self-hosted inference (vLLM, TGI): the model serves requests through continuous batching. A single A100 running a 7B model can handle 50–100 RPM with reasonable latency. Scale horizontally by running multiple replicas behind a load balancer.
+
+## Layer 3: caching
+
+Exact-match caching eliminates repeat requests. Semantic caching catches paraphrases. In a customer support or FAQ use case, cache hit rates of 30–50% are common, effectively doubling your capacity.
+
+## Layer 4: model routing
+
+Not every request needs your most capable (and slowest) model. Route simple classification and short-answer requests to a cheap, fast model. Reserve expensive models for complex generation. This both reduces cost and improves throughput.
+
+## Monitoring
+
+Track queue depth, worker utilization, P95 latency, and provider error rate. Alert when queue depth exceeds a threshold that implies growing backlog. Auto-scale workers based on queue depth rather than CPU — AI workloads are I/O bound.
+
+## Interview takeaway
+
+The architecture is: fast HTTP ingestion -> durable queue -> async worker pool -> model serving layer -> result store. Scaling happens at each layer independently. Caching and routing reduce load before it reaches the model. This answer shows systems thinking, not just "add more replicas."
+""",
+        "tags_json": ["deployment", "scaling", "inference-serving", "throughput"],
+    },
+    {
+        "category": "deployment",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "Explain your strategy for managing LLM API costs in a production application.",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you understand the cost structure of LLM APIs and have systematic controls in place — not that you just try to use cheaper models everywhere. Strong candidates talk about visibility, enforcement, and optimization as separate concerns.
+
+## Start with visibility
+
+You cannot manage what you cannot see. Before optimizing costs, instrument every LLM call to capture:
+
+- Input and output token counts
+- Model used
+- Feature or endpoint that triggered the call
+- User tier (if applicable)
+- Cost in dollars (input_tokens * input_rate + output_tokens * output_rate)
+
+Store these events and build a daily cost report grouped by feature and model. The first time you do this, you will almost always find one feature generating 60%+ of your costs.
+
+## Token budget enforcement
+
+The most common cost runaway is unbounded context. Users paste large documents; retrieval returns many chunks; conversation history grows without pruning. Enforce a token budget at the prompt construction layer:
+
+```python
+def build_prompt(system: str, history: list, context_chunks: list, max_tokens: int = 4000) -> str:
+    # Fill in order of importance, stop when budget is reached
+    ...
+```
+
+Set hard limits per request. Never let raw user input flow directly into a prompt without size checking.
+
+## Caching layers
+
+Exact-match caching is free latency and cost savings for identical requests. For features with repetitive queries (FAQ, documentation lookup), cache hit rates of 30-60% are common. Semantic caching extends this to paraphrased versions of the same question.
+
+Cached responses have zero cost and lower latency than API calls. Implement caching before optimization.
+
+## Model routing
+
+Classify request complexity and route to the cheapest capable model:
+
+- Simple lookups and short answers: mini/haiku tier ($0.00015-0.0004/1k tokens)
+- Summarization, extraction, structured output: same tier with better prompts
+- Complex reasoning, code generation, long-form writing: full tier ($0.002-0.015/1k)
+
+The cost difference between tiers is 10-50x. Even routing 50% of simple requests to a cheaper model cuts overall costs significantly.
+
+## Spend alerts and budgets
+
+Set a monthly budget alert in your provider's billing console. Alert at 80% of budget so you have time to respond before hitting the limit. For per-user features, implement per-user daily token budgets to prevent one user from consuming disproportionate resources.
+
+## Prompt efficiency
+
+Long system prompts are repeated on every request. A 500-token system prompt on 10,000 daily requests costs 5M tokens per day in system prompt tokens alone. Use prompt caching where providers support it (Anthropic and OpenAI both support prompt caching for repeated system prompts).
+
+## Interview takeaway
+
+The sequence is: visibility first (you need data), then enforcement (token budgets and alerts), then optimization (caching, routing, prompt efficiency). Jumping to optimization without visibility is guesswork.
+""",
+        "tags_json": ["deployment", "cost-management", "token-budgets", "caching"],
+    },
+    {
+        "category": "deployment",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you implement graceful degradation when your primary LLM provider goes down?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you have thought about failure modes before they happen — that you have a plan, not just a hope. Strong answers describe layered fallback strategies and emphasize that degradation should be a deliberate product decision, not an accident.
+
+## The degradation hierarchy
+
+Design your system with explicit fallback levels, ordered from most to least capable:
+
+1. **Primary provider** (e.g., OpenAI gpt-4o): full-quality AI response
+2. **Secondary provider** (e.g., Anthropic Claude): equivalent quality, different vendor
+3. **Cheaper/faster model** (e.g., gpt-4o-mini or a self-hosted model): reduced quality but similar capability
+4. **Cached responses**: serve the most relevant cached answer for similar queries
+5. **Template responses**: "Our AI assistant is temporarily unavailable. Here is the relevant documentation link."
+6. **Feature disabled**: hide the AI feature entirely with a clear message
+
+The key insight is that levels 4–6 keep the product functional in reduced-capability mode. Users can still accomplish their goal, even if the AI cannot help.
+
+## Circuit breakers
+
+A circuit breaker detects consecutive failures and stops sending requests to the failing provider, immediately routing to the fallback instead of accumulating timeouts:
+
+```python
+if primary_circuit_breaker.is_open:
+    return await secondary_provider.complete(messages)
+result = await primary_provider.complete(messages)
+```
+
+Without a circuit breaker, every request to a failed provider adds timeout latency (10-30 seconds) before falling back. This makes a provider outage cascade into a UX disaster.
+
+## Implementation pattern
+
+```python
+async def complete_with_fallback(messages):
+    for provider, label in [(primary, "primary"), (secondary, "secondary")]:
+        if provider.circuit_breaker.is_open:
+            continue
+        try:
+            result = await asyncio.wait_for(provider.complete(messages), timeout=10.0)
+            provider.circuit_breaker.record_success()
+            return {"content": result, "source": label}
+        except Exception:
+            provider.circuit_breaker.record_failure()
+    # All AI providers failed — serve cached or template response
+    cached = semantic_cache.get_best_match(messages[-1]["content"])
+    if cached:
+        return {"content": cached.content, "source": "cache", "degraded": True}
+    return {"content": FALLBACK_MESSAGE, "source": "template", "degraded": True}
+```
+
+## Communicating degradation to users
+
+When serving a degraded response, communicate it honestly but gently. "Our AI assistant is experiencing a brief interruption. Here is our documentation on this topic." is far better than serving a confidently wrong response or a cryptic error.
+
+Log the degradation event. Track degraded response rates. Set an alert when degraded responses exceed 2% of traffic.
+
+## Testing your fallback paths
+
+Fallback paths that are never tested will fail during real incidents. Test by:
+- Mocking the primary provider to raise exceptions in staging
+- Using a feature flag to force secondary-only traffic temporarily
+- Running chaos engineering tests that cut provider connectivity
+
+## Interview takeaway
+
+Graceful degradation is a design decision made before an incident, not a recovery action during one. The circuit breaker detects failure fast. The fallback chain routes to alternatives. The degradation levels define what "good enough" looks like at each tier. This is the same defensive design you would apply to any external dependency.
+""",
+        "tags_json": ["deployment", "reliability", "circuit-breaker", "graceful-degradation"],
+    },
+    {
+        "category": "deployment",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "Walk through how you'd set up CI/CD for an AI feature with prompt-based logic.",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see whether you treat prompts as engineering artifacts with version control, testing, and deployment discipline — or as magic strings you edit in a text file and hope for the best. Strong candidates treat prompts with the same rigor they apply to API contracts.
+
+## Step 1: prompts are files, not strings
+
+Store prompts as versioned text files in your repository:
+
+```
+prompts/
+  summarize_v1.txt      # previous stable version
+  summarize_v2.txt      # current production version
+```
+
+Load the active version from environment configuration:
+
+```python
+def load_prompt(name: str) -> str:
+    version = os.environ.get(f"PROMPT_VERSION_{name.upper()}", "v2")
+    return (Path("prompts") / f"{name}_{version}.txt").read_text().strip()
+```
+
+Now a prompt change creates a diff in version control with a reviewer, a history, and a rollback path.
+
+## Step 2: golden test cases
+
+Maintain a JSONL file of golden test cases: input, expected output, and a human-approved baseline. These are your regression tests for prompt changes.
+
+```json
+{"id": "summarize-01", "input": "...", "expected": "...", "approved_at": "2026-03-01"}
+```
+
+When you change a prompt, some golden tests may produce different (but better) outputs. Run a script that shows the diffs. A human reviewer approves the new outputs, updating the golden file. This creates a deliberate review step instead of silent regression.
+
+## Step 3: eval gate in CI
+
+Add a CI job that runs a subset of your evaluation suite (50–100 representative cases) using `temperature=0` for determinism:
+
+```yaml
+- name: Run eval gate
+  run: python scripts/eval_gate.py --threshold 0.85
+  env:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    PROMPT_VERSION_SUMMARIZE: ${{ env.CANDIDATE_VERSION }}
+```
+
+The gate exits with code 1 (blocking the merge) if pass rate drops below threshold.
+
+## Step 4: canary deployment for prompts
+
+Do not deploy prompt changes to 100% of traffic at once. Route a small percentage of traffic to the new prompt version:
+
+```python
+def get_prompt_version(user_id: str) -> str:
+    canary_pct = float(os.environ.get("PROMPT_CANARY_PCT", "0"))
+    if canary_pct > 0 and (hash(user_id) % 100) / 100 < canary_pct:
+        return os.environ.get("PROMPT_CANARY_VERSION", "v2")
+    return os.environ.get("PROMPT_VERSION", "v2")
+```
+
+Monitor quality metrics for the canary group. If quality holds after N requests, promote the canary version to 100%.
+
+## Step 5: deployment via environment variable
+
+Promoting a new prompt version is an environment variable change, not a code deployment. This means:
+- Instant rollback: change the variable back
+- No service restart required (if loaded fresh per request)
+- Decoupled from code release cycle
+
+## The full pipeline
+
+```
+Code change or prompt file change
+  -> Unit tests (fast, catch code regressions)
+  -> Eval gate (50-100 cases, temperature=0, < 5 minutes)
+  -> Merge to main
+  -> Deploy with PROMPT_CANARY_PCT=5
+  -> Monitor quality metrics for canary group (1-4 hours)
+  -> Promote to PROMPT_CANARY_PCT=100
+  -> Remove canary config, update PROMPT_VERSION
+```
+
+## Interview takeaway
+
+The interviewer wants to see that you treat the prompt as a first-class artifact. Version control gives you history and rollback. The eval gate gives you regression protection. Canary deployment gives you production validation before full exposure. These are the same practices you would apply to any API change.
+""",
+        "tags_json": ["deployment", "ci-cd", "prompts", "evaluation", "canary"],
     },
 
 ]
