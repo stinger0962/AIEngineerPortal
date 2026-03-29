@@ -15,6 +15,7 @@ import {
 import type {
   AdaptiveFocus,
   AIFeedbackResponse,
+  CoachingResult,
   Course,
   DeepDiveEntry,
   DashboardSummary,
@@ -265,6 +266,28 @@ export const portalApi = {
 
   async getDeepDives(lessonId: number): Promise<DeepDiveEntry[]> {
     const res = await fetch(`${API_BASE}/learning/lessons/${lessonId}/deep-dives`);
+    if (!res.ok) return [];
+    return res.json();
+  },
+
+  async submitForCoaching(questionId: number, answer: string): Promise<CoachingResult> {
+    const res = await fetch(
+      `${API_BASE}/interview/questions/${questionId}/coach`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer }),
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Coaching failed" }));
+      throw new Error(err.detail || `Coaching failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async getCoachingHistory(questionId: number): Promise<CoachingResult[]> {
+    const res = await fetch(`${API_BASE}/interview/questions/${questionId}/coaching-history`);
     if (!res.ok) return [];
     return res.json();
   },

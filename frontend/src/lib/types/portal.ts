@@ -347,3 +347,19 @@ export interface PinnedExercise {
   slug: string;
   title: string;
 }
+
+export interface CoachingResult {
+  id: number;
+  question_id: number;
+  overall_score: number;
+  strengths: string[];
+  gaps: string[];
+  improvements: string[];
+  example_answer_section: string;
+  ready_for_interview: boolean;
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  latency_ms?: number;
+  created_at?: string;
+}
