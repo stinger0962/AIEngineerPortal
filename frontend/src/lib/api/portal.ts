@@ -16,6 +16,7 @@ import type {
   AdaptiveFocus,
   AIFeedbackResponse,
   CoachingResult,
+  CopilotResponse,
   Course,
   DeepDiveEntry,
   DashboardSummary,
@@ -289,6 +290,19 @@ export const portalApi = {
   async getCoachingHistory(questionId: number): Promise<CoachingResult[]> {
     const res = await fetch(`${API_BASE}/interview/questions/${questionId}/coaching-history`);
     if (!res.ok) return [];
+    return res.json();
+  },
+
+  async sendCopilotMessage(messages: Array<{role: string; content: string}>): Promise<CopilotResponse> {
+    const res = await fetch(`${API_BASE}/copilot/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Copilot unavailable" }));
+      throw new Error(err.detail || `Copilot failed (${res.status})`);
+    }
     return res.json();
   },
 };

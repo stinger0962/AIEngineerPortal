@@ -363,3 +363,24 @@ export interface CoachingResult {
   latency_ms?: number;
   created_at?: string;
 }
+
+export interface CopilotMessage {
+  role: "user" | "assistant";
+  content: string;
+  suggestedActions?: SuggestedAction[];
+}
+
+export interface SuggestedAction {
+  type: "lesson" | "exercise" | "article";
+  title: string;
+  slug: string;
+}
+
+export interface CopilotResponse {
+  response: string;
+  suggested_actions: SuggestedAction[];
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  latency_ms?: number;
+}
