@@ -41,6 +41,26 @@ PHASE_TWO_COLUMN_PATCHES = {
 }
 
 
+MEMORY_CARDS_CREATE_DDL = """
+CREATE TABLE IF NOT EXISTS memory_cards (
+    id SERIAL PRIMARY KEY,
+    front_md TEXT NOT NULL,
+    back_md TEXT NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    source_kind VARCHAR(50) NOT NULL,
+    source_title VARCHAR(500) NOT NULL,
+    difficulty VARCHAR(50) DEFAULT 'intermediate',
+    tags_json JSON DEFAULT '[]',
+    review_count INTEGER DEFAULT 0,
+    last_reviewed_at TIMESTAMP,
+    confidence INTEGER,
+    next_review_at TIMESTAMP,
+    is_seeded BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+
 def apply_runtime_schema_patches(engine: Engine) -> None:
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -48,6 +68,10 @@ def apply_runtime_schema_patches(engine: Engine) -> None:
         return
 
     with engine.begin() as connection:
+        # Ensure memory_cards table exists (phase 6 — spaced repetition)
+        if "memory_cards" not in existing_tables:
+            connection.execute(text(MEMORY_CARDS_CREATE_DDL))
+
         all_patches = {**PHASE_TWO_COLUMN_PATCHES, **PHASE_FIVE_COLUMN_PATCHES}
         for table_name, patches in all_patches.items():
             if table_name not in existing_tables:

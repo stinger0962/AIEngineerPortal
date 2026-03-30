@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import func
 
 from app.db.base import Base
 
@@ -247,3 +248,22 @@ class ProgressSnapshot(Base):
     projects_completed_count: Mapped[int] = mapped_column(Integer, default=0)
     interview_readiness_score: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class MemoryCard(Base):
+    __tablename__ = "memory_cards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    front_md: Mapped[str] = mapped_column(Text, nullable=False)
+    back_md: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(50), nullable=False)  # lesson, exercise, interview, knowledge
+    source_title: Mapped[str] = mapped_column(String(500), nullable=False)
+    difficulty: Mapped[str] = mapped_column(String(50), default="intermediate")
+    tags_json: Mapped[Optional[list]] = mapped_column(JSON, default=list)
+    review_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    confidence: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1-5
+    next_review_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    is_seeded: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())

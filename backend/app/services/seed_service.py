@@ -28,6 +28,7 @@ from app.seed.data import (
     build_exercises,
     build_interview_questions,
     build_lessons,
+    seed_memory_cards,
 )
 from app.services.jobs_service import ensure_seed_jobs
 from app.services.news_service import ensure_seed_news
@@ -48,6 +49,7 @@ def seed_database(db: Session) -> None:
     seed_project_templates(db)
     ensure_seed_news(db)
     ensure_seed_jobs(db)
+    seed_memory_cards(db)
 
     snapshot = db.scalar(
         select(ProgressSnapshot).where(ProgressSnapshot.user_id == user.id).order_by(ProgressSnapshot.id.asc())

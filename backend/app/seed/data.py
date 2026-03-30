@@ -16711,3 +16711,293 @@ JOB_POSTINGS = [
         "tags_json": ["platform", "providers", "observability", "deployment"],
     },
 ]
+
+
+# ── Spaced repetition memory cards ───────────────────────────────────────────
+MEMORY_CARDS = [
+    # ── Lesson: Tool design for LLM agents ──────────────────────────────────
+    {
+        "front_md": "What are the three things that make or break a tool schema for an LLM agent?",
+        "back_md": "The tool **name** (short, action-verb-first), the **description** (says when to call AND when NOT to call), and **parameter types** (prefer enums over bare strings, add a description on every field). The description field does the most work — treat it like API documentation the model cannot ask clarifying questions about.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Tool design for LLM agents",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "tools", "schema-design"],
+    },
+    {
+        "front_md": "Why should input validation and structured error messages be returned from agent tools rather than bare exceptions?",
+        "back_md": "Agents use tool results to decide their next step. A bare exception gives the model nothing to act on. A structured error — with a message describing what went wrong — lets the agent retry intelligently, clarify parameters, or escalate gracefully instead of looping uselessly.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Tool design for LLM agents",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "tools", "error-handling"],
+    },
+    {
+        "front_md": "What is the 'overloaded tool' anti-pattern and why does it hurt agent reliability?",
+        "back_md": "An overloaded tool does two different things based on a flag parameter (e.g., `mode: 'search' | 'delete'`). This forces the model to reason about the flag correctly every time. Split overloaded tools into separate, narrowly named tools — the model calls the right one instead of guessing which mode to use.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Tool design for LLM agents",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "tools", "anti-patterns"],
+    },
+    # ── Lesson: Agent reasoning loops ───────────────────────────────────────
+    {
+        "front_md": "Describe the three phases of one ReAct iteration.",
+        "back_md": "**Thought** — the model reasons about what to do next. **Action** — it calls a tool with specific arguments. **Observation** — the tool result is fed back into context. The loop repeats until the model produces a Final Answer or the iteration cap is reached.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Agent reasoning loops",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "react", "reasoning-loop"],
+    },
+    {
+        "front_md": "Why are stop conditions more important than the loop itself in a ReAct agent?",
+        "back_md": "Without a maximum iteration count, token budget, or confidence signal, a confused agent loops forever burning money. Stop conditions define the failure contract: when the agent cannot reach a Final Answer within bounds, it should return a graceful error rather than spiral into useless retries.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Agent reasoning loops",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "react", "production"],
+    },
+    {
+        "front_md": "What is the plan-then-execute pattern and how does it differ from ReAct?",
+        "back_md": "Plan-then-execute separates reasoning from acting: the model produces a full plan upfront, then each step is executed sequentially. ReAct interleaves thought and action — the model re-reasons after each tool result. Plan-then-execute is faster and cheaper for predictable tasks; ReAct handles tasks where intermediate results change what to do next.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Agent reasoning loops",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "react", "plan-execute"],
+    },
+    # ── Lesson: Multi-agent orchestration ───────────────────────────────────
+    {
+        "front_md": "What does a supervisor agent do in a multi-agent system, and what does it NOT do?",
+        "back_md": "The supervisor **routes and quality-checks** — it receives the user request, decides which specialist to delegate to, reviews results, and either returns them or re-delegates. It does not do the actual work itself. This keeps subagents narrow and focused, making the system easier to debug and extend.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Multi-agent orchestration",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "multi-agent", "supervisor"],
+    },
+    {
+        "front_md": "What should a handoff context object contain when one agent transfers control to another?",
+        "back_md": "A handoff should include: **what the next agent needs to do**, **what context it needs** (not the entire conversation history), and **what a good result looks like**. Passing full history wastes tokens and confuses specialists — pass only the structured context the receiving agent requires.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Multi-agent orchestration",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "multi-agent", "handoff"],
+    },
+    {
+        "front_md": "When does peer-to-peer agent communication make sense over a hub-and-spoke supervisor?",
+        "back_md": "Peer-to-peer suits tasks that are **highly parallelizable**, where a central planner would become a bottleneck, and where you have strong observability to trace distributed interactions. For most production systems, start with supervisor — it concentrates coordination logic in one place and is far easier to debug.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Multi-agent orchestration",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "multi-agent", "architecture"],
+    },
+    # ── Lesson: Agent memory management ─────────────────────────────────────
+    {
+        "front_md": "Name the four types of agent memory and briefly describe each.",
+        "back_md": "**In-context (working)** — live conversation window, fast but bounded. **External retrieval** — vector store queried by embeddings, scales to millions of docs. **Persistent structured** — database of facts/preferences loaded selectively across sessions. **Episodic/compressed summaries** — digests of past turns that reduce tokens while preserving key facts.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Agent memory management",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "memory", "context-management"],
+    },
+    {
+        "front_md": "What is 'summarization on overflow' and what is its main tradeoff?",
+        "back_md": "When context approaches a token budget threshold, the model summarizes the oldest N turns into a compact digest, then replaces those turns with the summary. The tradeoff: summarization itself costs tokens and can lose details that matter later — so you should track whether memory loss caused task failures, not just whether context length decreased.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Agent memory management",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "memory", "summarization"],
+    },
+    # ── Lesson: Agent evaluation and safety ─────────────────────────────────
+    {
+        "front_md": "What are the four levels of agent evaluation and what does each measure?",
+        "back_md": "**Task success (outcome)** — did the agent achieve the goal? **Step quality (process)** — did it take a sensible path, or succeed by luck? **Efficiency (resources)** — how many steps, tokens, and seconds did it use? **Safety and boundary respect (risk)** — did it stay within permissions and fail gracefully on errors?",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Agent evaluation and safety",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "evaluation", "production"],
+    },
+    {
+        "front_md": "What are input, output, and action guardrails in an agent system?",
+        "back_md": "**Input guardrails** filter user messages before they reach the agent — detecting prompt injection, off-topic requests, or dangerous inputs. **Output guardrails** validate agent responses before delivery — checking for PII, harmful content, or policy violations. **Action guardrails** gate real-world actions (emails, DB writes) with rate limits, confirmation steps, and an audit log.",
+        "category": "agents",
+        "source_kind": "lesson",
+        "source_title": "Agent evaluation and safety",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "safety", "guardrails", "production"],
+    },
+
+    # ── Exercise cards ───────────────────────────────────────────────────────
+    {
+        "front_md": "What pattern does **Build a tool registry with schema validation** teach?",
+        "back_md": "The registry pattern: centralize tool registration with JSON Schema validation on intake, prevent duplicates, and expose a typed lookup interface. This is the foundational data structure every agent framework uses internally — understanding it lets you debug tool-not-found errors and extend registries with middleware like logging or auth.",
+        "category": "agents",
+        "source_kind": "exercise",
+        "source_title": "Build a tool registry with schema validation",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "tools", "registry-pattern"],
+    },
+    {
+        "front_md": "What pattern does **Implement a ReAct reasoning loop** teach?",
+        "back_md": "How to build a structured Thought→Action→Observation loop with an explicit iteration cap and a full trace of all reasoning steps. The key insight: always return a structured trace, not just the final answer — it's what you'll need to debug failures and feed into an observability system.",
+        "category": "agents",
+        "source_kind": "exercise",
+        "source_title": "Implement a ReAct reasoning loop",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "react", "reasoning-loop"],
+    },
+    {
+        "front_md": "What pattern does **Add retry and fallback logic to tool calls** teach?",
+        "back_md": "Wrapping tool execution with exponential backoff, per-call timeouts, and an ordered fallback list. The key takeaway: agent reliability lives in the orchestration layer, not in individual tools — a resilient executor that tries alternatives is the difference between a demo and a production system.",
+        "category": "agents",
+        "source_kind": "exercise",
+        "source_title": "Add retry and fallback logic to tool calls",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "resilience", "retry", "fallback"],
+    },
+    {
+        "front_md": "What pattern does **Parse structured outputs with error recovery** teach?",
+        "back_md": "A defensive parsing pipeline: strip markdown fences, attempt to repair truncated JSON, validate against a schema, and apply defaults — returning a structured result that records whether recovery was needed. LLMs wrap JSON in markdown ~30% of the time; treating robust parsing as a first-class concern prevents most agent parsing failures.",
+        "category": "agents",
+        "source_kind": "exercise",
+        "source_title": "Parse structured outputs with error recovery",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "parsing", "structured-output", "json"],
+    },
+    {
+        "front_md": "What pattern does **Conversation memory manager with token budgeting** teach?",
+        "back_md": "A `MemoryManager` that enforces a hard token budget using a sliding window for recent messages plus a running compressed summary for older turns. The system prompt is never evicted. This is the core technique for keeping long-running agents functional and cost-controlled across many turns.",
+        "category": "agents",
+        "source_kind": "exercise",
+        "source_title": "Conversation memory manager with token budgeting",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "memory", "token-management"],
+    },
+    {
+        "front_md": "What pattern does **Multi-agent handoff protocol** teach?",
+        "back_md": "A coordinator that routes tasks to specialist agents via a structured `HandoffContext` object, collects results, and handles failures (retry, skip, or escalate). The handoff protocol is where most multi-agent systems break — this exercise forces you to design the context contract before writing the routing logic.",
+        "category": "agents",
+        "source_kind": "exercise",
+        "source_title": "Multi-agent handoff protocol",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "multi-agent", "handoff", "coordination"],
+    },
+    {
+        "front_md": "What pattern does **Agent evaluation harness** teach?",
+        "back_md": "A test harness that scores agent runs across correctness (exact/fuzzy/LLM-judge), efficiency (steps vs baseline), and cost (tokens × pricing table), producing a category-level report. The habit: run this suite on every change to catch regressions before production, not after incidents.",
+        "category": "agents",
+        "source_kind": "exercise",
+        "source_title": "Agent evaluation harness",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "evaluation", "testing", "metrics"],
+    },
+    {
+        "front_md": "What pattern does **Cost-tracking middleware for agent tool calls** teach?",
+        "back_md": "A `CostTracker` middleware that intercepts every tool call to record token usage, latency, and estimated USD cost, with a configurable budget that raises `BudgetExceededError` before a call that would overspend. Track cost per test from day one — a runaway loop on GPT-4 can burn hundreds of dollars in minutes.",
+        "category": "agents",
+        "source_kind": "exercise",
+        "source_title": "Cost-tracking middleware for agent tool calls",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "cost-tracking", "middleware", "production"],
+    },
+
+    # ── Interview question cards ─────────────────────────────────────────────
+    {
+        "front_md": "When does an agent architecture add value, and when is it just complexity?",
+        "back_md": "An agent earns its place when three things are simultaneously true: the task path cannot be enumerated in advance, the system must choose between tools based on intermediate results, and flexibility provides measurable value worth the reliability cost. If any condition fails, a deterministic workflow is almost always better. Agents introduce non-determinism, harder observability, and compounding errors — treat them as expensive complexity, not default architecture.",
+        "category": "agents",
+        "source_kind": "interview",
+        "source_title": "When does an agent architecture add value?",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "architecture", "tradeoffs"],
+    },
+    {
+        "front_md": "How would you design a tool schema for an LLM agent?",
+        "back_md": "Use action-verb-first names, write top-level descriptions that say when NOT to call as well as when to call, add descriptions on every parameter (not just the tool), prefer enum over string for bounded values, and keep required fields minimal. Test the schema by feeding it to the model with realistic queries and checking if it hallucinates parameters — if it does, the description needs work.",
+        "category": "agents",
+        "source_kind": "interview",
+        "source_title": "How would you design a tool schema for an LLM agent?",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "tools", "schema-design"],
+    },
+    {
+        "front_md": "Explain the ReAct pattern and when to use it.",
+        "back_md": "ReAct interleaves Thought (reasoning), Action (tool call), and Observation (result) in a loop until a Final Answer. Use it for multi-hop questions where step 2 depends on step 1's result, or when you need the reasoning trace to be visible for debugging. Avoid it for simple single-tool tasks or latency-sensitive features — the reasoning overhead adds tokens without benefit. Always set explicit stop conditions.",
+        "category": "agents",
+        "source_kind": "interview",
+        "source_title": "Explain the ReAct pattern and when to use it",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "react", "reasoning"],
+    },
+    {
+        "front_md": "How do you manage agent memory to stay within context limits?",
+        "back_md": "Use sliding window truncation for recent turns, summarization-on-overflow for older context, tool result trimming (a 2000-word result often compresses to 200 words), and selective retrieval from a vector store for past sessions. Set hard token budgets per context component and enforce them before each LLM call. Track context length per call as a metric and alert when sessions consistently approach the limit.",
+        "category": "agents",
+        "source_kind": "interview",
+        "source_title": "How do you manage agent memory to stay within context limits?",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "memory", "context-management"],
+    },
+    {
+        "front_md": "What is MCP (Model Context Protocol) and why does it matter for AI engineers?",
+        "back_md": "MCP is an open standard (Anthropic, late 2024) that defines a uniform client-server protocol for connecting LLMs to tools, data sources, and services. It reduces M×N custom integrations to M+N by having each model implement the client protocol once and each tool implement the server protocol once. Practically: standard schemas, a growing library of pre-built servers, and a predictable integration surface. Still early (2026) — expect API changes, but ecosystem engagement suggests it may become infrastructure.",
+        "category": "agents",
+        "source_kind": "interview",
+        "source_title": "What is MCP (Model Context Protocol) and why does it matter?",
+        "difficulty": "intermediate",
+        "tags_json": ["agents", "mcp", "tooling", "protocols"],
+    },
+    {
+        "front_md": "How would you evaluate an agent's performance in production?",
+        "back_md": "Four layers: **Task success** (did it achieve the goal?), **Step quality** (was the path sensible?), **Efficiency** (steps, tokens, wall-clock time vs baseline), **Safety** (stayed within permissions, failed gracefully). Implement with: trace logging for every thought/action/observation, a benchmark task suite run on every deploy, LLM-as-judge for open-ended outcomes, and human review sampling. Alert on drops in success rate or spikes in step count.",
+        "category": "agents",
+        "source_kind": "interview",
+        "source_title": "How would you evaluate an agent's performance in production?",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "evaluation", "production", "observability"],
+    },
+    {
+        "front_md": "Compare supervisor vs peer-to-peer multi-agent architectures.",
+        "back_md": "**Supervisor**: one coordinator routes to specialists, owns the plan, easier to debug, single point of failure, latency accumulates. **Peer-to-peer**: agents route to each other, natural parallelism, resilient to single failures, distributed coordination logic is harder to trace and guard. Start with supervisor for most production systems. Move toward peer-to-peer only when concrete parallelism or resilience requirements justify the added observability burden.",
+        "category": "agents",
+        "source_kind": "interview",
+        "source_title": "Compare supervisor vs peer-to-peer multi-agent architectures",
+        "difficulty": "advanced",
+        "tags_json": ["agents", "multi-agent", "architecture", "supervisor"],
+    },
+]
+
+
+def seed_memory_cards(db) -> None:
+    from sqlalchemy import select
+    from app.models.entities import MemoryCard
+
+    existing_count = db.scalar(
+        select(MemoryCard).where(MemoryCard.is_seeded == True).limit(1)
+    )
+    if existing_count is not None:
+        return
+
+    for card_data in MEMORY_CARDS:
+        card = MemoryCard(
+            front_md=card_data["front_md"],
+            back_md=card_data["back_md"],
+            category=card_data["category"],
+            source_kind=card_data["source_kind"],
+            source_title=card_data["source_title"],
+            difficulty=card_data.get("difficulty", "intermediate"),
+            tags_json=card_data.get("tags_json", []),
+            is_seeded=True,
+        )
+        db.add(card)
