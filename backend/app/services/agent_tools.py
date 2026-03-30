@@ -1,7 +1,7 @@
 """agent_tools.py — Tool functions for the adaptive learning agent.
 
 Each tool can be called by the Anthropic tool_use API.  The module exposes:
-- TOOL_SCHEMAS   list of 4 Anthropic-compatible tool schema dicts
+- TOOL_SCHEMAS   list of 7 Anthropic-compatible tool schema dicts
 - execute_tool   dispatcher that routes a tool call to the right function
 - Individual tool functions (also importable for unit-testing)
 """
@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import AIFeedback, Exercise, Lesson, LearningPath, UserExerciseAttempt
+from app.models.entities import AIFeedback, Exercise, KnowledgeArticle, Lesson, LearningPath, UserExerciseAttempt
 from app.services.adaptive_service import build_mastery_profile
 
 # ---------------------------------------------------------------------------
@@ -84,6 +84,57 @@ TOOL_SCHEMAS: list[dict] = [
                 }
             },
             "required": ["lesson_slug"],
+        },
+    },
+    {
+        "name": "search_lessons",
+        "description": (
+            "Search across all lessons by keyword. Returns titles, slugs, path names, "
+            "and summaries of matching lessons. Use to find relevant learning content."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search keyword or phrase",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "search_exercises",
+        "description": (
+            "Search across all exercises by keyword. Returns titles, categories, "
+            "difficulty, and summaries of matching exercises. Use to find relevant practice drills."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search keyword or phrase",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "get_knowledge_article",
+        "description": (
+            "Read the full content of a knowledge article by slug. "
+            "Use when you need detailed reference material on a topic."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "slug": {
+                    "type": "string",
+                    "description": "The slug identifier for the knowledge article",
+                },
+            },
+            "required": ["slug"],
         },
     },
 ]
@@ -192,6 +243,69 @@ def read_lesson_summary(db: Session, user_id: int, lesson_slug: str) -> dict:
     }
 
 
+def search_lessons(db: Session, user_id: int, query: str) -> dict[str, Any]:
+    """Search lessons by keyword in title and content."""
+    pattern = f"%{query}%"
+    rows = db.execute(
+        select(Lesson.title, Lesson.slug, Lesson.content_md, LearningPath.title.label("path_name"))
+        .join(LearningPath, Lesson.learning_path_id == LearningPath.id)
+        .where(
+            (Lesson.title.ilike(pattern)) | (Lesson.content_md.ilike(pattern))
+        )
+        .limit(5)
+    ).all()
+
+    return {
+        "lessons": [
+            {
+                "title": title,
+                "slug": slug,
+                "path_name": path_name,
+                "summary": (content_md or "")[:300] + ("..." if content_md and len(content_md) > 300 else ""),
+            }
+            for title, slug, content_md, path_name in rows
+        ]
+    }
+
+
+def search_exercises(db: Session, user_id: int, query: str) -> dict[str, Any]:
+    """Search exercises by keyword in title and prompt."""
+    pattern = f"%{query}%"
+    rows = db.execute(
+        select(Exercise.id, Exercise.title, Exercise.category, Exercise.difficulty, Exercise.prompt_md)
+        .where(
+            (Exercise.title.ilike(pattern)) | (Exercise.prompt_md.ilike(pattern))
+        )
+        .limit(5)
+    ).all()
+
+    return {
+        "exercises": [
+            {
+                "id": eid,
+                "title": title,
+                "category": category,
+                "difficulty": difficulty,
+                "summary": (prompt_md or "")[:200] + ("..." if prompt_md and len(prompt_md) > 200 else ""),
+            }
+            for eid, title, category, difficulty, prompt_md in rows
+        ]
+    }
+
+
+def get_knowledge_article(db: Session, user_id: int, slug: str) -> dict[str, Any]:
+    """Read full knowledge article content by slug."""
+    article = db.scalar(select(KnowledgeArticle).where(KnowledgeArticle.slug == slug))
+    if not article:
+        return {"error": f"Article '{slug}' not found"}
+
+    return {
+        "title": article.title,
+        "category": article.category,
+        "content_md": article.content_md or "",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
@@ -212,11 +326,14 @@ def _resolve_exercise_title(db: Session, attempt_id: int) -> str:
 # Dispatcher
 # ---------------------------------------------------------------------------
 
-_TOOL_MAP = {
+TOOL_FUNCTIONS = {
     "check_mastery": check_mastery,
     "get_exercise_history": get_exercise_history,
     "get_recent_feedback": get_recent_feedback,
     "read_lesson_summary": read_lesson_summary,
+    "search_lessons": search_lessons,
+    "search_exercises": search_exercises,
+    "get_knowledge_article": get_knowledge_article,
 }
 
 
@@ -231,11 +348,17 @@ def execute_tool(
     Returns an error dict for unknown tool names or any exception raised
     during execution so the agent can surface the problem gracefully.
     """
-    fn = _TOOL_MAP.get(tool_name)
+    fn = TOOL_FUNCTIONS.get(tool_name)
     if fn is None:
         return {"error": f"Unknown tool: '{tool_name}'."}
 
     try:
+        if tool_name == "search_lessons":
+            return fn(db, user_id, query=tool_input.get("query", ""))
+        elif tool_name == "search_exercises":
+            return fn(db, user_id, query=tool_input.get("query", ""))
+        elif tool_name == "get_knowledge_article":
+            return fn(db, user_id, slug=tool_input.get("slug", ""))
         return fn(db=db, user_id=user_id, **tool_input)
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Tool '{tool_name}' raised {type(exc).__name__}: {exc}"}
