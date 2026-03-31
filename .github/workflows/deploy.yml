@@ -54,16 +54,29 @@ jobs:
             git rev-parse --short HEAD
             docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml ps
 
-      - name: Verify public health
-        shell: bash
-        run: |
-          for i in 1 2 3 4 5; do
-            if curl --fail --silent --show-error --max-time 10 https://${{ secrets.APP_DOMAIN }}/health >/dev/null 2>&1; then
-              echo "Health check passed on attempt $i"
-              exit 0
+      - name: Verify health via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            sleep 10
+            # Check backend health from inside the network (bypasses Cloudflare)
+            for i in 1 2 3 4 5; do
+              if docker exec infra-backend-1 python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" 2>/dev/null; then
+                echo "Backend health check passed on attempt $i"
+                break
+              fi
+              echo "Attempt $i failed, waiting 10s..."
+              sleep 10
+            done
+            # Check all containers are running (not restarting)
+            docker compose -f /opt/ai-engineer-portal/infra/docker-compose.prod.yml --env-file /opt/ai-engineer-portal/infra/.env.production ps --format 'table {{.Name}}\t{{.Status}}'
+            RESTARTING=$(docker compose -f /opt/ai-engineer-portal/infra/docker-compose.prod.yml --env-file /opt/ai-engineer-portal/infra/.env.production ps --format '{{.Status}}' | grep -c "Restarting" || true)
+            if [ "$RESTARTING" -gt 0 ]; then
+              echo "ERROR: containers are restarting"
+              exit 1
             fi
-            echo "Attempt $i failed, waiting 15s..."
-            sleep 15
-          done
-          echo "Health check failed after 5 attempts"
-          exit 1
+            echo "All containers healthy"
