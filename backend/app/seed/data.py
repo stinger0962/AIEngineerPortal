@@ -20341,12 +20341,12 @@ In production, replace the in-memory dict with Redis sorted sets — `ZADD` / `Z
         "tags_json": ["deployment", "rate-limiting", "api-async", "token-budgets", "llm-ops"],
     },
     {
-        "title": "Implement A/B testing for model versions",
-        "slug": "ab-testing-model-versions",
+        "title": "Implement A/B testing for model versions in production",
+        "slug": "ab-testing-model-versions-production",
         "category": "evaluation",
         "difficulty": "medium",
         "prompt_md": """\
-## Implement A/B Testing for Model Versions
+## Implement A/B Testing for Model Versions in Production
 
 Deploying a new model version without traffic splitting is risky. A/B testing routes a percentage of users to a new variant so you can measure quality before full rollout.
 
@@ -20842,8 +20842,8 @@ In production, replace this with OpenTelemetry. The patterns are identical: `sta
         "tags_json": ["deployment", "observability", "tracing", "llm-ops", "api-async"],
     },
     {
-        "title": "Implement graceful degradation with fallback tiers",
-        "slug": "graceful-degradation-fallback-tiers",
+        "title": "Implement graceful degradation with multi-level fallback tiers",
+        "slug": "graceful-degradation-multi-level-fallback",
         "category": "api-async",
         "difficulty": "hard",
         "prompt_md": """\
@@ -22580,8 +22580,8 @@ class AnnotationQueue:
         "tags_json": ["evaluation", "human-in-the-loop", "annotation", "workflow"],
     },
     {
-        "title": "Implement A/B evaluation for prompt variants",
-        "slug": "implement-ab-evaluation-prompt-variants",
+        "title": "Implement A/B evaluation framework for prompt variants",
+        "slug": "ab-evaluation-framework-prompt-variants",
         "category": "evaluation",
         "difficulty": "medium",
         "prompt_md": """\
