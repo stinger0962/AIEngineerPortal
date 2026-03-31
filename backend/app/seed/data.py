@@ -11271,6 +11271,1502 @@ Pre-filtering narrows the candidate set before embedding comparison — ensuring
     },
 ]
 
+
+# ── Additional RAG Systems exercises ─────────────────────────────────────────
+EXERCISES += [
+    {
+        "title": "Build a context window assembler for RAG prompts",
+        "slug": "rag-context-window-assembler",
+        "category": "retrieval",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a Context Window Assembler for RAG Prompts
+
+One of the most underestimated problems in production RAG is fitting retrieved chunks into the LLM context window without silently truncating relevant content or wasting tokens on duplicated passages. A naive implementation concatenates all chunks up to a token limit — but this ignores relevance order, fails to handle near-duplicate passages, and leaves no room for the system prompt and expected output.
+
+### What you are building
+
+Create a `ContextAssembler` class that:
+
+1. **Accepts a list of retrieved chunks** with relevance scores, text, and metadata (source, section).
+2. **Enforces a token budget** — a configurable `max_context_tokens` that reserves space for the system prompt and expected output. Use the approximation: `tokens ≈ len(text.split()) * 1.3`.
+3. **Prioritizes by relevance score** — highest-scoring chunks appear first in the assembled context.
+4. **Deduplicates near-identical chunks** — if two chunks share more than 80% of their words (Jaccard similarity), drop the lower-scored one.
+5. **Formats each chunk** with a citation header: `[Source: {source}, Section: {section}]` followed by the chunk text, separated by `---`.
+6. **Returns an `AssembledContext`** dataclass with: the formatted context string, included chunks, dropped chunks (with reason: "truncated" or "duplicate"), and the total token estimate.
+
+### Why this matters
+
+Context assembly is the last step before the LLM sees your data. Getting it wrong means the model misses the most relevant content (truncation) or wastes tokens on repeated information (duplication). A proper assembler makes the context window a managed resource, not an overflow buffer.
+
+### Constraints
+
+- Standard library only. No external tokenizer.
+- Type-hint everything. Deterministic: same input always produces the same output.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class RetrievedChunk:
+    id: str
+    text: str
+    score: float  # higher is better
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class AssembledContext:
+    context_str: str
+    included_chunks: list[RetrievedChunk]
+    dropped_chunks: list[dict]  # {"chunk": RetrievedChunk, "reason": str}
+    token_estimate: int
+
+
+def token_estimate(text: str) -> int:
+    \"\"\"Approximate token count: word count * 1.3.\"\"\"
+    # TODO: implement
+    raise NotImplementedError
+
+
+def jaccard_similarity(a: str, b: str) -> float:
+    \"\"\"Word-level Jaccard similarity between two strings.\"\"\"
+    # TODO: implement intersection / union of word sets
+    raise NotImplementedError
+
+
+class ContextAssembler:
+    def __init__(
+        self,
+        max_context_tokens: int = 2000,
+        dedup_threshold: float = 0.8,
+        system_prompt_tokens: int = 300,
+        output_reserve_tokens: int = 500,
+    ):
+        self.max_context_tokens = max_context_tokens
+        self.dedup_threshold = dedup_threshold
+        self.effective_budget = max_context_tokens - system_prompt_tokens - output_reserve_tokens
+
+    def assemble(self, chunks: list[RetrievedChunk]) -> AssembledContext:
+        \"\"\"
+        Sort by score, deduplicate near-identical chunks, fill budget greedily,
+        format with citation headers separated by ---.
+        \"\"\"
+        # TODO: implement
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class RetrievedChunk:
+    id: str
+    text: str
+    score: float
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class AssembledContext:
+    context_str: str
+    included_chunks: list[RetrievedChunk]
+    dropped_chunks: list[dict]
+    token_estimate: int
+
+
+def token_estimate(text: str) -> int:
+    return int(len(text.split()) * 1.3)
+
+
+def jaccard_similarity(a: str, b: str) -> float:
+    words_a = set(a.lower().split())
+    words_b = set(b.lower().split())
+    if not words_a and not words_b:
+        return 1.0
+    intersection = len(words_a & words_b)
+    union = len(words_a | words_b)
+    return intersection / union if union > 0 else 0.0
+
+
+class ContextAssembler:
+    def __init__(
+        self,
+        max_context_tokens: int = 2000,
+        dedup_threshold: float = 0.8,
+        system_prompt_tokens: int = 300,
+        output_reserve_tokens: int = 500,
+    ):
+        self.max_context_tokens = max_context_tokens
+        self.dedup_threshold = dedup_threshold
+        self.effective_budget = max_context_tokens - system_prompt_tokens - output_reserve_tokens
+
+    def assemble(self, chunks: list[RetrievedChunk]) -> AssembledContext:
+        sorted_chunks = sorted(chunks, key=lambda c: c.score, reverse=True)
+
+        deduplicated: list[RetrievedChunk] = []
+        dropped: list[dict] = []
+
+        for chunk in sorted_chunks:
+            is_duplicate = any(
+                jaccard_similarity(chunk.text, sel.text) >= self.dedup_threshold
+                for sel in deduplicated
+            )
+            if is_duplicate:
+                dropped.append({"chunk": chunk, "reason": "duplicate"})
+            else:
+                deduplicated.append(chunk)
+
+        included: list[RetrievedChunk] = []
+        used_tokens = 0
+
+        for chunk in deduplicated:
+            source = chunk.metadata.get("source", "unknown")
+            section = chunk.metadata.get("section", "")
+            header = f"[Source: {source}, Section: {section}]" if section else f"[Source: {source}]"
+            formatted = f"{header}\\n{chunk.text}"
+            chunk_tokens = token_estimate(formatted)
+
+            if used_tokens + chunk_tokens <= self.effective_budget:
+                included.append(chunk)
+                used_tokens += chunk_tokens
+            else:
+                dropped.append({"chunk": chunk, "reason": "truncated"})
+
+        parts = []
+        for chunk in included:
+            source = chunk.metadata.get("source", "unknown")
+            section = chunk.metadata.get("section", "")
+            header = f"[Source: {source}, Section: {section}]" if section else f"[Source: {source}]"
+            parts.append(f"{header}\\n{chunk.text}")
+
+        context_str = "\\n\\n---\\n\\n".join(parts)
+
+        return AssembledContext(
+            context_str=context_str,
+            included_chunks=included,
+            dropped_chunks=dropped,
+            token_estimate=used_tokens,
+        )
+
+
+# --- Demonstration ---
+assembler = ContextAssembler(max_context_tokens=500, system_prompt_tokens=50, output_reserve_tokens=100)
+chunks = [
+    RetrievedChunk(id="c1", text="The maximum file upload size is 10 MB per file.", score=0.95,
+                   metadata={"source": "faq.md", "section": "Limits"}),
+    RetrievedChunk(id="c2", text="File uploads are limited to 10 megabytes each.", score=0.82,
+                   metadata={"source": "help.md", "section": "Files"}),
+    RetrievedChunk(id="c3", text="Supported file types include PDF, DOCX, and TXT.", score=0.78,
+                   metadata={"source": "faq.md", "section": "Formats"}),
+]
+result = assembler.assemble(chunks)
+print(f"Included: {len(result.included_chunks)}, Dropped: {len(result.dropped_chunks)}")
+print(f"Token estimate: {result.token_estimate}")
+for d in result.dropped_chunks:
+    print(f"  Dropped [{d['reason']}]: {d['chunk'].text[:60]}")
+print("Context preview:", result.context_str[:200])
+""",
+        "explanation_md": """\
+## Walkthrough: Context Window Assembler
+
+**Deduplication before budget allocation.** Sorting by score first ensures the higher-scoring chunk of any near-duplicate pair is already in `deduplicated` before the lower-scored one is evaluated. The lower one is dropped as a duplicate. This matters because embedding retrieval often returns multiple chunks from nearby sections of the same document — sections that are semantically similar but not worth taking twice.
+
+**Greedy budget filling.** Chunks fill the effective budget in score order. The effective budget already excludes space for the system prompt and output. This prevents the classic mistake of allocating the full `max_context_tokens` to retrieved content and then finding the prompt overflows the model's context limit.
+
+**Citation headers enable downstream features.** Each chunk gets a `[Source: ..., Section: ...]` header. This gives the LLM what it needs to cite sources in its answer, and gives a frontend the data needed for "show source" buttons. Without headers, answers may be faithful but cannot be attributed to specific sources.
+
+**The `dropped_chunks` return value is observability data.** Logging which chunks were dropped as "truncated" tells you when your relevance ranking is being overridden by the token budget — a signal to either increase the budget or improve retrieval precision so fewer irrelevant chunks arrive.
+""",
+        "tags_json": ["retrieval", "rag", "context-window", "token-budget"],
+    },
+    {
+        "title": "Implement RAG answer generation with inline citations",
+        "slug": "rag-answer-generation-citations",
+        "category": "retrieval",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement RAG Answer Generation with Inline Citations
+
+Most RAG implementations generate an answer and separately display source documents, with no connection between a specific claim in the answer and the specific chunk that supports it. This makes it impossible for users to verify individual facts and impossible for engineers to audit faithfulness at the claim level.
+
+Citation-linked generation solves this: each factual claim in the answer is tagged with the chunk ID it came from using `[CITE:chunk_id]` notation, enabling both "show source" UI and automated faithfulness checking.
+
+### What you are building
+
+Create a `CitationRAG` class that:
+
+1. **Assembles a prompt** that instructs the LLM to cite sources inline using `[CITE:chunk_id]` after each factual claim.
+2. **Parses citations** from the generated answer — extract `(claim_text, cited_chunk_id)` pairs using regex.
+3. **Validates citations** — verify each cited chunk ID exists in the provided context. Flag phantom citations (citing a non-existent ID).
+4. **Returns a `CitedAnswer`** dataclass with: raw answer text, citation map `{chunk_id: [claims]}`, phantom citations list, and `grounding_score` (fraction of claims with a valid citation).
+
+Use an injectable mock LLM function for testability.
+
+### Why this matters
+
+Citation tracking is the foundation of trustworthy RAG. Without it, you are asking users to trust an answer on faith. With it, you power "show source" UI, audit faithfulness automatically, and identify which retrieval improvements have the highest impact.
+
+### Constraints
+
+- Use regex to extract `[CITE:...]` patterns. Type-hint everything.
+- LLM function signature: `Callable[[str], str]`.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class ContextChunk:
+    id: str
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class CitedAnswer:
+    raw_answer: str
+    citation_map: dict[str, list[str]]  # chunk_id -> list of claims citing it
+    phantom_citations: list[str]         # chunk IDs cited but not in context
+    grounding_score: float               # fraction of claims with valid citation
+
+
+CITATION_PATTERN = re.compile(r'\\[CITE:([\\w\\-]+)\\]')
+
+
+def build_rag_prompt(question: str, chunks: list[ContextChunk]) -> str:
+    \"\"\"Build prompt with instructions to cite every factual claim with [CITE:chunk_id].\"\"\"
+    # TODO: format chunks as "[chunk_id]: text", add citation instruction
+    raise NotImplementedError
+
+
+def parse_citations(answer: str) -> list[tuple[str, str]]:
+    \"\"\"
+    Extract (claim_text, chunk_id) pairs from answer.
+    Empty chunk_id means uncited claim.
+    Split on sentence boundaries; each [CITE:id] is paired with preceding claim text.
+    \"\"\"
+    # TODO: implement
+    raise NotImplementedError
+
+
+class CitationRAG:
+    def __init__(self, llm_fn: Callable[[str], str]):
+        self.llm_fn = llm_fn
+
+    def answer(self, question: str, chunks: list[ContextChunk]) -> CitedAnswer:
+        # TODO: build prompt, generate, parse, validate, compute score
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class ContextChunk:
+    id: str
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class CitedAnswer:
+    raw_answer: str
+    citation_map: dict[str, list[str]]
+    phantom_citations: list[str]
+    grounding_score: float
+
+
+CITATION_PATTERN = re.compile(r'\\[CITE:([\\w\\-]+)\\]')
+
+
+def build_rag_prompt(question: str, chunks: list[ContextChunk]) -> str:
+    context_lines = [f"[{c.id}]: {c.text}" for c in chunks]
+    context_str = "\\n".join(context_lines)
+    return (
+        f"Answer the question using ONLY the provided context. "
+        f"After each factual claim, cite the source using [CITE:chunk_id].\\n\\n"
+        f"Context:\\n{context_str}\\n\\n"
+        f"Question: {question}\\n\\nAnswer:"
+    )
+
+
+def parse_citations(answer: str) -> list[tuple[str, str]]:
+    pairs = []
+    segments = re.split(r'(?<=[.!?])\\s+', answer.strip())
+    for segment in segments:
+        citations = CITATION_PATTERN.findall(segment)
+        claim_text = CITATION_PATTERN.sub('', segment).strip()
+        if not claim_text:
+            continue
+        if citations:
+            for cid in citations:
+                pairs.append((claim_text, cid))
+        else:
+            pairs.append((claim_text, ''))
+    return pairs
+
+
+class CitationRAG:
+    def __init__(self, llm_fn: Callable[[str], str]):
+        self.llm_fn = llm_fn
+
+    def answer(self, question: str, chunks: list[ContextChunk]) -> CitedAnswer:
+        valid_ids = {c.id for c in chunks}
+        raw_answer = self.llm_fn(build_rag_prompt(question, chunks))
+        pairs = parse_citations(raw_answer)
+
+        citation_map: dict[str, list[str]] = {}
+        phantom_citations: list[str] = []
+        valid_cited = 0
+        total_claims = sum(1 for claim, _ in pairs if claim)
+
+        for claim_text, chunk_id in pairs:
+            if not chunk_id:
+                continue
+            if chunk_id not in valid_ids:
+                if chunk_id not in phantom_citations:
+                    phantom_citations.append(chunk_id)
+            else:
+                valid_cited += 1
+                citation_map.setdefault(chunk_id, []).append(claim_text)
+
+        grounding_score = valid_cited / total_claims if total_claims > 0 else 0.0
+        return CitedAnswer(
+            raw_answer=raw_answer,
+            citation_map=citation_map,
+            phantom_citations=phantom_citations,
+            grounding_score=grounding_score,
+        )
+
+
+# --- Demo ---
+def mock_llm(prompt: str) -> str:
+    return (
+        "The maximum upload size is 10 MB [CITE:faq-1]. "
+        "Supported types include PDF and DOCX [CITE:faq-2]. "
+        "Storage is unlimited [CITE:nonexistent-99]."
+    )
+
+chunks = [
+    ContextChunk(id="faq-1", text="The maximum file upload size is 10 MB."),
+    ContextChunk(id="faq-2", text="Supported file types: PDF, DOCX, TXT."),
+]
+rag = CitationRAG(llm_fn=mock_llm)
+result = rag.answer("What are the upload limits?", chunks)
+print(f"Grounding score: {result.grounding_score:.2f}")
+print(f"Phantom citations: {result.phantom_citations}")
+print(f"Citation map: {dict((k, len(v)) for k, v in result.citation_map.items())}")
+""",
+        "explanation_md": """\
+## Walkthrough: Citation-Linked RAG
+
+**Citations are a parsing problem, not just a prompting problem.** The prompt instructs the LLM to use a structured notation (`[CITE:id]`), and the parser recovers structured data from the generated text. This is the same pattern used for JSON mode or function calling — structured output extraction from free text.
+
+**Grounding score vs. faithfulness.** The grounding score measures what fraction of claims have a valid citation, not whether those claims are true. A claim can be grounded (cited) but wrong if the model misquotes the source, or ungrounded (uncited) but correct from parametric knowledge. Use grounding score as a fast proxy; use an LLM-as-judge evaluator when you need claim-level accuracy.
+
+**Phantom citations reveal a specific hallucination pattern.** When the model cites a chunk ID that does not exist in the provided context, it is fabricating a reference — signaling false confidence. Track phantom citation rate separately from uncited claims. A spike in phantom citations often indicates the model is confusing contexts from different concurrent requests, a sign of a prompt construction bug.
+
+**The citation map powers UI features.** With `{chunk_id: [claims]}`, a frontend can highlight which sentences in the answer correspond to which source document — the data structure behind "show source" buttons in production RAG products.
+""",
+        "tags_json": ["retrieval", "rag", "citations", "faithfulness", "generation"],
+    },
+    {
+        "title": "Build a RAG evaluation harness with Recall@K and MRR",
+        "slug": "rag-evaluation-recall-at-k",
+        "category": "retrieval",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a RAG Evaluation Harness with Recall@K and MRR
+
+You cannot improve what you cannot measure. Most RAG pipelines are deployed and then tuned based on user complaints — the worst possible feedback loop. A proper evaluation harness gives you Recall@K and MRR measurements before deploying a change, so you know whether a new chunking strategy, embedding model, or retrieval configuration actually improved anything.
+
+### What you are building
+
+Create a `RAGEvalHarness` class that:
+
+1. **Accepts a test set** — a list of `TestCase` objects, each with a `query` and `relevant_doc_ids` (IDs of documents that should be retrieved).
+2. **Accepts an injectable retrieval function** — `Callable[[str, int], list[str]]` returning document IDs given query and k.
+3. **Computes Recall@K** for K values 1, 3, 5, and 10 — fraction of test cases where at least one relevant document appears in the top K.
+4. **Computes Mean Reciprocal Rank (MRR)** — mean of `1/rank` of the first relevant result (0 if not found).
+5. **Returns an `EvalReport`** with per-query results, aggregate metrics, and failure cases.
+6. **Identifies failure cases** — queries where no relevant document appears in the top 10.
+
+### Why this matters
+
+Recall@K tells you whether the right document is even in the retrieved set. MRR tells you whether it is near the top. Without these numbers, retrieval changes are guesswork. A 10-minute eval harness saves weeks of debugging in production.
+
+### Constraints
+
+- Standard library only. Injectable retrieve function. Type-hint everything.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class TestCase:
+    query: str
+    relevant_doc_ids: list[str]
+    description: str = ""
+
+
+@dataclass
+class QueryResult:
+    query: str
+    relevant_doc_ids: list[str]
+    retrieved_ids: list[str]
+    recall_at_k: dict[int, bool]
+    reciprocal_rank: float
+
+
+@dataclass
+class EvalReport:
+    recall_at_1: float
+    recall_at_3: float
+    recall_at_5: float
+    recall_at_10: float
+    mrr: float
+    n_queries: int
+    failure_cases: list[QueryResult]
+    per_query: list[QueryResult]
+
+
+class RAGEvalHarness:
+    def __init__(
+        self,
+        retrieve_fn: Callable[[str, int], list[str]],
+        k_values: list[int] | None = None,
+    ):
+        self.retrieve_fn = retrieve_fn
+        self.k_values = k_values or [1, 3, 5, 10]
+
+    def _compute_reciprocal_rank(
+        self, retrieved_ids: list[str], relevant_ids: list[str]
+    ) -> float:
+        \"\"\"Return 1/rank of the first relevant document, 0 if not found.\"\"\"
+        # TODO: implement
+        raise NotImplementedError
+
+    def evaluate(self, test_cases: list[TestCase]) -> EvalReport:
+        \"\"\"Run evaluation and return aggregate report with failure cases.\"\"\"
+        # TODO: implement
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class TestCase:
+    query: str
+    relevant_doc_ids: list[str]
+    description: str = ""
+
+
+@dataclass
+class QueryResult:
+    query: str
+    relevant_doc_ids: list[str]
+    retrieved_ids: list[str]
+    recall_at_k: dict[int, bool]
+    reciprocal_rank: float
+
+
+@dataclass
+class EvalReport:
+    recall_at_1: float
+    recall_at_3: float
+    recall_at_5: float
+    recall_at_10: float
+    mrr: float
+    n_queries: int
+    failure_cases: list[QueryResult]
+    per_query: list[QueryResult]
+
+
+class RAGEvalHarness:
+    def __init__(
+        self,
+        retrieve_fn: Callable[[str, int], list[str]],
+        k_values: list[int] | None = None,
+    ):
+        self.retrieve_fn = retrieve_fn
+        self.k_values = k_values or [1, 3, 5, 10]
+
+    def _compute_reciprocal_rank(
+        self, retrieved_ids: list[str], relevant_ids: list[str]
+    ) -> float:
+        relevant_set = set(relevant_ids)
+        for rank, doc_id in enumerate(retrieved_ids, start=1):
+            if doc_id in relevant_set:
+                return 1.0 / rank
+        return 0.0
+
+    def evaluate(self, test_cases: list[TestCase]) -> EvalReport:
+        max_k = max(self.k_values)
+        per_query: list[QueryResult] = []
+
+        for tc in test_cases:
+            retrieved = self.retrieve_fn(tc.query, max_k)
+            relevant_set = set(tc.relevant_doc_ids)
+            recall_at_k = {
+                k: any(doc_id in relevant_set for doc_id in retrieved[:k])
+                for k in self.k_values
+            }
+            rr = self._compute_reciprocal_rank(retrieved, tc.relevant_doc_ids)
+            per_query.append(QueryResult(
+                query=tc.query, relevant_doc_ids=tc.relevant_doc_ids,
+                retrieved_ids=retrieved, recall_at_k=recall_at_k, reciprocal_rank=rr,
+            ))
+
+        n = len(per_query)
+        if n == 0:
+            return EvalReport(0.0, 0.0, 0.0, 0.0, 0.0, 0, [], [])
+
+        def avg_recall(k: int) -> float:
+            return sum(1 for qr in per_query if qr.recall_at_k.get(k, False)) / n
+
+        failure_cases = [qr for qr in per_query if not qr.recall_at_k.get(10, False)]
+
+        return EvalReport(
+            recall_at_1=round(avg_recall(1), 3),
+            recall_at_3=round(avg_recall(3), 3),
+            recall_at_5=round(avg_recall(5), 3),
+            recall_at_10=round(avg_recall(10), 3),
+            mrr=round(sum(qr.reciprocal_rank for qr in per_query) / n, 3),
+            n_queries=n,
+            failure_cases=failure_cases,
+            per_query=per_query,
+        )
+
+
+# --- Demo ---
+MOCK_INDEX = {
+    "What is the file upload limit?": ["faq-limits", "help-files"],
+    "How do I reset my password?": ["auth-reset", "help-account"],
+    "Unknown query": ["unrelated-1"],
+}
+def mock_retrieve(query: str, k: int) -> list[str]:
+    return MOCK_INDEX.get(query, ["unrelated-1"])[:k]
+
+test_cases = [
+    TestCase(query="What is the file upload limit?", relevant_doc_ids=["faq-limits"]),
+    TestCase(query="How do I reset my password?", relevant_doc_ids=["auth-reset"]),
+    TestCase(query="Unknown query", relevant_doc_ids=["missing-doc"]),
+]
+harness = RAGEvalHarness(retrieve_fn=mock_retrieve)
+report = harness.evaluate(test_cases)
+print(f"Recall@1={report.recall_at_1}, Recall@3={report.recall_at_3}, MRR={report.mrr}")
+print(f"Failures: {len(report.failure_cases)}")
+""",
+        "explanation_md": """\
+## Walkthrough: RAG Evaluation Harness
+
+**Recall@K vs. MRR.** Recall@K is binary: did the relevant document appear in the top K? It does not care whether it was rank 1 or rank K. MRR rewards systems that place the relevant document near the top: rank 1 gives 1.0, rank 5 gives 0.2. For user-facing applications, MRR is often more predictive of user satisfaction because users rarely scroll past the first few results.
+
+**The injectable retrieve_fn makes the harness system-agnostic.** You can test a Chroma collection, an Elasticsearch index, a hybrid retriever, or a mock without modifying the harness. This is essential for A/B testing: define two `retrieve_fn` closures, run the harness on both, and compare reports side by side.
+
+**Failure cases are the most actionable output.** An aggregate Recall@10 of 0.6 tells you 40% of queries fail retrieval. The failure_cases list tells you exactly which queries fail and what was retrieved instead. Debugging starts here: look at the failure cases, inspect the retrieved chunks, and determine whether the failure is a chunking issue (relevant content split across chunks), a semantic gap (terminology mismatch), or an indexing issue (document not in the index).
+
+**Building the test set.** The labeling burden is the main objection. Practical approach: start with 20 queries from real user logs or domain experts. For each, identify which source document should answer it. One hour of effort creates a regression guard that catches every future retrieval change that silently degrades quality.
+""",
+        "tags_json": ["retrieval", "rag", "evaluation", "recall", "mrr"],
+    },
+    {
+        "title": "Implement query expansion for improved RAG recall",
+        "slug": "rag-query-expansion",
+        "category": "retrieval",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement Query Expansion for Improved RAG Recall
+
+Users do not always phrase their questions the way your documents phrase their answers. A user asks "how do I cancel my subscription" but the documentation says "to terminate your membership agreement." Embedding similarity handles common paraphrases well, but for domain-specific or legal/medical terminology gaps, generating multiple query variants and merging results is more reliable.
+
+### What you are building
+
+Create a `QueryExpander` class that:
+
+1. **Generates query variants** using an injectable LLM function — given the original query, produce N alternative phrasings with different vocabulary.
+2. **Retrieves candidates** for each variant (including the original) using an injectable retrieve function.
+3. **Merges and deduplicates** all results using Reciprocal Rank Fusion (RRF) with k=60.
+4. **Returns a `QueryExpansionResult`** with: original query, expanded queries, merged results with RRF scores, per-variant results for debugging, and `found_by_queries` count per document.
+
+### Why this matters
+
+Query expansion consistently improves recall for domain-specific queries. Documents appearing in results for multiple query variants are likely genuinely relevant — multi-variant agreement is a strong relevance signal. The cost is N small-model LLM calls plus N retrieve calls per query.
+
+### Constraints
+
+- LLM function: `Callable[[str, int], list[str]]` — query + n -> variants.
+- Retrieve function: `Callable[[str, int], list[tuple[str, float]]]` — query + k -> `[(doc_id, score)]`.
+- Use RRF k=60. Type-hint everything.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class ExpandedResult:
+    doc_id: str
+    rrf_score: float
+    found_by_queries: list[str]
+
+
+@dataclass
+class QueryExpansionResult:
+    original_query: str
+    expanded_queries: list[str]
+    merged_results: list[ExpandedResult]
+    per_variant: dict[str, list[tuple[str, float]]]
+
+
+def rrf_merge(
+    ranked_lists: list[list[tuple[str, float]]],
+    k: int = 60,
+) -> list[tuple[str, float]]:
+    \"\"\"Merge ranked lists: score(doc) = sum(1 / (k + rank)) across all lists.\"\"\"
+    # TODO: implement
+    raise NotImplementedError
+
+
+class QueryExpander:
+    def __init__(
+        self,
+        expand_fn: Callable[[str, int], list[str]],
+        retrieve_fn: Callable[[str, int], list[tuple[str, float]]],
+        n_variants: int = 3,
+        top_k_per_query: int = 10,
+    ):
+        self.expand_fn = expand_fn
+        self.retrieve_fn = retrieve_fn
+        self.n_variants = n_variants
+        self.top_k_per_query = top_k_per_query
+
+    def retrieve(self, query: str) -> QueryExpansionResult:
+        \"\"\"Expand query, retrieve for all variants, merge results with RRF.\"\"\"
+        # TODO: implement
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class ExpandedResult:
+    doc_id: str
+    rrf_score: float
+    found_by_queries: list[str]
+
+
+@dataclass
+class QueryExpansionResult:
+    original_query: str
+    expanded_queries: list[str]
+    merged_results: list[ExpandedResult]
+    per_variant: dict[str, list[tuple[str, float]]]
+
+
+def rrf_merge(
+    ranked_lists: list[list[tuple[str, float]]],
+    k: int = 60,
+) -> list[tuple[str, float]]:
+    scores: dict[str, float] = defaultdict(float)
+    for ranked_list in ranked_lists:
+        for rank, (doc_id, _) in enumerate(ranked_list):
+            scores[doc_id] += 1.0 / (k + rank + 1)
+    return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+
+class QueryExpander:
+    def __init__(
+        self,
+        expand_fn: Callable[[str, int], list[str]],
+        retrieve_fn: Callable[[str, int], list[tuple[str, float]]],
+        n_variants: int = 3,
+        top_k_per_query: int = 10,
+    ):
+        self.expand_fn = expand_fn
+        self.retrieve_fn = retrieve_fn
+        self.n_variants = n_variants
+        self.top_k_per_query = top_k_per_query
+
+    def retrieve(self, query: str) -> QueryExpansionResult:
+        variants = self.expand_fn(query, self.n_variants)
+        all_queries = [query] + variants
+        per_variant: dict[str, list[tuple[str, float]]] = {}
+        ranked_lists: list[list[tuple[str, float]]] = []
+        query_for_doc: dict[str, list[str]] = defaultdict(list)
+
+        for q in all_queries:
+            results = self.retrieve_fn(q, self.top_k_per_query)
+            per_variant[q] = results
+            ranked_lists.append(results)
+            for doc_id, _ in results:
+                if q not in query_for_doc[doc_id]:
+                    query_for_doc[doc_id].append(q)
+
+        merged = rrf_merge(ranked_lists)
+        merged_results = [
+            ExpandedResult(doc_id=doc_id, rrf_score=round(score, 4),
+                           found_by_queries=query_for_doc[doc_id])
+            for doc_id, score in merged
+        ]
+        return QueryExpansionResult(
+            original_query=query, expanded_queries=variants,
+            merged_results=merged_results, per_variant=per_variant,
+        )
+
+
+# --- Demo ---
+def mock_expand(query: str, n: int) -> list[str]:
+    return {
+        "how do I cancel my subscription": ["terminate membership", "stop recurring billing", "unsubscribe"],
+    }.get(query, [f"variant {i}" for i in range(n)])[:n]
+
+CORPUS: dict[str, list[tuple[str, float]]] = {
+    "how do I cancel my subscription": [("cancel-faq", 0.91), ("billing-help", 0.78)],
+    "terminate membership": [("membership-terms", 0.88), ("cancel-faq", 0.72)],
+    "stop recurring billing": [("billing-help", 0.85), ("payment-faq", 0.70)],
+    "unsubscribe": [("plan-management", 0.83), ("cancel-faq", 0.68)],
+}
+def mock_retrieve(query: str, k: int) -> list[tuple[str, float]]:
+    return CORPUS.get(query, [])[:k]
+
+expander = QueryExpander(expand_fn=mock_expand, retrieve_fn=mock_retrieve)
+result = expander.retrieve("how do I cancel my subscription")
+print("Merged results:")
+for r in result.merged_results[:5]:
+    print(f"  {r.doc_id}: rrf={r.rrf_score}, variants={len(r.found_by_queries)}")
+""",
+        "explanation_md": """\
+## Walkthrough: Query Expansion with RRF
+
+**Why expansion improves recall.** Embedding models handle common paraphrases well but can miss domain-specific terminology gaps. When a user says "cancel" and the document says "terminate membership agreement," the embedding similarity may be too low to surface the document reliably in a domain-specific knowledge base. Expansion generates the vocabulary the documents actually use.
+
+**RRF is the right merge strategy.** A naive approach averages similarity scores across queries, which breaks when different retrieval calls return different score ranges. RRF uses only rank positions, which are comparable across any retrieval method or query. A document ranked 2nd for the original query and 1st for an expanded variant gets a strong RRF score without requiring score normalization.
+
+**found_by_queries as a confidence signal.** Documents appearing in results for multiple query variants are likely genuinely relevant — they match several different phrasings of the same intent. This multi-variant agreement can be used as a secondary boost signal or confidence threshold.
+
+**Cost control.** With n_variants=3, you make 4 retrieve calls per query (original + 3 variants). If retrieval is fast (vector DB query <50ms), this adds ~150ms to the retrieval step. The LLM expansion call is the expensive part — use a small model (gpt-4o-mini) for expansion, not a frontier model. Pre-cache expansions for your most common query patterns to eliminate expansion latency for repeat queries.
+""",
+        "tags_json": ["retrieval", "rag", "query-expansion", "rrf"],
+    },
+    {
+        "title": "Build a production RAG pipeline with caching and fallbacks",
+        "slug": "production-rag-caching-fallbacks",
+        "category": "retrieval",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Build a Production RAG Pipeline with Caching and Fallbacks
+
+A RAG pipeline that works in a demo rarely survives its first month in production. The embedding API goes down. The vector database returns stale results. The LLM provider has a service disruption. Users send the same question 50 times in an hour. Without caching and fallback strategies, every one of these situations becomes a user-facing failure.
+
+### What you are building
+
+Create a `ProductionRAGPipeline` class that adds operational resilience to a basic RAG pipeline:
+
+1. **Query result caching** — cache query -> (chunks, answer) with configurable TTL using a dict with timestamps. Cache miss triggers full retrieval + generation.
+2. **Retrieval fallback** — if the primary retriever raises an exception, fall back to a secondary retriever (injectable). Track which path was used.
+3. **Generation fallback** — if the primary LLM fails, fall back to a secondary LLM. If both fail, return a graceful degraded message.
+4. **Per-step timing** — track latency for retrieval, generation, and total in milliseconds.
+5. **Circuit breaker for the primary retriever** — after 3 consecutive failures, skip the primary and use the fallback directly until a success resets the count.
+6. **Returns a `PipelineResponse`** with: answer, chunks, from_cache bool, fallback_used string, latency breakdown, and error context.
+
+### Why this matters
+
+Caching eliminates redundant work for repeated queries (common in help-center bots where 20–40% of queries repeat within an hour). The fallback chain ensures a degraded-but-working answer instead of an error page. The circuit breaker prevents timeout latency from cascading across all requests when a service is degraded.
+
+### Constraints
+
+- Standard library only (use `time.monotonic`). Injectable callables for testability.
+- Retrieve function: `Callable[[str], list[dict]]`. LLM function: `Callable[[str, list[dict]], str]`.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import Callable, Optional
+
+
+@dataclass
+class PipelineResponse:
+    answer: str
+    chunks: list[dict]
+    from_cache: bool
+    fallback_used: str | None  # None, "retrieval", "generation", or "both"
+    latency_ms: dict[str, float]
+    error_context: str | None = None
+
+
+class CircuitBreaker:
+    def __init__(self, failure_threshold: int = 3):
+        self.failure_threshold = failure_threshold
+        self.consecutive_failures = 0
+        self.is_open = False
+
+    def record_success(self) -> None:
+        # TODO: reset consecutive_failures, set is_open = False
+        raise NotImplementedError
+
+    def record_failure(self) -> None:
+        # TODO: increment consecutive_failures, set is_open = True if threshold reached
+        raise NotImplementedError
+
+
+class ProductionRAGPipeline:
+    def __init__(
+        self,
+        primary_retrieve: Callable[[str], list[dict]],
+        fallback_retrieve: Callable[[str], list[dict]],
+        primary_llm: Callable[[str, list[dict]], str],
+        fallback_llm: Callable[[str, list[dict]], str],
+        cache_ttl_seconds: int = 3600,
+    ):
+        self.primary_retrieve = primary_retrieve
+        self.fallback_retrieve = fallback_retrieve
+        self.primary_llm = primary_llm
+        self.fallback_llm = fallback_llm
+        self.cache_ttl = cache_ttl_seconds
+        self._cache: dict[str, tuple[float, PipelineResponse]] = {}
+        self._circuit_breaker = CircuitBreaker()
+
+    def _cache_key(self, query: str) -> str:
+        raise NotImplementedError
+
+    def _get_cached(self, key: str) -> Optional[PipelineResponse]:
+        raise NotImplementedError
+
+    def _set_cached(self, key: str, response: PipelineResponse) -> None:
+        raise NotImplementedError
+
+    def query(self, query: str) -> PipelineResponse:
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import Callable, Optional
+
+
+@dataclass
+class PipelineResponse:
+    answer: str
+    chunks: list[dict]
+    from_cache: bool
+    fallback_used: str | None
+    latency_ms: dict[str, float]
+    error_context: str | None = None
+
+
+class CircuitBreaker:
+    def __init__(self, failure_threshold: int = 3):
+        self.failure_threshold = failure_threshold
+        self.consecutive_failures = 0
+        self.is_open = False
+
+    def record_success(self) -> None:
+        self.consecutive_failures = 0
+        self.is_open = False
+
+    def record_failure(self) -> None:
+        self.consecutive_failures += 1
+        if self.consecutive_failures >= self.failure_threshold:
+            self.is_open = True
+
+
+class ProductionRAGPipeline:
+    def __init__(
+        self,
+        primary_retrieve: Callable[[str], list[dict]],
+        fallback_retrieve: Callable[[str], list[dict]],
+        primary_llm: Callable[[str, list[dict]], str],
+        fallback_llm: Callable[[str, list[dict]], str],
+        cache_ttl_seconds: int = 3600,
+    ):
+        self.primary_retrieve = primary_retrieve
+        self.fallback_retrieve = fallback_retrieve
+        self.primary_llm = primary_llm
+        self.fallback_llm = fallback_llm
+        self.cache_ttl = cache_ttl_seconds
+        self._cache: dict[str, tuple[float, PipelineResponse]] = {}
+        self._circuit_breaker = CircuitBreaker()
+
+    def _cache_key(self, query: str) -> str:
+        return query.lower().strip()
+
+    def _get_cached(self, key: str) -> Optional[PipelineResponse]:
+        if key not in self._cache:
+            return None
+        stored_at, resp = self._cache[key]
+        if time.monotonic() - stored_at > self.cache_ttl:
+            del self._cache[key]
+            return None
+        return resp
+
+    def _set_cached(self, key: str, response: PipelineResponse) -> None:
+        self._cache[key] = (time.monotonic(), response)
+
+    def _degraded_response(self, chunks: list[dict], latency: dict, error: str) -> PipelineResponse:
+        return PipelineResponse(
+            answer="I'm unable to answer right now. Please try again later.",
+            chunks=chunks, from_cache=False, fallback_used="both",
+            latency_ms=latency, error_context=error,
+        )
+
+    def query(self, query: str) -> PipelineResponse:
+        overall_start = time.monotonic()
+        latency: dict[str, float] = {}
+
+        cache_key = self._cache_key(query)
+        cached = self._get_cached(cache_key)
+        if cached:
+            result = PipelineResponse(
+                answer=cached.answer, chunks=cached.chunks, from_cache=True,
+                fallback_used=cached.fallback_used, latency_ms={},
+            )
+            result.latency_ms["cache_check_ms"] = (time.monotonic() - overall_start) * 1000
+            return result
+
+        fallback_used: str | None = None
+        chunks: list[dict] = []
+        t0 = time.monotonic()
+
+        if self._circuit_breaker.is_open:
+            fallback_used = "retrieval"
+            try:
+                chunks = self.fallback_retrieve(query)
+            except Exception as exc:
+                latency["retrieval_ms"] = (time.monotonic() - t0) * 1000
+                latency["total_ms"] = (time.monotonic() - overall_start) * 1000
+                return self._degraded_response([], latency, str(exc))
+        else:
+            try:
+                chunks = self.primary_retrieve(query)
+                self._circuit_breaker.record_success()
+            except Exception as exc:
+                self._circuit_breaker.record_failure()
+                fallback_used = "retrieval"
+                try:
+                    chunks = self.fallback_retrieve(query)
+                except Exception as exc2:
+                    latency["retrieval_ms"] = (time.monotonic() - t0) * 1000
+                    latency["total_ms"] = (time.monotonic() - overall_start) * 1000
+                    return self._degraded_response([], latency, f"{exc} / {exc2}")
+        latency["retrieval_ms"] = (time.monotonic() - t0) * 1000
+
+        t0 = time.monotonic()
+        try:
+            answer = self.primary_llm(query, chunks)
+        except Exception as exc:
+            gen_fallback = "generation" if fallback_used is None else "both"
+            try:
+                answer = self.fallback_llm(query, chunks)
+                fallback_used = gen_fallback
+            except Exception as exc2:
+                latency["generation_ms"] = (time.monotonic() - t0) * 1000
+                latency["total_ms"] = (time.monotonic() - overall_start) * 1000
+                return self._degraded_response(chunks, latency, f"{exc} / {exc2}")
+        latency["generation_ms"] = (time.monotonic() - t0) * 1000
+        latency["total_ms"] = (time.monotonic() - overall_start) * 1000
+
+        response = PipelineResponse(
+            answer=answer, chunks=chunks, from_cache=False,
+            fallback_used=fallback_used, latency_ms=latency,
+        )
+        self._set_cached(cache_key, response)
+        return response
+
+
+# --- Demo ---
+call_count = {"primary": 0}
+
+def primary_retrieve(query: str) -> list[dict]:
+    call_count["primary"] += 1
+    if call_count["primary"] <= 3:
+        raise RuntimeError("Primary temporarily unavailable")
+    return [{"id": "doc-1", "text": "The answer is here."}]
+
+def fallback_retrieve(query: str) -> list[dict]:
+    return [{"id": "fallback", "text": "Fallback context."}]
+
+def primary_llm(q: str, chunks: list[dict]) -> str:
+    return f"Answer: {chunks[0]['text']}"
+
+def fallback_llm(q: str, chunks: list[dict]) -> str:
+    return "Brief fallback answer."
+
+pipeline = ProductionRAGPipeline(
+    primary_retrieve=primary_retrieve, fallback_retrieve=fallback_retrieve,
+    primary_llm=primary_llm, fallback_llm=fallback_llm, cache_ttl_seconds=60,
+)
+for i in range(6):
+    resp = pipeline.query("what is the upload limit?")
+    print(f"[{i+1}] cache={resp.from_cache}, fallback={resp.fallback_used}, answer={resp.answer[:40]}")
+""",
+        "explanation_md": """\
+## Walkthrough: Production RAG with Caching and Fallbacks
+
+**The circuit breaker prevents latency accumulation.** Without it, every request during a primary-service outage attempts the primary call, waits for a timeout, then falls back — adding 2–5 seconds of timeout latency to every query. The circuit breaker detects consecutive failures and skips the primary until a success resets the count. This keeps the fallback path as fast as if the primary never existed during an outage.
+
+**Cache TTL is a product decision, not a technical one.** For documentation RAG that updates weekly, a 1-hour TTL is safe and improves performance significantly. For content that updates frequently (pricing, inventory, news), use a shorter TTL (5–15 minutes). Cache keys should be normalized (lowercase, stripped) to improve hit rates without over-colliding on semantically equivalent queries.
+
+**The fallback LLM should be more conservative.** When the primary LLM is unavailable, the fallback may be a cheaper or less capable model. Use a simpler, more restrictive prompt for the fallback: "Answer only from the provided context. Say you don't know if the answer is not present." This reduces hallucination risk from a model that may be less effective at grounding.
+
+**`fallback_used` is a reliability metric.** Log its distribution. If 30% of queries are hitting the retrieval fallback, you have a reliability problem with the primary retriever. A rate of 0.5% is normal operational tolerance. Without this field in your observability data, you have no visibility into whether your fallback infrastructure is actively being used or lying dormant.
+""",
+        "tags_json": ["retrieval", "rag", "production", "caching", "fallbacks", "circuit-breaker"],
+    },
+    {
+        "title": "Implement BM25 keyword search from scratch",
+        "slug": "bm25-keyword-search-scratch",
+        "category": "retrieval",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement BM25 Keyword Search from Scratch
+
+Every production RAG system uses hybrid search — vector (semantic) retrieval combined with keyword (BM25) retrieval. Understanding BM25 from first principles lets you tune it for your corpus, debug unexpected ranking behavior, and explain to stakeholders why keyword search still matters in the era of embeddings.
+
+BM25 improves over plain TF-IDF in two critical ways: term saturation (doubling occurrences should not double the score — diminishing returns) and document length normalization (5 occurrences in a 100-word document is more significant than 5 in a 10,000-word document).
+
+### The BM25 formula
+
+```
+BM25(d, Q) = sum_t [ IDF(t) * tf(t,d) * (k1+1) / (tf(t,d) + k1*(1 - b + b*|d|/avgdl)) ]
+IDF(t) = log((N - df(t) + 0.5) / (df(t) + 0.5) + 1)
+```
+
+Standard defaults: k1=1.5 (term saturation), b=0.75 (length normalization).
+
+### What you are building
+
+Implement a `BM25Index` class that:
+1. **Builds the index** — tokenize documents (lowercase + whitespace split), compute IDF for each term.
+2. **Scores documents** for a query using the full BM25 formula.
+3. **Returns top-K results** sorted by score descending, excluding zero-score documents.
+
+### Constraints
+
+- Standard library only. k1 and b configurable at init time. Type-hint everything.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import math
+from collections import Counter, defaultdict
+from dataclasses import dataclass
+
+
+@dataclass
+class BM25Result:
+    doc_id: str
+    text: str
+    score: float
+
+
+def tokenize(text: str) -> list[str]:
+    return text.lower().split()
+
+
+class BM25Index:
+    def __init__(self, k1: float = 1.5, b: float = 0.75):
+        self.k1 = k1
+        self.b = b
+        self._docs: dict[str, str] = {}
+        self._doc_tf: dict[str, Counter] = {}
+        self._df: dict[str, int] = defaultdict(int)
+        self._doc_lengths: dict[str, int] = {}
+        self._avgdl: float = 0.0
+
+    def add_documents(self, docs: list[dict]) -> None:
+        \"\"\"Each doc: {\\\"id\\\": str, \\\"text\\\": str}. Tokenize, store TF, accumulate DF, compute avgdl.\"\"\"
+        # TODO: implement
+        raise NotImplementedError
+
+    def _idf(self, term: str) -> float:
+        \"\"\"IDF = log((N - df + 0.5) / (df + 0.5) + 1)\"\"\"
+        # TODO: implement
+        raise NotImplementedError
+
+    def _bm25_score(self, doc_id: str, query_terms: list[str]) -> float:
+        \"\"\"Sum BM25 formula over all query terms for one document.\"\"\"
+        # TODO: implement
+        raise NotImplementedError
+
+    def search(self, query: str, top_k: int = 10) -> list[BM25Result]:
+        \"\"\"Return top-k documents by BM25 score (exclude zero-score docs).\"\"\"
+        # TODO: implement
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import math
+from collections import Counter, defaultdict
+from dataclasses import dataclass
+
+
+@dataclass
+class BM25Result:
+    doc_id: str
+    text: str
+    score: float
+
+
+def tokenize(text: str) -> list[str]:
+    return text.lower().split()
+
+
+class BM25Index:
+    def __init__(self, k1: float = 1.5, b: float = 0.75):
+        self.k1 = k1
+        self.b = b
+        self._docs: dict[str, str] = {}
+        self._doc_tf: dict[str, Counter] = {}
+        self._df: dict[str, int] = defaultdict(int)
+        self._doc_lengths: dict[str, int] = {}
+        self._avgdl: float = 0.0
+
+    def add_documents(self, docs: list[dict]) -> None:
+        for doc in docs:
+            doc_id, text = doc["id"], doc["text"]
+            tokens = tokenize(text)
+            self._docs[doc_id] = text
+            self._doc_tf[doc_id] = Counter(tokens)
+            self._doc_lengths[doc_id] = len(tokens)
+            for term in set(tokens):
+                self._df[term] += 1
+        total = sum(self._doc_lengths.values())
+        self._avgdl = total / len(self._docs) if self._docs else 0.0
+
+    def _idf(self, term: str) -> float:
+        N = len(self._docs)
+        df = self._df.get(term, 0)
+        return math.log((N - df + 0.5) / (df + 0.5) + 1)
+
+    def _bm25_score(self, doc_id: str, query_terms: list[str]) -> float:
+        score = 0.0
+        tf_map = self._doc_tf.get(doc_id, Counter())
+        doc_len = self._doc_lengths.get(doc_id, 0)
+        for term in query_terms:
+            tf = tf_map.get(term, 0)
+            if tf == 0:
+                continue
+            idf = self._idf(term)
+            numerator = tf * (self.k1 + 1)
+            denominator = tf + self.k1 * (1 - self.b + self.b * doc_len / self._avgdl)
+            score += idf * (numerator / denominator)
+        return score
+
+    def search(self, query: str, top_k: int = 10) -> list[BM25Result]:
+        query_terms = tokenize(query)
+        scored = [
+            BM25Result(doc_id=doc_id, text=self._docs[doc_id],
+                       score=self._bm25_score(doc_id, query_terms))
+            for doc_id in self._docs
+        ]
+        scored = [r for r in scored if r.score > 0]
+        scored.sort(key=lambda r: r.score, reverse=True)
+        return scored[:top_k]
+
+
+# --- Demo ---
+index = BM25Index()
+index.add_documents([
+    {"id": "d1", "text": "BM25 is a ranking function used in information retrieval."},
+    {"id": "d2", "text": "Vector databases store high-dimensional embeddings for semantic search."},
+    {"id": "d3", "text": "Hybrid search combines BM25 keyword ranking with vector similarity scores."},
+    {"id": "d4", "text": "Information retrieval ranks documents by relevance to a user query."},
+    {"id": "d5", "text": "Semantic search finds documents based on meaning rather than exact keywords."},
+])
+
+print("Query: 'BM25 ranking retrieval'")
+for r in index.search("BM25 ranking retrieval", top_k=3):
+    print(f"  [{r.score:.3f}] {r.doc_id}: {r.text[:60]}...")
+
+print("\\nQuery: 'semantic similarity vector'")
+for r in index.search("semantic similarity vector", top_k=3):
+    print(f"  [{r.score:.3f}] {r.doc_id}: {r.text[:60]}...")
+""",
+        "explanation_md": """\
+## Walkthrough: BM25 from Scratch
+
+**Why BM25 beats plain TF-IDF.** Plain TF-IDF rewards documents that mention a query term many times with no ceiling. BM25's saturation term `tf / (tf + k1 * ...)` creates a soft ceiling: the score grows quickly for the first few occurrences, then asymptotes. This makes BM25 more robust to keyword stuffing and to documents that repeat a term versus documents that use it precisely.
+
+**The length normalization parameter b.** Setting `b=0` eliminates length normalization entirely — longer documents are not penalized for their length. Setting `b=1` fully penalizes long documents relative to the corpus average. The canonical `b=0.75` works well for most prose. For very short documents (FAQ entries, product descriptions), try `b=0.5` to reduce the penalty for naturally short content.
+
+**k1 controls saturation speed.** `k1=1.5` is the standard starting value. For corpora where high term frequency is a strong signal (code repositories, technical manuals where a function name appearing 10 times is very significant), try `k1=2.0`. For conversational text where repetition is less meaningful, `k1=1.0` flattens the saturation curve.
+
+**In hybrid search, BM25 and vector search complement each other.** Vector search excels at paraphrases, synonyms, and semantic similarity. BM25 excels at exact entity matches — product names, error codes, model numbers, acronyms, and version strings. These are exactly the identifiers that embedding models often fail to match precisely. Hybrid search with RRF merging consistently outperforms either alone across real-world query distributions.
+""",
+        "tags_json": ["retrieval", "rag", "bm25", "keyword-search", "hybrid-search"],
+    },
+    {
+        "title": "Build a multi-stage RAG pipeline with query routing",
+        "slug": "rag-multi-stage-routing",
+        "category": "retrieval",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Build a Multi-Stage RAG Pipeline with Query Routing
+
+Not all queries are the same. "What is our refund policy?" is a simple factual lookup. "Compare our Q3 2023 and Q4 2023 revenue performance" requires retrieving from multiple documents and synthesizing across them. Using the same retrieval pipeline for both wastes resources and produces worse answers for synthesis queries.
+
+Query routing classifies incoming queries and directs them to specialized retrieval strategies optimized for each query type.
+
+### What you are building
+
+Create a `RoutedRAGPipeline` with:
+
+1. **A query classifier** — injectable function that returns a `QueryType` enum: `FACTUAL`, `SYNTHESIS`, or `OUT_OF_SCOPE`.
+2. **Factual retrieval** — retrieves top-3 chunks for precision-optimized answering.
+3. **Synthesis retrieval** — retrieves top-8 chunks, groups by `source` metadata field, deduplicates within each source, returns a multi-source context map for comparative answering.
+4. **Out-of-scope handling** — returns a canned response without any retrieval or LLM calls.
+5. **Context formatting** — factual uses a numbered list with source labels; synthesis uses per-source block headers (`### Source: {name}`).
+6. **Returns a `RoutedResponse`** with: answer, query_type, routing_reason, chunks_used, and latency breakdown.
+
+### Constraints
+
+- Injectable classifier and retrieve functions. `QueryType` as a Python Enum. Type-hint everything.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+import time
+from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Callable
+
+
+class QueryType(Enum):
+    FACTUAL = "factual"
+    SYNTHESIS = "synthesis"
+    OUT_OF_SCOPE = "out_of_scope"
+
+
+@dataclass
+class Chunk:
+    id: str
+    text: str
+    score: float
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class RoutedResponse:
+    answer: str
+    query_type: QueryType
+    routing_reason: str
+    chunks_used: list[Chunk]
+    latency_ms: dict[str, float]
+
+
+def format_factual_context(chunks: list[Chunk]) -> str:
+    # TODO: numbered list: "[1] (Source: {source})\\n{text}"
+    raise NotImplementedError
+
+
+def format_synthesis_context(source_map: dict[str, list[Chunk]]) -> str:
+    # TODO: per-source blocks: "### Source: {name}\\n- {text}\\n..."
+    raise NotImplementedError
+
+
+class RoutedRAGPipeline:
+    def __init__(
+        self,
+        classify_fn: Callable[[str], QueryType],
+        retrieve_fn: Callable[[str, int], list[Chunk]],
+        llm_fn: Callable[[str, str], str],  # (question, context) -> answer
+        scope_description: str = "our product documentation",
+    ):
+        self.classify_fn = classify_fn
+        self.retrieve_fn = retrieve_fn
+        self.llm_fn = llm_fn
+        self.scope_description = scope_description
+
+    def query(self, question: str) -> RoutedResponse:
+        \"\"\"Classify, route to appropriate strategy, generate answer.\"\"\"
+        # TODO: implement
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+import time
+from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Callable
+
+
+class QueryType(Enum):
+    FACTUAL = "factual"
+    SYNTHESIS = "synthesis"
+    OUT_OF_SCOPE = "out_of_scope"
+
+
+@dataclass
+class Chunk:
+    id: str
+    text: str
+    score: float
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class RoutedResponse:
+    answer: str
+    query_type: QueryType
+    routing_reason: str
+    chunks_used: list[Chunk]
+    latency_ms: dict[str, float]
+
+
+def format_factual_context(chunks: list[Chunk]) -> str:
+    parts = [
+        f"[{i}] (Source: {c.metadata.get('source', 'unknown')})\\n{c.text}"
+        for i, c in enumerate(chunks, 1)
+    ]
+    return "\\n\\n".join(parts)
+
+
+def format_synthesis_context(source_map: dict[str, list[Chunk]]) -> str:
+    parts = []
+    for source, chunks in source_map.items():
+        lines = "\\n".join(f"- {c.text}" for c in chunks)
+        parts.append(f"### Source: {source}\\n{lines}")
+    return "\\n\\n".join(parts)
+
+
+class RoutedRAGPipeline:
+    def __init__(
+        self,
+        classify_fn: Callable[[str], QueryType],
+        retrieve_fn: Callable[[str, int], list[Chunk]],
+        llm_fn: Callable[[str, str], str],
+        scope_description: str = "our product documentation",
+    ):
+        self.classify_fn = classify_fn
+        self.retrieve_fn = retrieve_fn
+        self.llm_fn = llm_fn
+        self.scope_description = scope_description
+
+    def query(self, question: str) -> RoutedResponse:
+        latency: dict[str, float] = {}
+        overall_start = time.monotonic()
+
+        t0 = time.monotonic()
+        query_type = self.classify_fn(question)
+        latency["classify_ms"] = (time.monotonic() - t0) * 1000
+
+        if query_type == QueryType.OUT_OF_SCOPE:
+            latency["total_ms"] = (time.monotonic() - overall_start) * 1000
+            return RoutedResponse(
+                answer=f"I can only answer questions about {self.scope_description}.",
+                query_type=query_type,
+                routing_reason="Query classified as out-of-scope — skipped retrieval and generation.",
+                chunks_used=[], latency_ms=latency,
+            )
+
+        t0 = time.monotonic()
+        if query_type == QueryType.FACTUAL:
+            chunks = self.retrieve_fn(question, 3)
+            context = format_factual_context(chunks)
+            routing_reason = "Factual query: retrieved top-3 chunks for precision."
+            chunks_used = chunks
+        else:  # SYNTHESIS
+            chunks = self.retrieve_fn(question, 8)
+            source_map: dict[str, list[Chunk]] = defaultdict(list)
+            seen: set[tuple] = set()
+            for chunk in chunks:
+                source = chunk.metadata.get("source", "unknown")
+                key = (source, chunk.text[:50])
+                if key not in seen:
+                    source_map[source].append(chunk)
+                    seen.add(key)
+            context = format_synthesis_context(dict(source_map))
+            routing_reason = f"Synthesis query: retrieved from {len(source_map)} source(s)."
+            chunks_used = chunks
+        latency["retrieval_ms"] = (time.monotonic() - t0) * 1000
+
+        t0 = time.monotonic()
+        answer = self.llm_fn(question, context)
+        latency["generation_ms"] = (time.monotonic() - t0) * 1000
+        latency["total_ms"] = (time.monotonic() - overall_start) * 1000
+
+        return RoutedResponse(
+            answer=answer, query_type=query_type,
+            routing_reason=routing_reason, chunks_used=chunks_used, latency_ms=latency,
+        )
+
+
+# --- Demo ---
+def mock_classify(query: str) -> QueryType:
+    q = query.lower()
+    if any(w in q for w in ["compare", "vs", "versus", "difference between"]):
+        return QueryType.SYNTHESIS
+    if any(w in q for w in ["weather", "stock price", "sports score"]):
+        return QueryType.OUT_OF_SCOPE
+    return QueryType.FACTUAL
+
+def mock_retrieve(query: str, k: int) -> list[Chunk]:
+    return [Chunk(id=f"c{i}", text=f"Content chunk {i}", score=0.9 - i * 0.1,
+                  metadata={"source": f"doc-{i % 2 + 1}.md"}) for i in range(k)]
+
+def mock_llm(question: str, context: str) -> str:
+    return f"Answer to '{question[:40]}' using {len(context)} chars of context."
+
+pipeline = RoutedRAGPipeline(classify_fn=mock_classify, retrieve_fn=mock_retrieve, llm_fn=mock_llm)
+for q in ["What is our refund policy?", "Compare Q3 and Q4 revenue", "What is the weather today?"]:
+    resp = pipeline.query(q)
+    print(f"Q: {q}")
+    print(f"   type={resp.query_type.value}, chunks={len(resp.chunks_used)}, reason={resp.routing_reason}")
+""",
+        "explanation_md": """\
+## Walkthrough: Multi-Stage RAG with Query Routing
+
+**Routing as a product decision.** The classifier determines how much retrieval effort is applied to each query. A factual query needs precision (top-3, highest-quality chunks). A synthesis query needs breadth (top-8, multiple sources, grouped by origin). Applying the synthesis strategy to a factual query wastes tokens and adds latency; applying the factual strategy to a synthesis query produces a single-source answer when the user needs a comparison.
+
+**The source_map structure enables genuine comparison.** When a user asks to compare two things — documents, time periods, products — the context structure matters deeply. A flat chunk list hides which source contributed which information. The per-source block structure (`### Source: q3-report.pdf / ### Source: q4-report.pdf`) makes it straightforward for the LLM to attribute claims to the correct source and produce a genuinely comparative answer rather than a synthesis of one source.
+
+**Out-of-scope handling eliminates low-confidence answers.** Many RAG systems treat every query as retrieval-eligible and return uncertain answers for questions the corpus cannot answer. A classifier that detects out-of-scope queries eliminates these cases: the response is deterministic (no LLM call), costs nothing (no retrieval or generation), and is more honest than returning a low-confidence RAG answer that confuses the user.
+
+**Track routing decisions in your eval harness.** A misclassified synthesis query routed to factual produces an incomplete answer; a misclassified factual query routed to synthesis wastes retrieval budget. Including query_type and routing_reason in your observability data lets you detect systematic misclassification patterns — often revealing specific query phrasings that need special handling in the classifier.
+""",
+        "tags_json": ["retrieval", "rag", "routing", "multi-stage", "production"],
+    },
+]
+
 # ── Python-for-AI exercises ───────────────────────────────────────────────────
 EXERCISES += [
     {
@@ -13022,6 +14518,1630 @@ The routing stats enable cost attribution by model. In production, enrich this w
     },
 ]
 
+EXERCISES += [
+    {
+        "title": "Validate LLM structured output with Pydantic",
+        "slug": "validate-llm-structured-output-pydantic",
+        "category": "python-refresh",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Validate LLM Structured Output with Pydantic
+
+LLMs frequently return structured data that does not perfectly match what you asked for. A model asked to extract entities might wrap its JSON in a markdown code fence. It might omit required fields. It might return a string where you expect a list. Your application code should never let these failures propagate silently.
+
+### What to build
+
+Implement a `parse_llm_output` function that robustly parses and validates LLM-generated structured data:
+
+1. **Strip markdown code fences** — handle responses wrapped in ` ```json ` or ` ``` ` blocks.
+2. **Extract the JSON object or array** — find the outermost `{...}` or `[...]` even when surrounded by prose.
+3. **Validate against a Pydantic model** — use `model_class.model_validate()` to check the parsed JSON.
+4. **Return a typed result** — return a `ParseResult` dataclass with: `success: bool`, `data: BaseModel | None`, `error: str | None`, `raw: str`.
+
+Also implement `ExtractedFacts`, a Pydantic model for the test case:
+- `subject: str` — required, minimum length 1
+- `claims: list[str]` — required, minimum 1 item
+- `confidence: float` — required, between 0.0 and 1.0
+
+### Why this matters
+
+LLM structured outputs fail in the same small set of predictable ways. Building one robust parser you can reuse across many prompt tasks is far better than adding ad-hoc cleanup logic everywhere. Explicit `ParseResult` return types give callers the information they need to decide how to handle failures — log and skip, retry, or escalate to a human reviewer.
+
+### Constraints
+
+- Do not use `eval()` or `ast.literal_eval()` to parse JSON — use `json.loads()`.
+- Handle the case where JSON extraction succeeds but Pydantic validation fails.
+- All fields of `ParseResult` should be populated even on failure.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import json
+import re
+from dataclasses import dataclass
+from typing import TypeVar, Type
+from pydantic import BaseModel, Field
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
+@dataclass
+class ParseResult:
+    success: bool
+    data: BaseModel | None
+    error: str | None
+    raw: str
+
+
+class ExtractedFacts(BaseModel):
+    subject: str = Field(min_length=1)
+    claims: list[str] = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+def parse_llm_output(raw_text: str, model_class: Type[ModelT]) -> ParseResult:
+    # TODO: strip markdown fences
+    # TODO: find outermost JSON object or array
+    # TODO: parse JSON and validate against model_class
+    # TODO: return ParseResult with success, data, error, raw
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import json
+import re
+from dataclasses import dataclass
+from typing import TypeVar, Type
+from pydantic import BaseModel, Field, ValidationError
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
+@dataclass
+class ParseResult:
+    success: bool
+    data: BaseModel | None
+    error: str | None
+    raw: str
+
+
+class ExtractedFacts(BaseModel):
+    subject: str = Field(min_length=1)
+    claims: list[str] = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+def parse_llm_output(raw_text: str, model_class: Type[ModelT]) -> ParseResult:
+    text = raw_text.strip()
+
+    # Strip markdown code fences (```json ... ``` or ``` ... ```)
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\\n?", "", text)
+        text = re.sub(r"\\n?```$", "", text.strip())
+
+    # Find outermost JSON object or array
+    match = re.search(r"(\\{[\\s\\S]*\\}|\\[[\\s\\S]*\\])", text)
+    if not match:
+        return ParseResult(
+            success=False,
+            data=None,
+            error="No JSON object or array found in LLM output",
+            raw=raw_text,
+        )
+
+    json_str = match.group(1)
+
+    try:
+        parsed_dict = json.loads(json_str)
+    except json.JSONDecodeError as exc:
+        return ParseResult(
+            success=False,
+            data=None,
+            error=f"JSON parse error: {exc}",
+            raw=raw_text,
+        )
+
+    try:
+        validated = model_class.model_validate(parsed_dict)
+        return ParseResult(success=True, data=validated, error=None, raw=raw_text)
+    except ValidationError as exc:
+        return ParseResult(
+            success=False,
+            data=None,
+            error=f"Validation error: {exc.error_count()} error(s): {exc.errors()[0]['msg']}",
+            raw=raw_text,
+        )
+
+
+# Tests
+raw_clean = '{"subject": "Python", "claims": ["typed", "dynamic"], "confidence": 0.9}'
+result = parse_llm_output(raw_clean, ExtractedFacts)
+assert result.success, f"Expected success, got: {result.error}"
+assert result.data.subject == "Python"
+assert result.data.confidence == 0.9
+
+raw_fenced = '```json\\n{"subject": "AI", "claims": ["powerful"], "confidence": 0.8}\\n```'
+result2 = parse_llm_output(raw_fenced, ExtractedFacts)
+assert result2.success, f"Fenced case failed: {result2.error}"
+
+raw_prose = 'Here is the result: {"subject": "LLMs", "claims": ["useful"], "confidence": 0.7} Hope that helps!'
+result3 = parse_llm_output(raw_prose, ExtractedFacts)
+assert result3.success, f"Prose case failed: {result3.error}"
+
+raw_invalid = '{"subject": "", "claims": [], "confidence": 1.5}'
+result4 = parse_llm_output(raw_invalid, ExtractedFacts)
+assert not result4.success, "Expected validation failure"
+assert result4.error is not None
+
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The three-step extraction pipeline — strip fences, find JSON, validate — handles the vast majority of LLM structured output failures. The key design decisions:
+
+**Explicit ParseResult over exceptions.** Callers can check `result.success` without catching exceptions. This makes batch processing clean: collect failures, count them, and decide on retry or escalation policy without try/except in the caller.
+
+**Regex for fence stripping, not a split.** Code fences are inconsistently formatted by different models. The regex handles both ` ```json ` and bare ` ``` `, with or without newlines.
+
+**re.DOTALL via `[\\s\\S]*` in the JSON extractor.** Multi-line JSON objects need the dot (or equivalent) to match newlines. The `[\\s\\S]*` pattern works without the `re.DOTALL` flag.
+
+**Pydantic ValidationError gives actionable errors.** The error message includes which field failed and why, making it easy to identify which part of your prompt output format is inconsistent.
+
+In production, log failed `ParseResult` instances with the original `raw` field so you can inspect real LLM output failures without needing to reproduce the prompt.
+""",
+        "tags_json": ["python-refresh", "pydantic", "llm-output", "validation"],
+    },
+    {
+        "title": "Build a streaming token accumulator",
+        "slug": "streaming-token-accumulator",
+        "category": "python-refresh",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a Streaming Token Accumulator
+
+LLM providers stream responses as a sequence of small delta chunks. Each chunk contains a fragment of the final response — sometimes a single character, sometimes a few words. Your application needs to both forward these deltas in real time and accumulate the complete final response for logging, caching, and downstream processing.
+
+### What to build
+
+Implement a `StreamAccumulator` class that:
+
+1. **Accepts token deltas** via `push(delta: str)` — each call represents one streamed chunk.
+2. **Tracks the accumulated text** — `text` property returns the full response so far.
+3. **Counts tokens** — `token_count` property returns the number of whitespace-separated tokens accumulated (a simple approximation).
+4. **Signals completion** — `finish(finish_reason: str)` marks the stream as done and stores the reason.
+5. **Provides a final result** — `result()` returns a `StreamResult` dataclass with: `text: str`, `token_count: int`, `finish_reason: str`, and raises `RuntimeError` if called before `finish()`.
+
+Also implement `stream_to_accumulator(chunks: Iterator[dict]) -> StreamResult` — a function that drives a `StreamAccumulator` from an iterator of `{"delta": str, "done": bool, "finish_reason": str | None}` dicts.
+
+### Why this matters
+
+Every LLM streaming integration needs this pattern. Forwarding tokens to a WebSocket, a file, or a queue is the easy part. Knowing when the stream ended and capturing the complete response for logging and caching requires explicit accumulation. Without it, you end up re-implementing this logic in every streaming callsite.
+
+### Constraints
+
+- `push()` after `finish()` should raise `RuntimeError`.
+- `result()` before `finish()` should raise `RuntimeError`.
+- No external dependencies — standard library only.
+""",
+        "starter_code": """\
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Iterator
+
+
+@dataclass
+class StreamResult:
+    text: str
+    token_count: int
+    finish_reason: str
+
+
+class StreamAccumulator:
+    def __init__(self) -> None:
+        # TODO: initialize internal state
+        raise NotImplementedError
+
+    def push(self, delta: str) -> None:
+        # TODO: append delta, raise if already finished
+        raise NotImplementedError
+
+    @property
+    def text(self) -> str:
+        # TODO: return accumulated text so far
+        raise NotImplementedError
+
+    @property
+    def token_count(self) -> int:
+        # TODO: return whitespace-token count of accumulated text
+        raise NotImplementedError
+
+    def finish(self, finish_reason: str) -> None:
+        # TODO: mark stream as done, store finish_reason
+        raise NotImplementedError
+
+    def result(self) -> StreamResult:
+        # TODO: return StreamResult, raise if not finished
+        raise NotImplementedError
+
+
+def stream_to_accumulator(chunks: Iterator[dict]) -> StreamResult:
+    # TODO: drive StreamAccumulator from chunk iterator
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Iterator
+
+
+@dataclass
+class StreamResult:
+    text: str
+    token_count: int
+    finish_reason: str
+
+
+class StreamAccumulator:
+    def __init__(self) -> None:
+        self._parts: list[str] = []
+        self._finished: bool = False
+        self._finish_reason: str = ""
+
+    def push(self, delta: str) -> None:
+        if self._finished:
+            raise RuntimeError("Cannot push to a finished stream")
+        self._parts.append(delta)
+
+    @property
+    def text(self) -> str:
+        return "".join(self._parts)
+
+    @property
+    def token_count(self) -> int:
+        return len(self.text.split()) if self.text.strip() else 0
+
+    def finish(self, finish_reason: str) -> None:
+        self._finished = True
+        self._finish_reason = finish_reason
+
+    def result(self) -> StreamResult:
+        if not self._finished:
+            raise RuntimeError("Stream is not finished yet; call finish() first")
+        return StreamResult(
+            text=self.text,
+            token_count=self.token_count,
+            finish_reason=self._finish_reason,
+        )
+
+
+def stream_to_accumulator(chunks: Iterator[dict]) -> StreamResult:
+    acc = StreamAccumulator()
+    for chunk in chunks:
+        if chunk.get("delta"):
+            acc.push(chunk["delta"])
+        if chunk.get("done"):
+            acc.finish(chunk.get("finish_reason") or "stop")
+            break
+    if not acc._finished:
+        acc.finish("end_of_stream")
+    return acc.result()
+
+
+# Tests
+acc = StreamAccumulator()
+for word in ["Hello", ", ", "world", "!"]:
+    acc.push(word)
+assert acc.text == "Hello, world!"
+assert acc.token_count == 2  # "Hello," and "world!"
+
+acc.finish("stop")
+result = acc.result()
+assert result.text == "Hello, world!"
+assert result.finish_reason == "stop"
+
+try:
+    acc.push("extra")
+    assert False, "Should have raised RuntimeError"
+except RuntimeError:
+    pass
+
+acc2 = StreamAccumulator()
+try:
+    acc2.result()
+    assert False, "Should have raised RuntimeError"
+except RuntimeError:
+    pass
+
+chunks = iter([
+    {"delta": "The ", "done": False},
+    {"delta": "answer ", "done": False},
+    {"delta": "is 42.", "done": True, "finish_reason": "stop"},
+])
+result2 = stream_to_accumulator(chunks)
+assert result2.text == "The answer is 42."
+assert result2.finish_reason == "stop"
+
+print("All tests passed.")
+""",
+        "explanation_md": """\
+`StreamAccumulator` uses a list of string parts rather than string concatenation. Concatenating strings in a loop creates O(n²) intermediate objects because each `+=` allocates a new string. `"".join(parts)` at read time is O(n) and avoids the allocation pressure during streaming.
+
+The `_finished` flag enforces the state machine: push-only before finish, read-only after. This catches two real bugs: accidentally pushing to a finished stream (e.g., a late-arriving chunk after timeout) and reading a partial result before the stream ends.
+
+`stream_to_accumulator` adds a safety finish if the iterator exhausts without a `done: True` chunk. This handles providers that end the stream without an explicit done signal — a real edge case with some streaming implementations.
+
+In production, extend `StreamResult` with `latency_ms` (time from first push to finish), `chunk_count` (for throughput analysis), and `first_token_ms` (time-to-first-token, the metric users perceive most strongly).
+""",
+        "tags_json": ["python-refresh", "streaming", "generators", "llm-patterns"],
+    },
+    {
+        "title": "Implement token counting and cost tracking",
+        "slug": "token-counting-cost-tracking",
+        "category": "python-refresh",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement Token Counting and Cost Tracking
+
+Token usage is the billing unit for every major LLM API. Without explicit tracking, AI features run with no cost visibility until the monthly invoice arrives. Engineers who track token usage per request can answer "which feature costs the most?", "is this prompt getting more expensive over time?", and "what is the P95 cost per user session?"
+
+### What to build
+
+Implement a `CostTracker` class that records token usage across multiple LLM calls and computes cost summaries:
+
+1. **`record(model: str, input_tokens: int, output_tokens: int, feature: str)` method** — records one LLM call with its token usage and the product feature that made the call.
+2. **`total_cost_usd()` method** — returns the total USD cost across all recorded calls.
+3. **`cost_by_feature()` method** — returns a dict mapping feature name to total USD cost.
+4. **`cost_by_model()` method** — returns a dict mapping model name to total USD cost.
+5. **`summary()` method** — returns a dict with `total_calls`, `total_input_tokens`, `total_output_tokens`, `total_cost_usd`, `cost_by_feature`, `cost_by_model`.
+
+Also implement `MODEL_COSTS: dict[str, dict]` — a lookup table mapping model name to `{"input_per_1k": float, "output_per_1k": float}`. Include at minimum:
+- `"gpt-4o"`: input $0.0025/1k, output $0.01/1k
+- `"gpt-4o-mini"`: input $0.00015/1k, output $0.0006/1k
+- `"claude-3-5-sonnet"`: input $0.003/1k, output $0.015/1k
+
+### Why this matters
+
+Token tracking is required for cost attribution in multi-feature products, budget alerts before hitting billing limits, and deciding which model tier to use based on actual usage patterns. A tracker that is easy to integrate (one `.record()` call per LLM response) gets adopted; a complex one gets bypassed.
+
+### Constraints
+
+- Raise `ValueError` for unknown model names.
+- All costs should be computed from the `MODEL_COSTS` table, not hardcoded.
+- The `summary()` method should return costs rounded to 6 decimal places.
+""",
+        "starter_code": """\
+from __future__ import annotations
+from dataclasses import dataclass, field
+from collections import defaultdict
+
+MODEL_COSTS: dict[str, dict] = {
+    # TODO: fill in model pricing
+    # format: {"input_per_1k": float, "output_per_1k": float}
+}
+
+
+@dataclass
+class CallRecord:
+    model: str
+    input_tokens: int
+    output_tokens: int
+    feature: str
+    cost_usd: float
+
+
+class CostTracker:
+    def __init__(self) -> None:
+        self._records: list[CallRecord] = []
+
+    def record(self, model: str, input_tokens: int, output_tokens: int, feature: str) -> CallRecord:
+        # TODO: look up model costs, compute cost_usd, store record
+        raise NotImplementedError
+
+    def total_cost_usd(self) -> float:
+        # TODO: sum all recorded costs
+        raise NotImplementedError
+
+    def cost_by_feature(self) -> dict[str, float]:
+        # TODO: group costs by feature name
+        raise NotImplementedError
+
+    def cost_by_model(self) -> dict[str, float]:
+        # TODO: group costs by model name
+        raise NotImplementedError
+
+    def summary(self) -> dict:
+        # TODO: return full summary dict
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+from dataclasses import dataclass, field
+from collections import defaultdict
+
+MODEL_COSTS: dict[str, dict] = {
+    "gpt-4o": {"input_per_1k": 0.0025, "output_per_1k": 0.01},
+    "gpt-4o-mini": {"input_per_1k": 0.00015, "output_per_1k": 0.0006},
+    "claude-3-5-sonnet": {"input_per_1k": 0.003, "output_per_1k": 0.015},
+}
+
+
+@dataclass
+class CallRecord:
+    model: str
+    input_tokens: int
+    output_tokens: int
+    feature: str
+    cost_usd: float
+
+
+class CostTracker:
+    def __init__(self) -> None:
+        self._records: list[CallRecord] = []
+
+    def record(self, model: str, input_tokens: int, output_tokens: int, feature: str) -> CallRecord:
+        if model not in MODEL_COSTS:
+            raise ValueError(
+                f"Unknown model '{model}'. Known models: {list(MODEL_COSTS.keys())}"
+            )
+        pricing = MODEL_COSTS[model]
+        cost = (input_tokens / 1000 * pricing["input_per_1k"]) + (
+            output_tokens / 1000 * pricing["output_per_1k"]
+        )
+        rec = CallRecord(
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            feature=feature,
+            cost_usd=cost,
+        )
+        self._records.append(rec)
+        return rec
+
+    def total_cost_usd(self) -> float:
+        return sum(r.cost_usd for r in self._records)
+
+    def cost_by_feature(self) -> dict[str, float]:
+        totals: dict[str, float] = defaultdict(float)
+        for r in self._records:
+            totals[r.feature] += r.cost_usd
+        return dict(totals)
+
+    def cost_by_model(self) -> dict[str, float]:
+        totals: dict[str, float] = defaultdict(float)
+        for r in self._records:
+            totals[r.model] += r.cost_usd
+        return dict(totals)
+
+    def summary(self) -> dict:
+        return {
+            "total_calls": len(self._records),
+            "total_input_tokens": sum(r.input_tokens for r in self._records),
+            "total_output_tokens": sum(r.output_tokens for r in self._records),
+            "total_cost_usd": round(self.total_cost_usd(), 6),
+            "cost_by_feature": {k: round(v, 6) for k, v in self.cost_by_feature().items()},
+            "cost_by_model": {k: round(v, 6) for k, v in self.cost_by_model().items()},
+        }
+
+
+# Tests
+tracker = CostTracker()
+tracker.record("gpt-4o-mini", input_tokens=1000, output_tokens=200, feature="search")
+tracker.record("gpt-4o-mini", input_tokens=800, output_tokens=300, feature="search")
+tracker.record("gpt-4o", input_tokens=2000, output_tokens=500, feature="summarize")
+tracker.record("claude-3-5-sonnet", input_tokens=1500, output_tokens=400, feature="extract")
+
+assert tracker.summary()["total_calls"] == 4
+assert tracker.summary()["total_input_tokens"] == 5300
+assert "search" in tracker.cost_by_feature()
+assert "gpt-4o" in tracker.cost_by_model()
+assert tracker.total_cost_usd() > 0
+
+try:
+    tracker.record("gpt-5-unknown", 100, 100, "test")
+    assert False, "Should raise ValueError for unknown model"
+except ValueError:
+    pass
+
+print(f"Summary: {tracker.summary()}")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The cost formula `(tokens / 1000) * price_per_1k` is straightforward but easy to get wrong when input and output tokens have different prices — which they do for every major provider. Keeping `MODEL_COSTS` as a module-level dict makes pricing easy to update when providers change rates.
+
+`defaultdict(float)` in `cost_by_feature` and `cost_by_model` avoids the `if key not in totals` check. The `dict()` conversion at return time ensures the public API returns a plain dict rather than a `defaultdict`, which can confuse callers that check for missing keys.
+
+Rounding to 6 decimal places in `summary()` prevents floating-point noise (e.g., `0.00030000000000000003`) from appearing in logs and dashboards while preserving sub-cent precision.
+
+In production, add `timestamp: datetime` to `CallRecord` so you can slice costs by time window, and store records to a database rather than in memory so cost data survives service restarts. A weekly report grouped by feature is enough to catch runaway usage before it becomes a billing surprise.
+""",
+        "tags_json": ["python-refresh", "cost-tracking", "token-counting", "llm-ops"],
+    },
+    {
+        "title": "Build a type-safe configuration loader for AI services",
+        "slug": "type-safe-config-loader",
+        "category": "python-refresh",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a Type-Safe Configuration Loader for AI Services
+
+AI services have more configuration surface than typical web backends: model names, temperature, token limits, provider API keys, retry counts, timeout values, rate limits, and feature flags. Passing these as raw environment variables or loose dicts means typos fail silently, missing required values are discovered at runtime, and the available configuration is not documented anywhere.
+
+### What to build
+
+Implement a `ServiceConfig` Pydantic settings model and a `load_config` factory function:
+
+**`ServiceConfig` fields (all from environment variables with `AI_` prefix):**
+- `provider: str` — required, one of `"openai"`, `"anthropic"`, `"local"`
+- `model: str` — required, minimum length 1
+- `api_key: str` — required for non-local providers (validate this cross-field)
+- `max_tokens: int` — default 1024, between 1 and 32768
+- `temperature: float` — default 0.7, between 0.0 and 2.0
+- `timeout_s: float` — default 30.0, minimum 1.0
+- `max_retries: int` — default 3, between 0 and 10
+- `max_concurrent: int` — default 5, between 1 and 50
+- `cache_ttl_seconds: int` — default 3600, minimum 0
+
+**`load_config(env: dict | None = None) -> ServiceConfig`** — loads config from the provided dict (or `os.environ` if None). Raises `ConfigError` (a custom exception subclassing `ValueError`) with a descriptive message if required fields are missing or invalid.
+
+### Why this matters
+
+Configuration bugs in AI services show up in the worst possible way: the service starts fine, then fails on the first request because the API key is wrong, the timeout is too short, or the model name has a typo. Pydantic settings validation catches all of these at startup, not at request time.
+
+### Constraints
+
+- Use Pydantic v2 field validators, not v1 `@validator`.
+- The `api_key` should be required when `provider != "local"` — implement this as a `@model_validator`.
+- `ConfigError` should include a clear message listing what is wrong.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import os
+from typing import Literal
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+class ConfigError(ValueError):
+    pass
+
+
+class ServiceConfig(BaseModel):
+    provider: Literal["openai", "anthropic", "local"]
+    model: str = Field(min_length=1)
+    api_key: str = ""
+    max_tokens: int = Field(default=1024, ge=1, le=32768)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    timeout_s: float = Field(default=30.0, ge=1.0)
+    max_retries: int = Field(default=3, ge=0, le=10)
+    max_concurrent: int = Field(default=5, ge=1, le=50)
+    cache_ttl_seconds: int = Field(default=3600, ge=0)
+
+    # TODO: add @model_validator that requires api_key when provider != "local"
+
+    class Config:
+        # TODO: configure env var prefix
+        pass
+
+
+def load_config(env: dict | None = None) -> ServiceConfig:
+    # TODO: load from env dict (or os.environ), raise ConfigError on failure
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import os
+from typing import Literal
+from pydantic import BaseModel, Field, model_validator, ValidationError
+
+
+class ConfigError(ValueError):
+    pass
+
+
+class ServiceConfig(BaseModel):
+    provider: Literal["openai", "anthropic", "local"]
+    model: str = Field(min_length=1)
+    api_key: str = ""
+    max_tokens: int = Field(default=1024, ge=1, le=32768)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    timeout_s: float = Field(default=30.0, ge=1.0)
+    max_retries: int = Field(default=3, ge=0, le=10)
+    max_concurrent: int = Field(default=5, ge=1, le=50)
+    cache_ttl_seconds: int = Field(default=3600, ge=0)
+
+    @model_validator(mode="after")
+    def api_key_required_for_cloud_providers(self) -> "ServiceConfig":
+        if self.provider != "local" and not self.api_key.strip():
+            raise ValueError(
+                f"api_key is required when provider='{self.provider}'. "
+                "Set AI_API_KEY in environment."
+            )
+        return self
+
+
+def load_config(env: dict | None = None) -> ServiceConfig:
+    source = env if env is not None else os.environ
+    prefix = "AI_"
+
+    # Extract fields with the AI_ prefix, lowercased
+    raw: dict = {}
+    for key, value in source.items():
+        if key.upper().startswith(prefix):
+            field_name = key[len(prefix):].lower()
+            raw[field_name] = value
+
+    try:
+        return ServiceConfig(**raw)
+    except (ValidationError, TypeError) as exc:
+        # Summarize validation errors into a single ConfigError
+        if isinstance(exc, ValidationError):
+            errors = "; ".join(
+                f"{'.'.join(str(l) for l in e['loc'])}: {e['msg']}"
+                for e in exc.errors()
+            )
+            raise ConfigError(f"Invalid AI service configuration: {errors}") from exc
+        raise ConfigError(f"Configuration error: {exc}") from exc
+
+
+# Tests
+valid_env = {
+    "AI_PROVIDER": "openai",
+    "AI_MODEL": "gpt-4o-mini",
+    "AI_API_KEY": "sk-test-key",
+    "AI_MAX_TOKENS": "2048",
+    "AI_TEMPERATURE": "0.5",
+}
+cfg = load_config(valid_env)
+assert cfg.provider == "openai"
+assert cfg.model == "gpt-4o-mini"
+assert cfg.max_tokens == 2048
+assert cfg.temperature == 0.5
+assert cfg.max_retries == 3  # default
+
+# Local provider does not need api_key
+local_env = {"AI_PROVIDER": "local", "AI_MODEL": "llama3"}
+cfg_local = load_config(local_env)
+assert cfg_local.provider == "local"
+assert cfg_local.api_key == ""
+
+# Missing api_key for cloud provider should raise ConfigError
+try:
+    load_config({"AI_PROVIDER": "anthropic", "AI_MODEL": "claude-3-5-sonnet"})
+    assert False, "Should have raised ConfigError"
+except ConfigError as e:
+    assert "api_key" in str(e).lower()
+
+# Invalid provider should raise ConfigError
+try:
+    load_config({"AI_PROVIDER": "unknown_provider", "AI_MODEL": "x", "AI_API_KEY": "k"})
+    assert False, "Should have raised ConfigError"
+except ConfigError:
+    pass
+
+print(f"Config loaded: provider={cfg.provider}, model={cfg.model}, max_tokens={cfg.max_tokens}")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The `AI_` prefix convention keeps environment variable namespacing explicit. In production, every service should have its own prefix so environment variables from different services do not collide in the same shell environment or Kubernetes ConfigMap.
+
+The `@model_validator(mode="after")` runs after all individual field validators have passed, which means `self.provider` is already a valid literal when the cross-field check runs. `mode="before"` would give you raw dict values instead of typed fields.
+
+`load_config` accepts an `env: dict | None` parameter rather than reading `os.environ` directly. This makes it trivially testable — pass a dict in tests, no monkeypatching required. It also supports loading config from sources other than environment variables (e.g., a secrets manager that populates a dict).
+
+Converting `ValidationError` to a domain-specific `ConfigError` is a clean boundary practice. Callers do not need to import Pydantic to handle configuration failures, and the error message is tailored to the operator's perspective ("Set AI_API_KEY") rather than the validation framework's perspective.
+""",
+        "tags_json": ["python-refresh", "pydantic", "configuration", "type-safety"],
+    },
+    {
+        "title": "Transform JSONL trace logs into aggregated metrics",
+        "slug": "transform-jsonl-traces-to-metrics",
+        "category": "data-transformation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Transform JSONL Trace Logs into Aggregated Metrics
+
+AI services emit structured logs for every LLM call: model used, input/output token counts, latency, feature name, and whether the call succeeded. These logs are the raw material for operational dashboards, cost attribution, and debugging regressions.
+
+### What to build
+
+Implement `aggregate_traces(lines: list[str]) -> AggregateReport` that parses JSONL trace logs and produces a structured report.
+
+**Input format** — each line is a JSON object with:
+- `request_id: str`
+- `model: str`
+- `feature: str`
+- `input_tokens: int`
+- `output_tokens: int`
+- `latency_ms: int`
+- `success: bool`
+- `error: str | null`
+
+**`AggregateReport` dataclass fields:**
+- `total_calls: int`
+- `success_count: int`
+- `failure_count: int`
+- `success_rate: float` — rounded to 4 decimal places
+- `avg_latency_ms: float` — across all calls
+- `p95_latency_ms: float` — 95th percentile latency
+- `total_input_tokens: int`
+- `total_output_tokens: int`
+- `by_model: dict[str, ModelStats]` — per-model breakdown
+- `by_feature: dict[str, FeatureStats]` — per-feature breakdown
+
+**`ModelStats`:** `call_count`, `success_rate`, `avg_latency_ms`, `total_tokens`
+
+**`FeatureStats`:** `call_count`, `success_rate`, `avg_latency_ms`, `avg_tokens_per_call`
+
+### Why this matters
+
+Operational insight from trace data is one of the most direct ways to improve an AI system. Engineers who can write this transformation quickly can answer production questions in minutes instead of filing tickets to a data team.
+
+### Constraints
+
+- Skip malformed lines (log a warning, do not abort).
+- `p95_latency_ms` should use numpy-free percentile computation.
+- All float fields rounded to 2 decimal places except `success_rate` (4 places).
+""",
+        "starter_code": """\
+from __future__ import annotations
+import json
+import logging
+from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ModelStats:
+    call_count: int
+    success_rate: float
+    avg_latency_ms: float
+    total_tokens: int
+
+
+@dataclass
+class FeatureStats:
+    call_count: int
+    success_rate: float
+    avg_latency_ms: float
+    avg_tokens_per_call: float
+
+
+@dataclass
+class AggregateReport:
+    total_calls: int
+    success_count: int
+    failure_count: int
+    success_rate: float
+    avg_latency_ms: float
+    p95_latency_ms: float
+    total_input_tokens: int
+    total_output_tokens: int
+    by_model: dict[str, ModelStats]
+    by_feature: dict[str, FeatureStats]
+
+
+def aggregate_traces(lines: list[str]) -> AggregateReport:
+    # TODO: parse lines, skip malformed, compute all metrics
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import json
+import logging
+from collections import defaultdict
+from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ModelStats:
+    call_count: int
+    success_rate: float
+    avg_latency_ms: float
+    total_tokens: int
+
+
+@dataclass
+class FeatureStats:
+    call_count: int
+    success_rate: float
+    avg_latency_ms: float
+    avg_tokens_per_call: float
+
+
+@dataclass
+class AggregateReport:
+    total_calls: int
+    success_count: int
+    failure_count: int
+    success_rate: float
+    avg_latency_ms: float
+    p95_latency_ms: float
+    total_input_tokens: int
+    total_output_tokens: int
+    by_model: dict[str, ModelStats]
+    by_feature: dict[str, FeatureStats]
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    if not values:
+        return 0.0
+    sorted_vals = sorted(values)
+    idx = (len(sorted_vals) - 1) * pct / 100
+    lower = int(idx)
+    upper = min(lower + 1, len(sorted_vals) - 1)
+    frac = idx - lower
+    return sorted_vals[lower] + frac * (sorted_vals[upper] - sorted_vals[lower])
+
+
+def aggregate_traces(lines: list[str]) -> AggregateReport:
+    records = []
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+            # Minimal validation
+            for field in ("model", "feature", "input_tokens", "output_tokens", "latency_ms", "success"):
+                if field not in rec:
+                    raise KeyError(f"missing field: {field}")
+            records.append(rec)
+        except (json.JSONDecodeError, KeyError) as exc:
+            logger.warning("skipping malformed trace line %d: %s", i, exc)
+
+    if not records:
+        return AggregateReport(
+            total_calls=0, success_count=0, failure_count=0,
+            success_rate=0.0, avg_latency_ms=0.0, p95_latency_ms=0.0,
+            total_input_tokens=0, total_output_tokens=0,
+            by_model={}, by_feature={},
+        )
+
+    total = len(records)
+    successes = sum(1 for r in records if r["success"])
+    latencies = [float(r["latency_ms"]) for r in records]
+    total_in = sum(r["input_tokens"] for r in records)
+    total_out = sum(r["output_tokens"] for r in records)
+
+    # Group by model
+    model_groups: dict[str, list] = defaultdict(list)
+    for r in records:
+        model_groups[r["model"]].append(r)
+    by_model = {}
+    for model, recs in model_groups.items():
+        by_model[model] = ModelStats(
+            call_count=len(recs),
+            success_rate=round(sum(1 for r in recs if r["success"]) / len(recs), 4),
+            avg_latency_ms=round(sum(r["latency_ms"] for r in recs) / len(recs), 2),
+            total_tokens=sum(r["input_tokens"] + r["output_tokens"] for r in recs),
+        )
+
+    # Group by feature
+    feature_groups: dict[str, list] = defaultdict(list)
+    for r in records:
+        feature_groups[r["feature"]].append(r)
+    by_feature = {}
+    for feature, recs in feature_groups.items():
+        avg_tokens = sum(r["input_tokens"] + r["output_tokens"] for r in recs) / len(recs)
+        by_feature[feature] = FeatureStats(
+            call_count=len(recs),
+            success_rate=round(sum(1 for r in recs if r["success"]) / len(recs), 4),
+            avg_latency_ms=round(sum(r["latency_ms"] for r in recs) / len(recs), 2),
+            avg_tokens_per_call=round(avg_tokens, 2),
+        )
+
+    return AggregateReport(
+        total_calls=total,
+        success_count=successes,
+        failure_count=total - successes,
+        success_rate=round(successes / total, 4),
+        avg_latency_ms=round(sum(latencies) / len(latencies), 2),
+        p95_latency_ms=round(_percentile(latencies, 95), 2),
+        total_input_tokens=total_in,
+        total_output_tokens=total_out,
+        by_model=by_model,
+        by_feature=by_feature,
+    )
+
+
+# Tests
+import json as _json
+
+test_lines = [
+    _json.dumps({"request_id": "1", "model": "gpt-4o-mini", "feature": "search",
+                 "input_tokens": 500, "output_tokens": 100, "latency_ms": 320, "success": True}),
+    _json.dumps({"request_id": "2", "model": "gpt-4o-mini", "feature": "search",
+                 "input_tokens": 600, "output_tokens": 120, "latency_ms": 280, "success": True}),
+    _json.dumps({"request_id": "3", "model": "gpt-4o", "feature": "summarize",
+                 "input_tokens": 2000, "output_tokens": 400, "latency_ms": 1800, "success": True}),
+    _json.dumps({"request_id": "4", "model": "gpt-4o-mini", "feature": "search",
+                 "input_tokens": 400, "output_tokens": 0, "latency_ms": 150, "success": False, "error": "timeout"}),
+    "malformed line",  # should be skipped
+    "",               # should be skipped
+]
+
+report = aggregate_traces(test_lines)
+assert report.total_calls == 4
+assert report.success_count == 3
+assert report.failure_count == 1
+assert report.success_rate == 0.75
+assert "gpt-4o-mini" in report.by_model
+assert "gpt-4o" in report.by_model
+assert "search" in report.by_feature
+assert report.by_model["gpt-4o-mini"].call_count == 3
+assert report.by_feature["search"].call_count == 3
+
+print(f"Report: {report.total_calls} calls, {report.success_rate:.0%} success, avg latency {report.avg_latency_ms:.0f}ms")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The `_percentile` function implements linear interpolation between sorted values — the same algorithm as `numpy.percentile` with `interpolation='linear'`. For production dashboards with large datasets, use numpy. For scripts and utility functions, this pure-Python version avoids the dependency while being accurate enough for operational decision-making.
+
+`defaultdict(list)` in the grouping step avoids the `if key not in dict: dict[key] = []` pattern. The `dict()` call at return time is not needed here since we're building `ModelStats` and `FeatureStats` objects, but the `defaultdict(list)` pattern itself is worth recognizing.
+
+Skipping malformed lines (log and continue) rather than aborting is the correct choice for data transformation functions. A single bad line in a 100K-line log file should not break the entire analysis run. The `logger.warning` call ensures engineers are aware of the skipped data without crashing.
+
+In production, add `error_types: dict[str, int]` to `FeatureStats` — a breakdown of failure reasons. Grouping failures by error type (timeout, rate_limit, validation_error) gives you an immediate next action: "3 rate limit failures in search means our semaphore is too large."
+""",
+        "tags_json": ["data-transformation", "metrics", "jsonl", "observability"],
+    },
+    {
+        "title": "Build a data pipeline with generator composition",
+        "slug": "data-pipeline-generator-composition",
+        "category": "data-transformation",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Build a Data Pipeline with Generator Composition
+
+Document ingestion pipelines need to process large corpora efficiently. Loading an entire dataset into memory before processing creates unnecessary memory pressure and prevents you from streaming results to storage as they are produced. Python generators solve both problems — but only if you compose them correctly.
+
+### What to build
+
+Implement a complete document ingestion pipeline using generator composition:
+
+1. **`read_jsonl(path: str) -> Iterator[dict]`** — reads a JSONL file line by line, skipping blank lines and logging (not aborting) parse errors.
+2. **`validate_doc(records: Iterator[dict]) -> Iterator[dict]`** — yields only records that have non-empty `"id"` and `"body"` fields (minimum 50 chars). Log skipped records.
+3. **`normalize_doc(records: Iterator[dict]) -> Iterator[dict]`** — strips whitespace from `body`, lowercases the `"source"` field if present, adds `"char_count": int`.
+4. **`chunk_doc(records: Iterator[dict], max_chars: int = 500) -> Iterator[dict]`** — splits each document body into chunks of at most `max_chars`, yielding one chunk dict per chunk with fields: `"doc_id"`, `"chunk_index"`, `"text"`, `"metadata"`.
+5. **`write_jsonl(records: Iterator[dict], path: str) -> int`** — writes records to a JSONL file and returns the count of records written.
+6. **`run_pipeline(input_path: str, output_path: str, chunk_size: int = 500) -> dict`** — composes all stages and returns `{"docs_read", "docs_valid", "chunks_written"}`.
+
+### Why this matters
+
+A pipeline that processes one document at a time uses O(1) memory regardless of corpus size. A 10GB JSONL file and a 10MB file should use the same peak memory. Generator composition is the idiomatic Python way to achieve this, and it is used in virtually every production data ingestion pipeline.
+
+### Constraints
+
+- Each stage must be a generator function — no materializing lists between stages.
+- `run_pipeline` must work by chaining the generators together, not calling them sequentially.
+- The pipeline should process at least one test document end-to-end.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import json
+import logging
+from pathlib import Path
+from typing import Iterator
+
+logger = logging.getLogger(__name__)
+
+
+def read_jsonl(path: str) -> Iterator[dict]:
+    # TODO: open file, yield parsed dicts, skip blanks, log parse errors
+    raise NotImplementedError
+
+
+def validate_doc(records: Iterator[dict]) -> Iterator[dict]:
+    # TODO: yield only records with non-empty id and body >= 50 chars
+    raise NotImplementedError
+
+
+def normalize_doc(records: Iterator[dict]) -> Iterator[dict]:
+    # TODO: strip body, lowercase source, add char_count
+    raise NotImplementedError
+
+
+def chunk_doc(records: Iterator[dict], max_chars: int = 500) -> Iterator[dict]:
+    # TODO: yield chunk dicts for each document
+    raise NotImplementedError
+
+
+def write_jsonl(records: Iterator[dict], path: str) -> int:
+    # TODO: write to file, return count
+    raise NotImplementedError
+
+
+def run_pipeline(input_path: str, output_path: str, chunk_size: int = 500) -> dict:
+    # TODO: compose all stages, return stats
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import json
+import logging
+from pathlib import Path
+from typing import Iterator
+
+logger = logging.getLogger(__name__)
+
+
+def read_jsonl(path: str) -> Iterator[dict]:
+    with open(path) as f:
+        for i, line in enumerate(f):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError as exc:
+                logger.warning("read_jsonl: parse error on line %d: %s", i, exc)
+
+
+def validate_doc(records: Iterator[dict]) -> Iterator[dict]:
+    for rec in records:
+        doc_id = rec.get("id", "")
+        body = rec.get("body", "")
+        if not doc_id or len(body) < 50:
+            logger.debug("validate_doc: skipping doc id=%r body_len=%d", doc_id, len(body))
+            continue
+        yield rec
+
+
+def normalize_doc(records: Iterator[dict]) -> Iterator[dict]:
+    for rec in records:
+        body = rec.get("body", "").strip()
+        source = rec.get("source", "")
+        yield {
+            **rec,
+            "body": body,
+            "source": source.lower() if source else source,
+            "char_count": len(body),
+        }
+
+
+def chunk_doc(records: Iterator[dict], max_chars: int = 500) -> Iterator[dict]:
+    for rec in records:
+        body = rec.get("body", "")
+        metadata = {k: v for k, v in rec.items() if k not in ("body", "char_count")}
+        chunk_index = 0
+        for start in range(0, max(len(body), 1), max_chars):
+            text = body[start : start + max_chars]
+            if text.strip():
+                yield {
+                    "doc_id": rec.get("id", ""),
+                    "chunk_index": chunk_index,
+                    "text": text,
+                    "metadata": metadata,
+                }
+                chunk_index += 1
+
+
+def write_jsonl(records: Iterator[dict], path: str) -> int:
+    count = 0
+    with open(path, "w") as f:
+        for rec in records:
+            f.write(json.dumps(rec) + "\\n")
+            count += 1
+    return count
+
+
+def run_pipeline(input_path: str, output_path: str, chunk_size: int = 500) -> dict:
+    docs_read = 0
+    docs_valid = 0
+
+    # Instrument the pipeline by wrapping stages in counting generators
+    def count_reads(gen):
+        nonlocal docs_read
+        for item in gen:
+            docs_read += 1
+            yield item
+
+    def count_valid(gen):
+        nonlocal docs_valid
+        for item in gen:
+            docs_valid += 1
+            yield item
+
+    raw = count_reads(read_jsonl(input_path))
+    validated = count_valid(validate_doc(raw))
+    normalized = normalize_doc(validated)
+    chunked = chunk_doc(normalized, max_chars=chunk_size)
+    chunks_written = write_jsonl(chunked, output_path)
+
+    return {
+        "docs_read": docs_read,
+        "docs_valid": docs_valid,
+        "chunks_written": chunks_written,
+    }
+
+
+# Tests
+import tempfile
+import os
+
+test_docs = [
+    {"id": "doc-1", "body": "This is a document body that is long enough to pass validation. " * 2, "source": "WEB"},
+    {"id": "doc-2", "body": "Short"},  # too short, should be skipped
+    {"id": "", "body": "No ID document. " * 5},  # missing id, should be skipped
+    {"id": "doc-3", "body": "Another valid document with enough text for chunking and testing. " * 3, "source": "Blog"},
+    {},  # empty, should be skipped
+]
+
+with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+    for doc in test_docs:
+        f.write(json.dumps(doc) + "\\n")
+    input_path = f.name
+
+with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+    output_path = f.name
+
+try:
+    stats = run_pipeline(input_path, output_path, chunk_size=100)
+    assert stats["docs_read"] == 5, f"Expected 5 docs read, got {stats['docs_read']}"
+    assert stats["docs_valid"] == 2, f"Expected 2 valid docs, got {stats['docs_valid']}"
+    assert stats["chunks_written"] > 2, f"Expected multiple chunks, got {stats['chunks_written']}"
+
+    # Verify output
+    output_lines = Path(output_path).read_text().strip().split("\\n")
+    assert len(output_lines) == stats["chunks_written"]
+    first_chunk = json.loads(output_lines[0])
+    assert "doc_id" in first_chunk
+    assert "text" in first_chunk
+    assert "chunk_index" in first_chunk
+    print(f"Pipeline stats: {stats}")
+    print("All tests passed.")
+finally:
+    os.unlink(input_path)
+    os.unlink(output_path)
+""",
+        "explanation_md": """\
+The counting wrapper generators (`count_reads`, `count_valid`) instrument the pipeline without modifying the stage functions themselves. Each stage stays a pure generator. Instrumentation wraps from outside — the same principle used by observability libraries.
+
+`chunk_doc` uses `range(0, max(len(body), 1), max_chars)` instead of `range(0, len(body), max_chars)`. The `max(..., 1)` prevents an empty range when `body` is an empty string after normalization — otherwise the loop would not execute and a valid document would produce zero chunks with no logging.
+
+The `metadata` dict in `chunk_doc` explicitly excludes `"body"` and `"char_count"` — these are the per-chunk fields. Everything else (id, source, custom fields) travels with every chunk so the retrieval layer can filter by metadata without reconstructing the original document.
+
+The `write_jsonl` function writes directly to the file inside the generator loop — it does not collect all records first. A 10GB corpus produces O(1) memory use in the write stage. This is the core benefit of generator composition: each stage processes one item at a time, and the entire pipeline runs in a single pass.
+""",
+        "tags_json": ["data-transformation", "generators", "pipelines", "ingestion"],
+    },
+    {
+        "title": "Implement batch processing with rate limiting",
+        "slug": "batch-processing-rate-limiting",
+        "category": "data-transformation",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Implement Batch Processing with Rate Limiting
+
+Provider APIs enforce rate limits in two dimensions: requests per minute (RPM) and tokens per minute (TPM). Exceeding either causes 429 errors. A naive batch processor that fires all requests immediately will hit these limits before reaching even 10% of most corpora.
+
+### What to build
+
+Implement a `RateLimitedBatcher` that processes items in batches while respecting both request and token rate limits:
+
+1. **`__init__(rpm_limit: int, tpm_limit: int, batch_size: int)`** — stores limits.
+2. **`process(items: list[dict], process_fn: Callable[[list[dict]], list[dict]]) -> BatchStats`** — processes all items in batches. Each item has `"tokens": int`. Tracks: total requests made, total tokens sent, total elapsed time, and rate limit waits.
+3. **Before each batch**, check if sending it would exceed either limit within the current 60-second window. If so, sleep until the window resets.
+4. **`BatchStats` dataclass:** `total_items`, `total_batches`, `total_tokens`, `elapsed_s`, `rate_limit_waits`, `items_per_second`.
+
+The rate limiting logic: track how many requests and tokens were sent in the last 60 seconds. If the next batch would exceed either limit, compute how long to sleep until the window clears.
+
+### Why this matters
+
+Rate limit handling is one of the most common sources of production failures in AI pipelines. Engineers often add naive `time.sleep(60)` calls that make pipelines 10x slower than necessary. A proper token-aware rate limiter sleeps only when needed and for only as long as required.
+
+### Constraints
+
+- Use `time.time()` for rate limit window tracking (not `asyncio`).
+- Do not sleep for more than 60 seconds at a time.
+- Test with a mock `process_fn` that does not actually call any API.
+- `items_per_second` in `BatchStats` should be rounded to 2 decimal places.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import time
+import logging
+from dataclasses import dataclass, field
+from typing import Callable
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BatchStats:
+    total_items: int
+    total_batches: int
+    total_tokens: int
+    elapsed_s: float
+    rate_limit_waits: int
+    items_per_second: float
+
+
+class RateLimitedBatcher:
+    WINDOW_S = 60.0
+
+    def __init__(self, rpm_limit: int, tpm_limit: int, batch_size: int) -> None:
+        self.rpm_limit = rpm_limit
+        self.tpm_limit = tpm_limit
+        self.batch_size = batch_size
+
+    def process(
+        self,
+        items: list[dict],
+        process_fn: Callable[[list[dict]], list[dict]],
+    ) -> BatchStats:
+        # TODO: process items in batches with rate limit enforcement
+        raise NotImplementedError
+
+    def _check_rate_limits(
+        self,
+        window_requests: list[float],
+        window_tokens: list[tuple[float, int]],
+        batch_tokens: int,
+        now: float,
+    ) -> float:
+        # TODO: return seconds to sleep (0.0 if no sleep needed)
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import time
+import logging
+from dataclasses import dataclass
+from typing import Callable
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BatchStats:
+    total_items: int
+    total_batches: int
+    total_tokens: int
+    elapsed_s: float
+    rate_limit_waits: int
+    items_per_second: float
+
+
+class RateLimitedBatcher:
+    WINDOW_S = 60.0
+
+    def __init__(self, rpm_limit: int, tpm_limit: int, batch_size: int) -> None:
+        self.rpm_limit = rpm_limit
+        self.tpm_limit = tpm_limit
+        self.batch_size = batch_size
+
+    def _purge_window(self, window: list, now: float) -> list:
+        """Remove entries older than the rate limit window."""
+        return [entry for entry in window if (now - (entry if isinstance(entry, float) else entry[0])) < self.WINDOW_S]
+
+    def _check_rate_limits(
+        self,
+        window_requests: list[float],
+        window_tokens: list[tuple[float, int]],
+        batch_tokens: int,
+        now: float,
+    ) -> float:
+        sleep_s = 0.0
+        # RPM check: would this batch push us over?
+        if len(window_requests) >= self.rpm_limit:
+            oldest_req = window_requests[0]
+            sleep_s = max(sleep_s, self.WINDOW_S - (now - oldest_req) + 0.1)
+        # TPM check: would this batch push us over?
+        tokens_in_window = sum(t for _, t in window_tokens)
+        if tokens_in_window + batch_tokens > self.tpm_limit:
+            if window_tokens:
+                oldest_token_ts = window_tokens[0][0]
+                sleep_s = max(sleep_s, self.WINDOW_S - (now - oldest_token_ts) + 0.1)
+            else:
+                # Single batch exceeds TPM — sleep a full window
+                sleep_s = max(sleep_s, self.WINDOW_S)
+        return min(sleep_s, self.WINDOW_S)
+
+    def process(
+        self,
+        items: list[dict],
+        process_fn: Callable[[list[dict]], list[dict]],
+    ) -> BatchStats:
+        start = time.time()
+        window_requests: list[float] = []
+        window_tokens: list[tuple[float, int]] = []
+        total_tokens = 0
+        total_batches = 0
+        rate_limit_waits = 0
+        results: list[dict] = []
+
+        for i in range(0, len(items), self.batch_size):
+            batch = items[i : i + self.batch_size]
+            batch_tokens = sum(item.get("tokens", 0) for item in batch)
+
+            # Purge old window entries
+            now = time.time()
+            window_requests = self._purge_window(window_requests, now)
+            window_tokens = [(ts, t) for ts, t in self._purge_window(window_tokens, now)]
+
+            # Check rate limits
+            sleep_s = self._check_rate_limits(window_requests, window_tokens, batch_tokens, now)
+            if sleep_s > 0:
+                logger.info("rate_limit_wait: sleeping %.1fs", sleep_s)
+                time.sleep(sleep_s)
+                rate_limit_waits += 1
+                now = time.time()
+                window_requests = self._purge_window(window_requests, now)
+                window_tokens = [(ts, t) for ts, t in self._purge_window(window_tokens, now)]
+
+            # Process batch
+            batch_results = process_fn(batch)
+            results.extend(batch_results)
+
+            # Record usage
+            now = time.time()
+            window_requests.append(now)
+            window_tokens.append((now, batch_tokens))
+            total_tokens += batch_tokens
+            total_batches += 1
+
+        elapsed = time.time() - start
+        return BatchStats(
+            total_items=len(items),
+            total_batches=total_batches,
+            total_tokens=total_tokens,
+            elapsed_s=round(elapsed, 2),
+            rate_limit_waits=rate_limit_waits,
+            items_per_second=round(len(items) / elapsed if elapsed > 0 else 0.0, 2),
+        )
+
+
+# Tests (using a fast mock process_fn to avoid real sleeps)
+items = [{"id": i, "tokens": 100, "text": f"doc {i}"} for i in range(20)]
+
+# Mock that records calls
+calls = []
+def mock_process(batch):
+    calls.append(len(batch))
+    return batch
+
+batcher = RateLimitedBatcher(rpm_limit=100, tpm_limit=100000, batch_size=5)
+stats = batcher.process(items, mock_process)
+
+assert stats.total_items == 20
+assert stats.total_batches == 4
+assert stats.total_tokens == 2000
+assert stats.rate_limit_waits == 0  # no limits hit
+assert len(calls) == 4
+assert all(c == 5 for c in calls)
+
+print(f"Stats: {stats}")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The sliding window approach — recording timestamps of recent requests and tokens, then purging entries older than 60 seconds — is more accurate than a fixed 60-second bucket that resets on a schedule. Fixed buckets allow burst-then-wait patterns; sliding windows smooth throughput.
+
+The `_purge_window` helper works for both request timestamps (a list of floats) and token tuples (a list of (timestamp, count) tuples) by checking the first element. This is a small duck-typing win — same purge logic for both tracking structures.
+
+`sleep_s = min(sleep_s, self.WINDOW_S)` prevents sleeping for more than 60 seconds even when a single batch exceeds TPM. In that edge case, sleeping a full window is the safest option; after 60 seconds, all previous usage has expired.
+
+In production, replace `time.sleep` with an async equivalent (`asyncio.sleep`) and move the rate limit check into an async context manager. The tracking structures (window_requests, window_tokens) become shared state in a service and need a lock. Redis sorted sets are a common production implementation — they support atomic range queries that make the sliding window check and purge a single round-trip.
+""",
+        "tags_json": ["data-transformation", "rate-limiting", "batch-processing", "llm-ops"],
+    },
+    {
+        "title": "Build an error classification and retry policy engine",
+        "slug": "error-classification-retry-policy",
+        "category": "data-transformation",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Build an Error Classification and Retry Policy Engine
+
+AI service calls fail in distinct categories, and each category calls for a different response. A 429 rate limit error should wait and retry. A 401 authentication error should fail immediately — retrying is pointless. A 500 server error should retry with backoff. A validation error in the response should log and skip, not retry.
+
+Treating all errors the same (either always retry or never retry) wastes time on unrecoverable errors and abandons recoverable ones.
+
+### What to build
+
+Implement an error classification and retry policy system:
+
+1. **`ErrorCategory` enum** with values: `RATE_LIMITED`, `SERVER_ERROR`, `AUTH_ERROR`, `VALIDATION_ERROR`, `TIMEOUT`, `UNKNOWN`.
+2. **`classify_error(error: Exception | dict) -> ErrorCategory`** — classifies an exception or error dict. Rules:
+   - HTTP 429 or message containing "rate limit" → `RATE_LIMITED`
+   - HTTP 4xx (except 429) or "unauthorized"/"forbidden" → `AUTH_ERROR`
+   - HTTP 5xx or "internal server error" → `SERVER_ERROR`
+   - `TimeoutError` or "timed out" in message → `TIMEOUT`
+   - `ValueError` or "validation" in message → `VALIDATION_ERROR`
+   - anything else → `UNKNOWN`
+3. **`RetryPolicy` dataclass** with: `should_retry: bool`, `max_attempts: int`, `base_delay_s: float`, `max_delay_s: float`.
+4. **`get_retry_policy(category: ErrorCategory) -> RetryPolicy`** — returns the appropriate policy per category. `AUTH_ERROR` and `VALIDATION_ERROR` → never retry. `RATE_LIMITED` → retry up to 5 times, 60s base delay. `SERVER_ERROR` and `TIMEOUT` → retry up to 3 times, 1s base delay. `UNKNOWN` → retry once, 2s base delay.
+5. **`execute_with_retry(fn: Callable, *args, **kwargs) -> dict`** — wraps a callable, catches errors, classifies them, and applies the retry policy with exponential backoff. Returns `{"result": ..., "attempts": int, "category": ErrorCategory | None}`.
+
+### Why this matters
+
+Production AI systems without explicit retry policies either retry too aggressively (hammering a rate-limited API) or not at all (failing on transient 500s). This classification layer makes retry behavior explicit, testable, and easy to tune per error type.
+
+### Constraints
+
+- `execute_with_retry` must use exponential backoff: `delay = min(base_delay * 2^attempt, max_delay)`.
+- Do not retry on `AUTH_ERROR` or `VALIDATION_ERROR` under any circumstances.
+- Use `time.sleep` (synchronous version).
+""",
+        "starter_code": """\
+from __future__ import annotations
+import time
+import logging
+from dataclasses import dataclass
+from enum import Enum
+from typing import Callable, Any
+
+logger = logging.getLogger(__name__)
+
+
+class ErrorCategory(Enum):
+    RATE_LIMITED = "rate_limited"
+    SERVER_ERROR = "server_error"
+    AUTH_ERROR = "auth_error"
+    VALIDATION_ERROR = "validation_error"
+    TIMEOUT = "timeout"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class RetryPolicy:
+    should_retry: bool
+    max_attempts: int
+    base_delay_s: float
+    max_delay_s: float
+
+
+def classify_error(error: Exception | dict) -> ErrorCategory:
+    # TODO: classify based on HTTP status codes or exception type/message
+    raise NotImplementedError
+
+
+def get_retry_policy(category: ErrorCategory) -> RetryPolicy:
+    # TODO: return appropriate RetryPolicy per category
+    raise NotImplementedError
+
+
+def execute_with_retry(fn: Callable, *args, **kwargs) -> dict:
+    # TODO: call fn, catch errors, classify, apply retry policy
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import time
+import logging
+from dataclasses import dataclass
+from enum import Enum
+from typing import Callable, Any
+
+logger = logging.getLogger(__name__)
+
+
+class ErrorCategory(Enum):
+    RATE_LIMITED = "rate_limited"
+    SERVER_ERROR = "server_error"
+    AUTH_ERROR = "auth_error"
+    VALIDATION_ERROR = "validation_error"
+    TIMEOUT = "timeout"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class RetryPolicy:
+    should_retry: bool
+    max_attempts: int
+    base_delay_s: float
+    max_delay_s: float
+
+
+def classify_error(error: Exception | dict) -> ErrorCategory:
+    if isinstance(error, dict):
+        status = error.get("status_code", 0)
+        message = str(error.get("message", "")).lower()
+    else:
+        status = getattr(error, "status_code", 0) or 0
+        message = str(error).lower()
+
+    if status == 429 or "rate limit" in message or "too many requests" in message:
+        return ErrorCategory.RATE_LIMITED
+    if isinstance(error, TimeoutError) or "timed out" in message or "timeout" in message:
+        return ErrorCategory.TIMEOUT
+    if isinstance(error, ValueError) or "validation" in message or "invalid" in message:
+        return ErrorCategory.VALIDATION_ERROR
+    if status in (401, 403) or "unauthorized" in message or "forbidden" in message or "auth" in message:
+        return ErrorCategory.AUTH_ERROR
+    if 400 <= status < 500:
+        return ErrorCategory.AUTH_ERROR  # other 4xx are non-retryable client errors
+    if status >= 500 or "internal server error" in message or "server error" in message:
+        return ErrorCategory.SERVER_ERROR
+    return ErrorCategory.UNKNOWN
+
+
+def get_retry_policy(category: ErrorCategory) -> RetryPolicy:
+    policies = {
+        ErrorCategory.RATE_LIMITED: RetryPolicy(should_retry=True, max_attempts=5, base_delay_s=60.0, max_delay_s=300.0),
+        ErrorCategory.SERVER_ERROR: RetryPolicy(should_retry=True, max_attempts=3, base_delay_s=1.0, max_delay_s=30.0),
+        ErrorCategory.TIMEOUT: RetryPolicy(should_retry=True, max_attempts=3, base_delay_s=1.0, max_delay_s=30.0),
+        ErrorCategory.UNKNOWN: RetryPolicy(should_retry=True, max_attempts=1, base_delay_s=2.0, max_delay_s=10.0),
+        ErrorCategory.AUTH_ERROR: RetryPolicy(should_retry=False, max_attempts=0, base_delay_s=0.0, max_delay_s=0.0),
+        ErrorCategory.VALIDATION_ERROR: RetryPolicy(should_retry=False, max_attempts=0, base_delay_s=0.0, max_delay_s=0.0),
+    }
+    return policies[category]
+
+
+def execute_with_retry(fn: Callable, *args, **kwargs) -> dict:
+    last_exc = None
+    last_category = None
+    attempt = 0
+
+    while True:
+        try:
+            result = fn(*args, **kwargs)
+            return {"result": result, "attempts": attempt + 1, "category": last_category}
+        except Exception as exc:
+            last_exc = exc
+            category = classify_error(exc)
+            last_category = category
+            policy = get_retry_policy(category)
+
+            logger.warning(
+                "execute_with_retry: attempt %d failed, category=%s, should_retry=%s",
+                attempt + 1, category.value, policy.should_retry,
+            )
+
+            if not policy.should_retry or attempt >= policy.max_attempts:
+                raise
+
+            delay = min(policy.base_delay_s * (2 ** attempt), policy.max_delay_s)
+            logger.info("execute_with_retry: sleeping %.1fs before retry", delay)
+            time.sleep(delay)
+            attempt += 1
+
+
+# Tests (using mock functions that fail predictably)
+# Test 1: success on first attempt
+result = execute_with_retry(lambda: "success")
+assert result["result"] == "success"
+assert result["attempts"] == 1
+
+# Test 2: auth error should not retry
+class AuthError(Exception):
+    def __init__(self):
+        super().__init__("unauthorized access")
+        self.status_code = 401
+
+try:
+    execute_with_retry(lambda: (_ for _ in ()).throw(AuthError()))
+    assert False, "Should have raised"
+except AuthError:
+    pass
+
+# Test 3: classification
+assert classify_error({"status_code": 429, "message": "Too many requests"}) == ErrorCategory.RATE_LIMITED
+assert classify_error({"status_code": 500, "message": "Internal server error"}) == ErrorCategory.SERVER_ERROR
+assert classify_error({"status_code": 401, "message": "Unauthorized"}) == ErrorCategory.AUTH_ERROR
+assert classify_error(TimeoutError("timed out")) == ErrorCategory.TIMEOUT
+assert classify_error(ValueError("validation failed")) == ErrorCategory.VALIDATION_ERROR
+
+# Test 4: retry policies
+assert get_retry_policy(ErrorCategory.AUTH_ERROR).should_retry is False
+assert get_retry_policy(ErrorCategory.RATE_LIMITED).max_attempts == 5
+assert get_retry_policy(ErrorCategory.SERVER_ERROR).max_attempts == 3
+
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The classification function handles both exception objects and error dicts because real AI service integrations encounter both: SDK exceptions that wrap HTTP errors (usually dicts with `status_code`) and raw exceptions from your own code (e.g., `TimeoutError`, `ValueError`). One classification function that handles both formats prevents duplication in higher-level error handlers.
+
+`get_retry_policy` uses a lookup dict over a chain of if/elif statements. Adding a new error category means adding one entry to the dict without touching the existing logic. The dict also makes the policy table easy to read and easy to test in isolation.
+
+`execute_with_retry` checks `attempt >= policy.max_attempts` rather than `attempt > policy.max_attempts - 1`. The off-by-one is a common bug: with `max_attempts=3`, you want attempts 0, 1, 2 (three total), then raise on attempt 3. The `>=` check matches this intent.
+
+The exponential backoff formula `min(base * 2^attempt, max_delay)` is standard. For production, add jitter: `delay + random.uniform(0, delay * 0.1)`. Jitter prevents thundering herd when many worker processes encounter the same rate limit at the same time and all start retrying on the same schedule.
+""",
+        "tags_json": ["data-transformation", "error-handling", "retry-policy", "resilience"],
+    },
+]
+
 EXERCISE_DRILLS = [
     ("Parse JSONL benchmark rows into normalized records", "parse-jsonl-benchmark-rows", "python-refresh", "easy"),
     ("Summarize token usage by endpoint and model", "summarize-token-usage", "data-transformation", "easy"),
@@ -13078,6 +16198,1699 @@ for title, slug, category, difficulty in EXERCISE_DRILLS:
 def build_exercises():
     return EXERCISES
 
+
+# ── AI Deployment & MLOps exercises ──────────────────────────────────────────
+EXERCISES += [
+    {
+        "title": "Add health and readiness probes to an LLM service",
+        "slug": "llm-service-health-readiness-probes",
+        "category": "api-async",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Add Health and Readiness Probes to an LLM Service
+
+Kubernetes and cloud load balancers use two distinct probes to manage container lifecycle:
+
+- **Liveness probe** (`/health/live`): is the container alive? If it fails, kill and restart it.
+- **Readiness probe** (`/health/ready`): is the container ready to serve traffic? If it fails, stop routing requests to it — but do not kill it.
+
+These semantics matter for LLM services. A container can be alive (process running) but not ready (model still loading, provider API unreachable, or token budget exhausted for the day). Conflating liveness and readiness causes cascading restarts and dropped traffic.
+
+### What to build
+
+Implement a `HealthChecker` class that powers both endpoints:
+
+1. `is_alive() -> LivenessResult` — checks that the process is running and has not entered a fatal error state. Should almost always return healthy; only fail on unrecoverable conditions.
+2. `is_ready() -> ReadinessResult` — checks that all dependencies needed to serve requests are available: provider reachability, model loaded, config valid, queue not saturated.
+3. Both methods return a typed result with `healthy: bool`, `checks: dict[str, CheckResult]`, and `latency_ms: int`.
+4. Each individual check in `is_ready()` should time out independently (default 2 seconds) so one slow dependency does not block the whole probe.
+5. The readiness result should report `degraded: bool` — True when some non-critical checks fail but the service can still partially serve requests.
+
+### Constraints
+
+- Use only the Python standard library and dataclasses.
+- Each dependency check is a callable `async () -> bool`.
+- Readiness is healthy if all critical checks pass (even if non-critical checks fail).
+- Implement a `check_provider_reachability` stub that simulates an async HTTP ping.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import asyncio
+import time
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class CheckResult:
+    name: str
+    healthy: bool
+    latency_ms: int
+    error: str = ""
+
+
+@dataclass
+class LivenessResult:
+    healthy: bool
+    latency_ms: int
+    checks: dict[str, CheckResult] = field(default_factory=dict)
+
+
+@dataclass
+class ReadinessResult:
+    healthy: bool
+    degraded: bool
+    latency_ms: int
+    checks: dict[str, CheckResult] = field(default_factory=dict)
+
+
+class HealthChecker:
+    def __init__(
+        self,
+        critical_checks: dict[str, Callable[[], bool]],
+        non_critical_checks: dict[str, Callable[[], bool]] | None = None,
+        check_timeout_seconds: float = 2.0,
+    ):
+        # TODO: store checks and timeout
+        raise NotImplementedError
+
+    async def is_alive(self) -> LivenessResult:
+        # TODO: run a minimal process-level check (just confirm process is running)
+        raise NotImplementedError
+
+    async def is_ready(self) -> ReadinessResult:
+        # TODO: run all critical and non-critical checks with timeout
+        # healthy if all critical checks pass; degraded if any non-critical fail
+        raise NotImplementedError
+
+    async def _run_check(self, name: str, check_fn: Callable[[], bool]) -> CheckResult:
+        # TODO: run check with timeout, return CheckResult
+        raise NotImplementedError
+
+
+async def check_provider_reachability() -> bool:
+    # Stub: simulate a fast async HTTP ping to provider
+    await asyncio.sleep(0.01)
+    return True
+""",
+        "solution_code": """\
+from __future__ import annotations
+import asyncio
+import time
+from dataclasses import dataclass, field
+from typing import Callable, Awaitable
+
+
+@dataclass
+class CheckResult:
+    name: str
+    healthy: bool
+    latency_ms: int
+    error: str = ""
+
+
+@dataclass
+class LivenessResult:
+    healthy: bool
+    latency_ms: int
+    checks: dict[str, CheckResult] = field(default_factory=dict)
+
+
+@dataclass
+class ReadinessResult:
+    healthy: bool
+    degraded: bool
+    latency_ms: int
+    checks: dict[str, CheckResult] = field(default_factory=dict)
+
+
+class HealthChecker:
+    def __init__(
+        self,
+        critical_checks: dict[str, Callable[[], Awaitable[bool] | bool]],
+        non_critical_checks: dict[str, Callable[[], Awaitable[bool] | bool]] | None = None,
+        check_timeout_seconds: float = 2.0,
+    ):
+        self.critical_checks = critical_checks
+        self.non_critical_checks = non_critical_checks or {}
+        self.check_timeout = check_timeout_seconds
+        self._fatal_error: str | None = None
+
+    def set_fatal_error(self, message: str) -> None:
+        self._fatal_error = message
+
+    async def is_alive(self) -> LivenessResult:
+        start = time.monotonic()
+        if self._fatal_error:
+            return LivenessResult(
+                healthy=False,
+                latency_ms=int((time.monotonic() - start) * 1000),
+                checks={"process": CheckResult("process", False, 0, self._fatal_error)},
+            )
+        latency_ms = int((time.monotonic() - start) * 1000)
+        return LivenessResult(
+            healthy=True,
+            latency_ms=latency_ms,
+            checks={"process": CheckResult("process", True, latency_ms)},
+        )
+
+    async def is_ready(self) -> ReadinessResult:
+        start = time.monotonic()
+        all_checks: dict[str, CheckResult] = {}
+
+        critical_tasks = {
+            name: asyncio.create_task(self._run_check(name, fn))
+            for name, fn in self.critical_checks.items()
+        }
+        non_critical_tasks = {
+            name: asyncio.create_task(self._run_check(name, fn))
+            for name, fn in self.non_critical_checks.items()
+        }
+
+        for name, task in critical_tasks.items():
+            all_checks[name] = await task
+        for name, task in non_critical_tasks.items():
+            all_checks[name] = await task
+
+        critical_all_passed = all(all_checks[name].healthy for name in self.critical_checks)
+        non_critical_any_failed = any(not all_checks[name].healthy for name in self.non_critical_checks)
+
+        return ReadinessResult(
+            healthy=critical_all_passed,
+            degraded=critical_all_passed and non_critical_any_failed,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            checks=all_checks,
+        )
+
+    async def _run_check(
+        self, name: str, check_fn: Callable[[], Awaitable[bool] | bool]
+    ) -> CheckResult:
+        start = time.monotonic()
+        try:
+            result = check_fn()
+            if asyncio.iscoroutine(result):
+                healthy = await asyncio.wait_for(result, timeout=self.check_timeout)
+            else:
+                healthy = bool(result)
+            return CheckResult(name=name, healthy=healthy, latency_ms=int((time.monotonic() - start) * 1000))
+        except asyncio.TimeoutError:
+            return CheckResult(name=name, healthy=False, latency_ms=int(self.check_timeout * 1000), error="timeout")
+        except Exception as exc:
+            return CheckResult(name=name, healthy=False, latency_ms=int((time.monotonic() - start) * 1000), error=str(exc))
+
+
+async def check_provider_reachability() -> bool:
+    await asyncio.sleep(0.01)
+    return True
+
+
+async def check_model_loaded() -> bool:
+    return True
+
+
+async def main():
+    checker = HealthChecker(
+        critical_checks={"provider": check_provider_reachability, "model": check_model_loaded},
+        non_critical_checks={"cache": lambda: True},
+    )
+    live = await checker.is_alive()
+    ready = await checker.is_ready()
+    print(f"Liveness: {live.healthy} ({live.latency_ms}ms)")
+    print(f"Readiness: {ready.healthy}, degraded={ready.degraded} ({ready.latency_ms}ms)")
+    for name, result in ready.checks.items():
+        print(f"  {name}: {'OK' if result.healthy else 'FAIL'} ({result.latency_ms}ms)")
+
+asyncio.run(main())
+""",
+        "explanation_md": """\
+## Walkthrough: Health and Readiness Probes
+
+The liveness/readiness split is a Kubernetes design pattern but the principle applies everywhere: keep the decision to restart separate from the decision to route traffic.
+
+**Why they are separate:** An LLM service might be alive (the Python process runs) but not ready (model still initializing, provider API returning 429s, or the queue is full). Restarting a container that is merely busy makes the problem worse. A readiness probe takes the container out of the load balancer rotation until it can serve requests again.
+
+**Per-check timeouts:** Each dependency check runs with `asyncio.wait_for(check, timeout=2.0)`. If one check hangs (network call to a slow provider), only that check times out — the probe still returns quickly. Without per-check timeouts, a 30-second provider hang would make your readiness endpoint time out, causing unnecessary container restarts.
+
+**Critical vs non-critical checks:** Mark provider reachability as critical (service cannot function without it) and cache availability as non-critical (service degrades but continues). The `degraded` flag in `ReadinessResult` lets downstream systems distinguish "healthy and full-capability" from "healthy but degraded."
+
+**The `set_fatal_error` mechanism:** This allows application code to mark itself as permanently broken (e.g., unrecoverable config error on startup). The liveness probe then fails, triggering a container restart. This is the correct use of liveness — not for transient dependency failures.
+""",
+        "tags_json": ["deployment", "health-checks", "kubernetes", "reliability", "llm-ops"],
+    },
+    {
+        "title": "Enforce per-request token budgets",
+        "slug": "enforce-per-request-token-budgets",
+        "category": "api-async",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Enforce Per-Request Token Budgets
+
+LLM API costs are linear with token usage. Without enforcement, a single user pasting a 50,000-token document into a chat box can generate a $1-$5 API call. Multiply by thousands of users and you have a runaway cost event.
+
+Token budget enforcement happens at prompt construction time — before the API call, not after. This exercise builds the enforcement layer.
+
+### What to build
+
+Implement a `PromptBudgetEnforcer` that:
+
+1. Takes a `max_total_tokens: int` and `model: str` to construct a budget-aware prompt.
+2. `build(system: str, history: list[dict], context_chunks: list[str], user_query: str) -> BuiltPrompt` — assembles the prompt while respecting the budget.
+   - System prompt is always included first (it is always high-priority).
+   - User query is always included (it is what the user asked).
+   - History is included newest-first until the budget is hit.
+   - Context chunks are included in order until the budget is hit.
+   - If any component is truncated, `BuiltPrompt.truncated: bool` is True and `BuiltPrompt.truncated_components: list[str]` lists what was cut.
+3. Use a simple token approximation: 1 token = 4 characters.
+4. `BuiltPrompt` should contain the final `messages: list[dict]` ready to send to the API, plus budget metadata.
+5. Add a `budget_remaining(built: BuiltPrompt) -> int` method showing how many tokens are left for the model's response.
+
+### Constraints
+
+- No external tokenizer libraries — use the 4-char approximation.
+- `max_total_tokens` includes both the prompt tokens and the expected completion. Reserve 20% for completion.
+- Raise `ValueError` if the system prompt + user query alone exceed the budget.
+""",
+        "starter_code": """\
+from __future__ import annotations
+from dataclasses import dataclass, field
+
+
+@dataclass
+class BuiltPrompt:
+    messages: list[dict]
+    prompt_tokens_approx: int
+    max_total_tokens: int
+    truncated: bool = False
+    truncated_components: list[str] = field(default_factory=list)
+
+
+class PromptBudgetEnforcer:
+    CHARS_PER_TOKEN = 4
+    COMPLETION_RESERVE_PCT = 0.20
+
+    def __init__(self, max_total_tokens: int, model: str = "gpt-4o-mini"):
+        self.max_total_tokens = max_total_tokens
+        self.model = model
+
+    def _count_tokens(self, text: str) -> int:
+        # TODO: approximate token count
+        raise NotImplementedError
+
+    def _prompt_budget(self) -> int:
+        # TODO: compute available tokens for the prompt (reserve 20% for completion)
+        raise NotImplementedError
+
+    def build(
+        self,
+        system: str,
+        history: list[dict],
+        context_chunks: list[str],
+        user_query: str,
+    ) -> BuiltPrompt:
+        # TODO: assemble messages within budget
+        raise NotImplementedError
+
+    def budget_remaining(self, built: BuiltPrompt) -> int:
+        # TODO: return tokens available for model response
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+from dataclasses import dataclass, field
+
+
+@dataclass
+class BuiltPrompt:
+    messages: list[dict]
+    prompt_tokens_approx: int
+    max_total_tokens: int
+    truncated: bool = False
+    truncated_components: list[str] = field(default_factory=list)
+
+
+class PromptBudgetEnforcer:
+    CHARS_PER_TOKEN = 4
+    COMPLETION_RESERVE_PCT = 0.20
+
+    def __init__(self, max_total_tokens: int, model: str = "gpt-4o-mini"):
+        self.max_total_tokens = max_total_tokens
+        self.model = model
+
+    def _count_tokens(self, text: str) -> int:
+        return max(1, len(text) // self.CHARS_PER_TOKEN)
+
+    def _prompt_budget(self) -> int:
+        return int(self.max_total_tokens * (1 - self.COMPLETION_RESERVE_PCT))
+
+    def build(
+        self,
+        system: str,
+        history: list[dict],
+        context_chunks: list[str],
+        user_query: str,
+    ) -> BuiltPrompt:
+        budget = self._prompt_budget()
+        used = 0
+        messages: list[dict] = []
+        truncated_components: list[str] = []
+
+        system_tokens = self._count_tokens(system)
+        query_tokens = self._count_tokens(user_query)
+        if system_tokens + query_tokens > budget:
+            raise ValueError(
+                f"System prompt ({system_tokens} tokens) + user query ({query_tokens} tokens) "
+                f"exceeds prompt budget ({budget} tokens)."
+            )
+
+        messages.append({"role": "system", "content": system})
+        used += system_tokens
+
+        context_text_parts: list[str] = []
+        chunks_truncated = False
+        for chunk in context_chunks:
+            chunk_tokens = self._count_tokens(chunk)
+            if used + chunk_tokens + query_tokens > budget:
+                chunks_truncated = True
+                break
+            context_text_parts.append(chunk)
+            used += chunk_tokens
+
+        if chunks_truncated:
+            truncated_components.append("context_chunks")
+
+        if context_text_parts:
+            context_block = "\\n\\n".join(context_text_parts)
+            messages.append({"role": "system", "content": f"Context:\\n{context_block}"})
+
+        remaining_for_history = budget - used - query_tokens
+        history_included: list[dict] = []
+        history_truncated = False
+        for turn in reversed(history):
+            turn_text = turn.get("content", "")
+            turn_tokens = self._count_tokens(turn_text)
+            if turn_tokens > remaining_for_history:
+                history_truncated = True
+                break
+            history_included.insert(0, turn)
+            remaining_for_history -= turn_tokens
+
+        if history_truncated:
+            truncated_components.append("history")
+
+        messages.extend(history_included)
+        messages.append({"role": "user", "content": user_query})
+        used += query_tokens
+
+        return BuiltPrompt(
+            messages=messages,
+            prompt_tokens_approx=used,
+            max_total_tokens=self.max_total_tokens,
+            truncated=bool(truncated_components),
+            truncated_components=truncated_components,
+        )
+
+    def budget_remaining(self, built: BuiltPrompt) -> int:
+        return built.max_total_tokens - built.prompt_tokens_approx
+
+
+# Demo
+enforcer = PromptBudgetEnforcer(max_total_tokens=4096)
+result = enforcer.build(
+    system="You are a helpful assistant.",
+    history=[
+        {"role": "user", "content": "What is the capital of France?"},
+        {"role": "assistant", "content": "Paris."},
+    ],
+    context_chunks=["Paris is the capital of France.", "France is in Western Europe."],
+    user_query="Summarize what you know about Paris.",
+)
+print(f"Prompt tokens (approx): {result.prompt_tokens_approx}")
+print(f"Truncated: {result.truncated} -- {result.truncated_components}")
+print(f"Budget remaining for completion: {enforcer.budget_remaining(result)}")
+print(f"Messages: {len(result.messages)} turns")
+""",
+        "explanation_md": """\
+## Walkthrough: Token Budget Enforcement
+
+The critical insight is **priority ordering**: some content must always appear (system prompt, user query) while other content is best-effort (context chunks, history). When the budget runs out, drop the lowest-priority content first.
+
+**Completion reserve:** Reserving 20% for the completion prevents the model from having no room to respond. A 4096-token model with a 3800-token prompt leaves 296 tokens for completion — enough for a sentence, not a real answer. The 80/20 split is a reasonable default; adjust based on your typical completion lengths.
+
+**Context before history:** Context chunks are usually more important than conversation history for RAG use cases. The order in `build()` reflects this priority: context fills available space after the system prompt, then history fills what remains.
+
+**The 4-char approximation:** `len(text) // 4` is rough — the actual ratio varies by language and content type. For production, use `tiktoken` (OpenAI) or the model's actual tokenizer. The approximation is fine for enforcement with a 10-20% safety margin built in.
+
+**Raising on hard violations:** If system + query alone exceed the budget, there is nothing to trim — raise early with a clear message. Silently truncating the system prompt or user query would corrupt the request in unpredictable ways.
+""",
+        "tags_json": ["deployment", "cost-management", "token-budgets", "prompt-engineering"],
+    },
+    {
+        "title": "Implement A/B testing for model versions",
+        "slug": "ab-testing-model-versions",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement A/B Testing for Model Versions
+
+When you want to test a new model version or prompt in production, rolling it out to all users at once is risky. A/B testing lets you route a fraction of traffic to the candidate version, collect quality metrics, and compare against the control before committing to a full rollout.
+
+### What to build
+
+Implement an `ABTestRouter` that:
+
+1. Takes a `control_config` and `candidate_config` (each with `version_id: str`).
+2. `assign(user_id: str, test_id: str) -> str` — deterministically returns either `"control"` or `"candidate"`. The same user always gets the same assignment for the same test (sticky assignment via hash).
+3. `record_outcome(test_id: str, variant: str, metric_name: str, value: float) -> None` — record a quality metric for a variant.
+4. `get_results(test_id: str) -> ABTestResults` — return aggregated results for both variants.
+5. `ABTestResults` has per-variant `n` and `mean` for each recorded metric.
+6. `should_promote(test_id: str, metric: str, min_improvement_pct: float = 5.0) -> bool` — return True if candidate outperforms control by at least `min_improvement_pct` percent.
+
+### Constraints
+
+- Standard library only.
+- Candidate percentage is configurable (default 10% of traffic).
+- Sticky assignment must be deterministic: same `user_id + test_id` always returns same variant.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import hashlib
+from collections import defaultdict
+from dataclasses import dataclass, field
+
+
+@dataclass
+class VariantConfig:
+    version_id: str
+    extra_params: dict = field(default_factory=dict)
+
+
+@dataclass
+class VariantStats:
+    n: int
+    mean: float
+
+
+@dataclass
+class ABTestResults:
+    test_id: str
+    control: dict[str, VariantStats]
+    candidate: dict[str, VariantStats]
+
+
+class ABTestRouter:
+    def __init__(
+        self,
+        control_config: VariantConfig,
+        candidate_config: VariantConfig,
+        candidate_pct: float = 0.10,
+    ):
+        # TODO: store configs and pct
+        raise NotImplementedError
+
+    def assign(self, user_id: str, test_id: str) -> str:
+        # TODO: deterministically assign "control" or "candidate"
+        raise NotImplementedError
+
+    def record_outcome(self, test_id: str, variant: str, metric_name: str, value: float) -> None:
+        # TODO: store metric value for this variant
+        raise NotImplementedError
+
+    def get_results(self, test_id: str) -> ABTestResults:
+        # TODO: aggregate per-variant metrics
+        raise NotImplementedError
+
+    def should_promote(self, test_id: str, metric: str, min_improvement_pct: float = 5.0) -> bool:
+        # TODO: return True if candidate outperforms control by min_improvement_pct
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import hashlib
+from collections import defaultdict
+from dataclasses import dataclass, field
+
+
+@dataclass
+class VariantConfig:
+    version_id: str
+    extra_params: dict = field(default_factory=dict)
+
+
+@dataclass
+class VariantStats:
+    n: int
+    mean: float
+
+
+@dataclass
+class ABTestResults:
+    test_id: str
+    control: dict[str, VariantStats]
+    candidate: dict[str, VariantStats]
+
+
+class ABTestRouter:
+    def __init__(
+        self,
+        control_config: VariantConfig,
+        candidate_config: VariantConfig,
+        candidate_pct: float = 0.10,
+    ):
+        self.control_config = control_config
+        self.candidate_config = candidate_config
+        self.candidate_pct = candidate_pct
+        self._outcomes: dict[str, dict[str, dict[str, list[float]]]] = defaultdict(
+            lambda: {"control": defaultdict(list), "candidate": defaultdict(list)}
+        )
+
+    def assign(self, user_id: str, test_id: str) -> str:
+        raw = f"{test_id}:{user_id}".encode()
+        digest = hashlib.md5(raw).hexdigest()
+        bucket = int(digest[:8], 16) / 0xFFFFFFFF
+        return "candidate" if bucket < self.candidate_pct else "control"
+
+    def record_outcome(self, test_id: str, variant: str, metric_name: str, value: float) -> None:
+        if variant not in ("control", "candidate"):
+            raise ValueError(f"Unknown variant: {variant}")
+        self._outcomes[test_id][variant][metric_name].append(value)
+
+    def _stats(self, values: list[float]) -> VariantStats:
+        n = len(values)
+        mean = sum(values) / n if n else 0.0
+        return VariantStats(n=n, mean=mean)
+
+    def get_results(self, test_id: str) -> ABTestResults:
+        data = self._outcomes[test_id]
+        all_metrics = set(data["control"].keys()) | set(data["candidate"].keys())
+        return ABTestResults(
+            test_id=test_id,
+            control={m: self._stats(data["control"][m]) for m in all_metrics},
+            candidate={m: self._stats(data["candidate"][m]) for m in all_metrics},
+        )
+
+    def should_promote(self, test_id: str, metric: str, min_improvement_pct: float = 5.0) -> bool:
+        results = self.get_results(test_id)
+        ctrl = results.control.get(metric)
+        cand = results.candidate.get(metric)
+        if ctrl is None or cand is None or ctrl.n == 0 or cand.n == 0:
+            return False
+        if ctrl.mean == 0:
+            return cand.mean > 0
+        improvement_pct = (cand.mean - ctrl.mean) / abs(ctrl.mean) * 100
+        return improvement_pct >= min_improvement_pct
+
+
+# Demo
+import random
+random.seed(42)
+router = ABTestRouter(
+    control_config=VariantConfig(version_id="prompt-v1"),
+    candidate_config=VariantConfig(version_id="prompt-v2"),
+    candidate_pct=0.10,
+)
+for i in range(200):
+    uid = f"user-{i}"
+    variant = router.assign(uid, test_id="prompt-exp-1")
+    score = random.gauss(0.75, 0.08) + (0.07 if variant == "candidate" else 0.0)
+    router.record_outcome("prompt-exp-1", variant, "quality_score", max(0, min(1, score)))
+
+results = router.get_results("prompt-exp-1")
+ctrl = results.control.get("quality_score")
+cand = results.candidate.get("quality_score")
+print(f"Control: n={ctrl.n}, mean={ctrl.mean:.3f}")
+print(f"Candidate: n={cand.n}, mean={cand.mean:.3f}")
+print(f"Should promote? {router.should_promote('prompt-exp-1', 'quality_score', min_improvement_pct=5.0)}")
+""",
+        "explanation_md": """\
+## Walkthrough: A/B Testing for Model Versions
+
+**Sticky assignment via hash:** The same user always gets the same variant because the assignment is deterministic: `hash(test_id + user_id)` produces a consistent bucket. This prevents the same user from experiencing both variants within a test, which would contaminate quality measurements and confuse the user experience.
+
+**Why 10% default for candidate traffic:** Exposing 10% of users to the candidate version limits blast radius if the candidate has a quality regression. Once you have enough data (typically 30+ outcomes per variant for meaningful comparison), you promote or roll back.
+
+**The promotion decision:** `should_promote` compares means and checks for a minimum improvement threshold. A 5% minimum prevents you from promoting a candidate that is not meaningfully better — statistical noise can produce apparent improvements of 1-3% even when the true difference is zero.
+
+**What is missing (intentionally):** A production A/B test system would compute p-values using a proper t-test (`scipy.stats.ttest_ind`), track power analysis to know when you have enough data, and handle metric directionality (higher is better for quality score, lower is better for latency). The architecture here — sticky assignment, per-variant metric storage, aggregation — is correct; add statistical rigor as the system matures.
+
+**When to use this pattern:** Any time you want to validate a model upgrade, prompt change, or retrieval improvement in production before committing to 100% rollout.
+""",
+        "tags_json": ["deployment", "ab-testing", "experimentation", "model-versioning"],
+    },
+    {
+        "title": "Build a rate limiter for AI API endpoints",
+        "slug": "rate-limiter-ai-api-endpoints",
+        "category": "api-async",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a Rate Limiter for AI API Endpoints
+
+LLM API calls are expensive and slow. Without rate limiting at your application layer, a single misbehaving client can exhaust your provider token budget or trigger provider-side rate limits that degrade service for everyone.
+
+You need two rate limiting strategies working together:
+
+- **Per-user RPM (requests per minute):** limit how many requests a single user can make per minute.
+- **Global TPM (tokens per minute):** limit the total tokens consumed across all users per minute to stay within your provider quota.
+
+### What to build
+
+Implement a `TwoLayerRateLimiter` that:
+
+1. `check_user(user_id: str) -> RateLimitResult` — checks if the user is within their per-user RPM limit.
+2. `check_global(estimated_tokens: int) -> RateLimitResult` — checks if the global TPM budget has headroom.
+3. `record_usage(user_id: str, tokens_used: int) -> None` — records actual usage after a successful call.
+4. Uses a sliding window algorithm (1-minute window) for both limits.
+5. `RateLimitResult` has: `allowed: bool`, `reason: str`, `retry_after_seconds: float`.
+
+### Constraints
+
+- Standard library only (use `time.monotonic()`).
+- Per-user default limit: 10 RPM.
+- Global default: 100,000 TPM.
+- Sliding window: deque of timestamps for RPM, deque of `(timestamp, tokens)` for TPM.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass
+
+
+@dataclass
+class RateLimitResult:
+    allowed: bool
+    reason: str = ""
+    retry_after_seconds: float = 0.0
+
+
+class TwoLayerRateLimiter:
+    WINDOW_SECONDS = 60.0
+
+    def __init__(self, user_rpm_limit: int = 10, global_tpm_limit: int = 100_000):
+        self.user_rpm_limit = user_rpm_limit
+        self.global_tpm_limit = global_tpm_limit
+        # TODO: initialize per-user request windows and global token window
+        raise NotImplementedError
+
+    def check_user(self, user_id: str) -> RateLimitResult:
+        # TODO: sliding window check for user RPM
+        raise NotImplementedError
+
+    def check_global(self, estimated_tokens: int) -> RateLimitResult:
+        # TODO: sliding window check for global TPM
+        raise NotImplementedError
+
+    def record_usage(self, user_id: str, tokens_used: int) -> None:
+        # TODO: add request timestamp to user window and tokens to global window
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass
+from typing import NamedTuple
+
+
+@dataclass
+class RateLimitResult:
+    allowed: bool
+    reason: str = ""
+    retry_after_seconds: float = 0.0
+
+
+class TokenRecord(NamedTuple):
+    timestamp: float
+    tokens: int
+
+
+class TwoLayerRateLimiter:
+    WINDOW_SECONDS = 60.0
+
+    def __init__(self, user_rpm_limit: int = 10, global_tpm_limit: int = 100_000):
+        self.user_rpm_limit = user_rpm_limit
+        self.global_tpm_limit = global_tpm_limit
+        self._user_windows: dict[str, deque[float]] = defaultdict(deque)
+        self._global_window: deque[TokenRecord] = deque()
+
+    def check_user(self, user_id: str) -> RateLimitResult:
+        now = time.monotonic()
+        window = self._user_windows[user_id]
+        self._prune_timestamps(window, now)
+        if len(window) >= self.user_rpm_limit:
+            oldest = window[0]
+            retry_after = self.WINDOW_SECONDS - (now - oldest)
+            return RateLimitResult(
+                allowed=False,
+                reason=f"User rate limit: {self.user_rpm_limit} RPM exceeded",
+                retry_after_seconds=max(0.0, retry_after),
+            )
+        return RateLimitResult(allowed=True)
+
+    def check_global(self, estimated_tokens: int) -> RateLimitResult:
+        now = time.monotonic()
+        self._prune_token_records(self._global_window, now)
+        current_tpm = sum(r.tokens for r in self._global_window)
+        if current_tpm + estimated_tokens > self.global_tpm_limit:
+            oldest_ts = self._global_window[0].timestamp if self._global_window else now
+            retry_after = self.WINDOW_SECONDS - (now - oldest_ts)
+            return RateLimitResult(
+                allowed=False,
+                reason=f"Global TPM limit ({self.global_tpm_limit}) would be exceeded",
+                retry_after_seconds=max(0.0, retry_after),
+            )
+        return RateLimitResult(allowed=True)
+
+    def record_usage(self, user_id: str, tokens_used: int) -> None:
+        now = time.monotonic()
+        self._user_windows[user_id].append(now)
+        self._global_window.append(TokenRecord(timestamp=now, tokens=tokens_used))
+
+    def _prune_timestamps(self, window: deque, now: float) -> None:
+        cutoff = now - self.WINDOW_SECONDS
+        while window and window[0] < cutoff:
+            window.popleft()
+
+    def _prune_token_records(self, window: deque, now: float) -> None:
+        cutoff = now - self.WINDOW_SECONDS
+        while window and window[0].timestamp < cutoff:
+            window.popleft()
+
+    def current_global_tpm(self) -> int:
+        now = time.monotonic()
+        self._prune_token_records(self._global_window, now)
+        return sum(r.tokens for r in self._global_window)
+
+    def current_user_rpm(self, user_id: str) -> int:
+        now = time.monotonic()
+        self._prune_timestamps(self._user_windows[user_id], now)
+        return len(self._user_windows[user_id])
+
+
+# Demo
+limiter = TwoLayerRateLimiter(user_rpm_limit=3, global_tpm_limit=1000)
+for i in range(5):
+    result = limiter.check_user("user-1")
+    if result.allowed:
+        limiter.record_usage("user-1", tokens_used=100)
+        print(f"Request {i+1}: allowed, RPM={limiter.current_user_rpm('user-1')}, TPM={limiter.current_global_tpm()}")
+    else:
+        print(f"Request {i+1}: BLOCKED -- {result.reason} (retry in {result.retry_after_seconds:.1f}s)")
+""",
+        "explanation_md": """\
+## Walkthrough: Two-Layer Rate Limiter
+
+**Sliding window vs fixed window:** A fixed window (reset every minute at :00) allows a burst of 2x the limit straddling a window boundary. A sliding window evaluates the last N seconds from the current moment, giving a true rolling limit. The deque adds to the right and prunes expired entries from the left.
+
+**Two separate concerns:** Per-user RPM prevents abuse by individual clients. Global TPM prevents the entire application from exceeding provider quotas. Both must be checked before making an LLM call. Check user first (cheaper) then global (involves summing token counts).
+
+**The `record_usage` call pattern:** Call `record_usage` after a successful API call, not before. If you record before the call and the call fails, you consume budget unnecessarily. The pattern is: `check_user -> check_global -> make_api_call -> record_usage`.
+
+**`retry_after_seconds` calculation:** Clients that receive a 429 response need to know how long to wait. Returning `WINDOW_SECONDS - (now - oldest_entry)` gives the exact time until the oldest entry expires and one slot opens. This is more useful than a fixed "try again in 60 seconds."
+
+**Production extension:** Replace the in-memory deques with Redis sorted sets (using timestamps as scores) for multi-instance rate limiting. Redis's `ZRANGEBYSCORE` and `ZREMRANGEBYSCORE` implement sliding windows natively. The interface stays identical.
+""",
+        "tags_json": ["deployment", "rate-limiting", "api-async", "cost-management", "reliability"],
+    },
+    {
+        "title": "Build an LLM call tracer with span export",
+        "slug": "llm-call-tracer-span-export",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build an LLM Call Tracer with Span Export
+
+Observability for LLM applications goes beyond logging. When a user sees a bad response, you need to reconstruct the entire request lifecycle: what was retrieved, what prompt was built, which model was called, what the tokens and latency were, and where time was spent.
+
+Distributed tracing — using traces and spans — is the right abstraction. A trace represents one user request end-to-end. Spans within the trace represent individual steps (retrieval, prompt construction, LLM call, post-processing).
+
+### What to build
+
+Implement a `RequestTracer` that:
+
+1. Creates a root trace with a `trace_id`, `request_id`, and start timestamp.
+2. `span(name: str, **attrs) -> SpanContext` — returns a context manager that creates a child span capturing `start_ms`, `end_ms`, `latency_ms`, and all keyword attributes.
+3. Spans auto-complete on context manager exit, even if the body raises (record the error).
+4. `export() -> TraceExport` — returns the complete trace as a structured object.
+5. `TraceExport` has: `trace_id`, `request_id`, `total_latency_ms`, `spans: list[SpanData]`, `llm_calls: list[LLMCallSummary]`.
+6. `SpanContext.add_llm_call(model, input_tokens, output_tokens, latency_ms)` — attach an LLM call summary to the active span.
+
+### Constraints
+
+- Standard library only.
+- Spans form a flat list (no tree — single level for simplicity).
+- `export()` should be callable multiple times without side effects.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import time
+import uuid
+from dataclasses import dataclass, field
+
+
+@dataclass
+class LLMCallSummary:
+    model: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+
+
+@dataclass
+class SpanData:
+    span_id: str
+    name: str
+    start_ms: int
+    end_ms: int = 0
+    latency_ms: int = 0
+    attributes: dict = field(default_factory=dict)
+    error: str = ""
+    llm_calls: list[LLMCallSummary] = field(default_factory=list)
+
+
+@dataclass
+class TraceExport:
+    trace_id: str
+    request_id: str
+    total_latency_ms: int
+    spans: list[SpanData]
+    llm_calls: list[LLMCallSummary]
+
+
+class SpanContext:
+    def __init__(self, span: SpanData):
+        # TODO: store span
+        raise NotImplementedError
+
+    def set(self, key: str, value) -> None:
+        # TODO: add attribute to span
+        raise NotImplementedError
+
+    def add_llm_call(self, model: str, input_tokens: int, output_tokens: int, latency_ms: int) -> None:
+        # TODO: attach LLM call summary
+        raise NotImplementedError
+
+    def __enter__(self) -> "SpanContext":
+        raise NotImplementedError
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        # TODO: record end time and error if any; do not suppress exceptions
+        raise NotImplementedError
+
+
+class RequestTracer:
+    def __init__(self, request_id: str | None = None):
+        # TODO: initialize trace
+        raise NotImplementedError
+
+    def span(self, name: str, **attrs) -> SpanContext:
+        # TODO: create and register a new span
+        raise NotImplementedError
+
+    def export(self) -> TraceExport:
+        # TODO: build and return TraceExport
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import time
+import uuid
+from dataclasses import dataclass, field
+
+
+@dataclass
+class LLMCallSummary:
+    model: str
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+
+
+@dataclass
+class SpanData:
+    span_id: str
+    name: str
+    start_ms: int
+    end_ms: int = 0
+    latency_ms: int = 0
+    attributes: dict = field(default_factory=dict)
+    error: str = ""
+    llm_calls: list[LLMCallSummary] = field(default_factory=list)
+
+
+@dataclass
+class TraceExport:
+    trace_id: str
+    request_id: str
+    total_latency_ms: int
+    spans: list[SpanData]
+    llm_calls: list[LLMCallSummary]
+
+
+class SpanContext:
+    def __init__(self, span: SpanData):
+        self._span = span
+
+    def set(self, key: str, value) -> None:
+        self._span.attributes[key] = value
+
+    def add_llm_call(self, model: str, input_tokens: int, output_tokens: int, latency_ms: int) -> None:
+        self._span.llm_calls.append(
+            LLMCallSummary(model=model, input_tokens=input_tokens,
+                           output_tokens=output_tokens, latency_ms=latency_ms)
+        )
+
+    def __enter__(self) -> "SpanContext":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        now_ms = int(time.monotonic() * 1000)
+        self._span.end_ms = now_ms
+        self._span.latency_ms = now_ms - self._span.start_ms
+        if exc_type is not None:
+            self._span.error = f"{exc_type.__name__}: {exc_val}"
+        return False  # do not suppress exceptions
+
+
+class RequestTracer:
+    def __init__(self, request_id: str | None = None):
+        self.trace_id = str(uuid.uuid4())
+        self.request_id = request_id or str(uuid.uuid4())
+        self._start_ms = int(time.monotonic() * 1000)
+        self._spans: list[SpanData] = []
+
+    def span(self, name: str, **attrs) -> SpanContext:
+        span_data = SpanData(
+            span_id=str(uuid.uuid4()),
+            name=name,
+            start_ms=int(time.monotonic() * 1000),
+            attributes=dict(attrs),
+        )
+        self._spans.append(span_data)
+        return SpanContext(span=span_data)
+
+    def export(self) -> TraceExport:
+        end_ms = int(time.monotonic() * 1000)
+        all_llm_calls = [call for span in self._spans for call in span.llm_calls]
+        return TraceExport(
+            trace_id=self.trace_id,
+            request_id=self.request_id,
+            total_latency_ms=end_ms - self._start_ms,
+            spans=list(self._spans),
+            llm_calls=all_llm_calls,
+        )
+
+
+# Demo
+import time as _time
+
+tracer = RequestTracer(request_id="req-demo-001")
+
+with tracer.span("retrieval", index="docs_v3", query="What is token budget?") as s:
+    _time.sleep(0.02)
+    s.set("num_results", 5)
+    s.set("top_score", 0.91)
+
+with tracer.span("llm_call", model="gpt-4o-mini") as s:
+    _time.sleep(0.05)
+    s.add_llm_call(model="gpt-4o-mini", input_tokens=1200, output_tokens=350, latency_ms=50)
+
+export = tracer.export()
+print(f"trace_id: {export.trace_id[:8]}...")
+print(f"total_latency_ms: {export.total_latency_ms}")
+for span in export.spans:
+    print(f"  span '{span.name}': {span.latency_ms}ms, attrs={span.attributes}")
+print(f"LLM calls: {len(export.llm_calls)}, tokens: {sum(c.input_tokens + c.output_tokens for c in export.llm_calls)}")
+""",
+        "explanation_md": """\
+## Walkthrough: LLM Call Tracer
+
+**Why spans, not just logs:** Logs are per-event records. Spans have duration and structured attributes. When debugging a slow response, you want to see "retrieval took 400ms, LLM took 1800ms" — not grep through logs correlating timestamps manually.
+
+**Context manager error capture:** The `__exit__` method records the exception type and message in `span.error` but returns `False` — it does not suppress the exception. Errors propagate normally while still being captured in the trace. A span that captured an error shows up in the export alongside its latency.
+
+**The `export()` design:** Returning a `TraceExport` dataclass (not printing to a log) makes the tracer testable and composable. In production, `export()` would serialize to OpenTelemetry's OTLP format and send to Jaeger, Datadog, or Honeycomb. The in-memory representation here is identical to what you would send.
+
+**LLM calls as first-class entities:** The `llm_calls` list in both spans and the export provides quick access to token usage. Aggregating `sum(c.input_tokens + c.output_tokens for c in export.llm_calls)` gives you total tokens for the request — the primary cost driver.
+
+**Production extension:** Add `parent_span_id` to `SpanData` and accept a parent context in `span()`. This gives nested spans (LLM call nested inside generate_answer nested inside root request) — the full OpenTelemetry tree structure.
+""",
+        "tags_json": ["deployment", "observability", "tracing", "llm-ops"],
+    },
+    {
+        "title": "Implement graceful degradation with fallback tiers",
+        "slug": "graceful-degradation-fallback-tiers",
+        "category": "api-async",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Implement Graceful Degradation with Fallback Tiers
+
+Production AI services fail in partial ways: the primary LLM provider might be rate-limited, the secondary might be slow, and the semantic cache might have a miss. A well-designed system handles these failures without completely breaking user-facing functionality.
+
+The key pattern is **explicit degradation tiers** — a ranked list of response strategies, from best to worst.
+
+### What to build
+
+Implement a `DegradationManager` that:
+
+1. Takes an ordered list of `ResponseTier` objects: `name: str`, `handler: async callable`, `timeout_seconds: float`, `is_acceptable: bool`.
+2. `serve(request: dict) -> DegradedResponse` — tries tiers in order, returns the first success. If a tier fails (exception or timeout), log and move on.
+3. `DegradedResponse` has: `content: str`, `tier_used: str`, `is_degraded: bool`, `latency_ms: int`, `tiers_attempted: list[str]`.
+4. If all tiers fail, return a `DegradedResponse` with the static `ULTIMATE_FALLBACK_MESSAGE`, `is_degraded=True`.
+5. `get_stats() -> dict` — return call counts and success rates per tier.
+
+### Test with three tiers
+
+1. **Tier 1 (primary LLM):** Fast, high quality, `is_acceptable=True` — but times out on first calls.
+2. **Tier 2 (cached):** Returns a cached response. `is_acceptable=False` (degraded).
+3. **Tier 3 (template):** Returns a static template. `is_acceptable=False` (degraded).
+
+### Constraints
+
+- Standard library + asyncio only.
+- Each tier must respect its `timeout_seconds` using `asyncio.wait_for`.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import asyncio
+import time
+from dataclasses import dataclass, field
+from typing import Callable, Awaitable
+
+ULTIMATE_FALLBACK_MESSAGE = (
+    "Our AI assistant is temporarily unavailable. "
+    "Please try again in a few minutes or contact support."
+)
+
+
+@dataclass
+class ResponseTier:
+    name: str
+    handler: Callable[[dict], Awaitable[str]]
+    timeout_seconds: float = 10.0
+    is_acceptable: bool = True
+
+
+@dataclass
+class DegradedResponse:
+    content: str
+    tier_used: str
+    is_degraded: bool
+    latency_ms: int
+    tiers_attempted: list[str] = field(default_factory=list)
+
+
+class DegradationManager:
+    def __init__(self, tiers: list[ResponseTier]):
+        # TODO: store tiers and initialize stats
+        raise NotImplementedError
+
+    async def serve(self, request: dict) -> DegradedResponse:
+        # TODO: try tiers in order with timeout, return first success
+        raise NotImplementedError
+
+    def get_stats(self) -> dict:
+        # TODO: return per-tier call counts and success rates
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import asyncio
+import logging
+import time
+from dataclasses import dataclass, field
+from typing import Callable, Awaitable
+
+logger = logging.getLogger(__name__)
+
+ULTIMATE_FALLBACK_MESSAGE = (
+    "Our AI assistant is temporarily unavailable. "
+    "Please try again in a few minutes or contact support."
+)
+
+
+@dataclass
+class ResponseTier:
+    name: str
+    handler: Callable[[dict], Awaitable[str]]
+    timeout_seconds: float = 10.0
+    is_acceptable: bool = True
+
+
+@dataclass
+class DegradedResponse:
+    content: str
+    tier_used: str
+    is_degraded: bool
+    latency_ms: int
+    tiers_attempted: list[str] = field(default_factory=list)
+
+
+class DegradationManager:
+    def __init__(self, tiers: list[ResponseTier]):
+        self.tiers = tiers
+        self._stats: dict[str, dict] = {
+            t.name: {"calls": 0, "successes": 0, "total_latency_ms": 0}
+            for t in tiers
+        }
+
+    async def serve(self, request: dict) -> DegradedResponse:
+        overall_start = time.monotonic()
+        tiers_attempted: list[str] = []
+
+        for tier in self.tiers:
+            tiers_attempted.append(tier.name)
+            tier_start = time.monotonic()
+            self._stats[tier.name]["calls"] += 1
+            try:
+                content = await asyncio.wait_for(tier.handler(request), timeout=tier.timeout_seconds)
+                latency_ms = int((time.monotonic() - tier_start) * 1000)
+                self._stats[tier.name]["successes"] += 1
+                self._stats[tier.name]["total_latency_ms"] += latency_ms
+                return DegradedResponse(
+                    content=content,
+                    tier_used=tier.name,
+                    is_degraded=not tier.is_acceptable,
+                    latency_ms=int((time.monotonic() - overall_start) * 1000),
+                    tiers_attempted=tiers_attempted,
+                )
+            except (asyncio.TimeoutError, Exception) as exc:
+                latency_ms = int((time.monotonic() - tier_start) * 1000)
+                self._stats[tier.name]["total_latency_ms"] += latency_ms
+                logger.warning("tier_failed", extra={"tier": tier.name, "error": str(exc)})
+
+        return DegradedResponse(
+            content=ULTIMATE_FALLBACK_MESSAGE,
+            tier_used="static_fallback",
+            is_degraded=True,
+            latency_ms=int((time.monotonic() - overall_start) * 1000),
+            tiers_attempted=tiers_attempted,
+        )
+
+    def get_stats(self) -> dict:
+        result = {}
+        for name, stats in self._stats.items():
+            calls = stats["calls"]
+            result[name] = {
+                "calls": calls,
+                "success_rate": stats["successes"] / calls if calls > 0 else 0.0,
+                "avg_latency_ms": stats["total_latency_ms"] / calls if calls > 0 else 0.0,
+            }
+        return result
+
+
+# Demo
+async def demo():
+    call_count = 0
+
+    async def primary_llm(req: dict) -> str:
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            await asyncio.sleep(5.0)  # simulate timeout
+        return f"AI response to: {req.get('query', '')}"
+
+    async def cached_response(req: dict) -> str:
+        await asyncio.sleep(0.005)
+        return "Cached: Here is a relevant answer from our knowledge base."
+
+    async def template_response(req: dict) -> str:
+        return "Template: Please visit our help center for assistance."
+
+    manager = DegradationManager(tiers=[
+        ResponseTier("primary_llm", primary_llm, timeout_seconds=0.1, is_acceptable=True),
+        ResponseTier("semantic_cache", cached_response, timeout_seconds=1.0, is_acceptable=False),
+        ResponseTier("template", template_response, timeout_seconds=1.0, is_acceptable=False),
+    ])
+
+    for i in range(3):
+        response = await manager.serve({"query": f"What is the refund policy? (call {i+1})"})
+        print(f"Call {i+1}: tier={response.tier_used}, degraded={response.is_degraded}, {response.latency_ms}ms")
+        print(f"  attempted: {response.tiers_attempted}")
+
+    print("\\nStats:", manager.get_stats())
+
+
+asyncio.run(demo())
+""",
+        "explanation_md": """\
+## Walkthrough: Graceful Degradation with Fallback Tiers
+
+**The core principle:** Every AI feature should have a defined answer to "what does the user see when the AI is unavailable?" Encoding it as explicit fallback tiers forces the decision at design time, not during an incident.
+
+**`is_acceptable` flag:** Tiers where `is_acceptable=False` succeed technically (they return content) but are considered degraded from a product perspective. The `is_degraded` flag in `DegradedResponse` allows the API response to include a degraded signal so the frontend can show a subtle notice rather than pretending everything is normal.
+
+**Timeout per tier:** Each tier has its own `timeout_seconds`. The primary LLM might get 10 seconds; the cache lookup gets 0.5 seconds; the template response is near-instant. `asyncio.wait_for` ensures a slow tier does not hold up the fallback chain.
+
+**Stats for monitoring:** `get_stats()` returns per-tier success rates. A dashboard showing "primary LLM success rate: 98%, cache fallback rate: 2%" tells you system health at a glance.
+
+**Ultimate fallback:** Even when all tiers fail, the user gets a human-readable message instead of a 500 error. `static_fallback` never raises — it is the safety net of last resort.
+""",
+        "tags_json": ["deployment", "reliability", "graceful-degradation", "circuit-breaker", "api-async"],
+    },
+    {
+        "title": "Track and alert on LLM cost per feature",
+        "slug": "track-alert-llm-cost-per-feature",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Track and Alert on LLM Cost Per Feature
+
+Without cost visibility, you will discover that your most popular feature is generating $30,000/month in LLM costs via the monthly billing invoice — after the fact. The solution is instrumented cost tracking that captures cost at request time, grouped by feature.
+
+### What to build
+
+Implement a `CostLedger` that:
+
+1. `record(event: CostEvent) -> None` — record a cost event with `feature`, `model`, `input_tokens`, `output_tokens`, `user_id`.
+2. `daily_report(date_str: str | None = None) -> DailyReport` — costs grouped by feature for today. Include total cost, per-feature breakdown, and top 3 costliest requests.
+3. `check_alerts(budgets: dict[str, float]) -> list[BudgetAlert]` — check if any feature has exceeded its daily budget.
+4. `hourly_burn_rate(feature: str) -> float` — average cost per hour over the last 24 hours for a feature.
+
+Use these rates per 1000 tokens (input/output):
+- `gpt-4o-mini`: $0.00015 / $0.0006
+- `gpt-4o`: $0.0025 / $0.01
+- `claude-3-5-haiku-20241022`: $0.0008 / $0.004
+
+### Constraints
+
+- Standard library only.
+- Use `datetime` for timestamps.
+- Events stored in-memory.
+""",
+        "starter_code": """\
+from __future__ import annotations
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from collections import defaultdict
+
+MODEL_COSTS = {
+    "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
+    "gpt-4o": {"input": 0.0025, "output": 0.01},
+    "claude-3-5-haiku-20241022": {"input": 0.0008, "output": 0.004},
+}
+
+
+@dataclass
+class CostEvent:
+    feature: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    user_id: str | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def cost_usd(self) -> float:
+        # TODO: compute cost using MODEL_COSTS
+        raise NotImplementedError
+
+
+@dataclass
+class DailyReport:
+    date: str
+    total_usd: float
+    by_feature: dict[str, float]
+    top_requests: list[dict]
+
+
+@dataclass
+class BudgetAlert:
+    feature: str
+    spent_usd: float
+    budget_usd: float
+    overage_pct: float
+
+
+class CostLedger:
+    def __init__(self):
+        self._events: list[CostEvent] = []
+
+    def record(self, event: CostEvent) -> None:
+        raise NotImplementedError
+
+    def daily_report(self, date_str: str | None = None) -> DailyReport:
+        raise NotImplementedError
+
+    def check_alerts(self, budgets: dict[str, float]) -> list[BudgetAlert]:
+        raise NotImplementedError
+
+    def hourly_burn_rate(self, feature: str) -> float:
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+
+MODEL_COSTS = {
+    "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
+    "gpt-4o": {"input": 0.0025, "output": 0.01},
+    "claude-3-5-haiku-20241022": {"input": 0.0008, "output": 0.004},
+}
+
+
+@dataclass
+class CostEvent:
+    feature: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    user_id: str | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def cost_usd(self) -> float:
+        rates = MODEL_COSTS.get(self.model)
+        if not rates:
+            return 0.0
+        return (
+            self.input_tokens / 1000 * rates["input"]
+            + self.output_tokens / 1000 * rates["output"]
+        )
+
+
+@dataclass
+class DailyReport:
+    date: str
+    total_usd: float
+    by_feature: dict[str, float]
+    top_requests: list[dict]
+
+
+@dataclass
+class BudgetAlert:
+    feature: str
+    spent_usd: float
+    budget_usd: float
+    overage_pct: float
+
+
+class CostLedger:
+    def __init__(self):
+        self._events: list[CostEvent] = []
+
+    def record(self, event: CostEvent) -> None:
+        self._events.append(event)
+
+    def daily_report(self, date_str: str | None = None) -> DailyReport:
+        if date_str is None:
+            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        day_events = [e for e in self._events if e.timestamp.strftime("%Y-%m-%d") == date_str]
+        by_feature: dict[str, float] = defaultdict(float)
+        for event in day_events:
+            by_feature[event.feature] += event.cost_usd
+        sorted_events = sorted(day_events, key=lambda e: e.cost_usd, reverse=True)
+        top_requests = [
+            {
+                "feature": e.feature, "model": e.model,
+                "cost_usd": round(e.cost_usd, 6),
+                "input_tokens": e.input_tokens, "output_tokens": e.output_tokens,
+            }
+            for e in sorted_events[:3]
+        ]
+        return DailyReport(
+            date=date_str,
+            total_usd=sum(by_feature.values()),
+            by_feature={k: round(v, 6) for k, v in by_feature.items()},
+            top_requests=top_requests,
+        )
+
+    def check_alerts(self, budgets: dict[str, float]) -> list[BudgetAlert]:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        report = self.daily_report(today)
+        alerts = []
+        for feature, budget_usd in budgets.items():
+            spent = report.by_feature.get(feature, 0.0)
+            if spent > budget_usd:
+                overage_pct = (spent - budget_usd) / budget_usd * 100
+                alerts.append(BudgetAlert(
+                    feature=feature, spent_usd=round(spent, 6),
+                    budget_usd=budget_usd, overage_pct=round(overage_pct, 1),
+                ))
+        return alerts
+
+    def hourly_burn_rate(self, feature: str) -> float:
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=24)
+        recent = [e for e in self._events if e.feature == feature and e.timestamp >= cutoff]
+        return sum(e.cost_usd for e in recent) / 24.0
+
+
+# Demo
+import random
+random.seed(42)
+ledger = CostLedger()
+features = ["document_qa", "code_review", "summarizer"]
+models = ["gpt-4o-mini", "gpt-4o"]
+for _ in range(50):
+    ledger.record(CostEvent(
+        feature=random.choice(features),
+        model=random.choice(models),
+        input_tokens=random.randint(200, 4000),
+        output_tokens=random.randint(50, 800),
+    ))
+
+report = ledger.daily_report()
+print(f"Today total: ${report.total_usd:.4f}")
+for feature, cost in sorted(report.by_feature.items(), key=lambda x: x[1], reverse=True):
+    print(f"  {feature}: ${cost:.4f}")
+
+alerts = ledger.check_alerts(budgets={"document_qa": 0.001, "code_review": 0.10})
+if alerts:
+    for alert in alerts:
+        print(f"ALERT: {alert.feature} exceeded budget by {alert.overage_pct:.1f}%")
+else:
+    print("No budget alerts.")
+""",
+        "explanation_md": """\
+## Walkthrough: LLM Cost Tracking Per Feature
+
+**Why feature-level granularity matters:** Provider billing gives you total tokens per API key. That tells you nothing about which feature is driving cost. By recording `feature` on every event, you can answer "document_qa generated 73% of our LLM costs this month" and make engineering decisions accordingly.
+
+**Cost at record time vs compute later:** The `cost_usd` property on `CostEvent` computes cost from the rates dictionary. Storing raw tokens (not just dollars) is important because model pricing changes. If a provider cuts prices, you can retroactively recompute historical costs from stored token counts.
+
+**Budget alerts as guardrails:** `check_alerts` compares today's spend against per-feature budgets. Run this hourly via a cron job and alert to Slack when a feature is over budget. Set budgets conservatively at first — you will tune them as you learn typical usage patterns.
+
+**Hourly burn rate:** This metric answers "at the current consumption rate, how much will this feature cost over 24 hours?" It is more actionable than a daily total because it updates continuously.
+
+**Production extension:** Add `request_id` to `CostEvent` so you can join cost records with traces for per-request debugging. Persist events to a database for multi-day reporting.
+""",
+        "tags_json": ["deployment", "cost-management", "observability", "monitoring"],
+    },
+    {
+        "title": "Generate Kubernetes manifests for an LLM service",
+        "slug": "kubernetes-manifests-llm-service",
+        "category": "api-async",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Generate Kubernetes Manifests for an LLM Service
+
+Deploying an LLM service to Kubernetes requires careful manifest design. The key differences from a typical web service:
+
+- **Slow startup:** Even API-gateway-style LLM services can be slow to initialize (loading embedding models, warming caches). The `startupProbe` must allow enough time.
+- **Memory sensitivity:** LLM services hold large in-memory caches. Pod memory limits need to be generous.
+- **Config via secrets:** API keys must come from Kubernetes Secrets, never plain env vars in the manifest.
+- **Graceful shutdown:** In-flight LLM calls can take 10-30 seconds. `terminationGracePeriodSeconds` must accommodate this.
+
+### What to build
+
+Write Python functions that generate Kubernetes manifest dictionaries:
+
+1. `build_deployment(config: ServiceConfig) -> dict` — a `Deployment` manifest with startup/liveness/readiness probes, resource limits, secret env vars, and `terminationGracePeriodSeconds: 45`.
+2. `build_service(config: ServiceConfig) -> dict` — a ClusterIP `Service` manifest.
+3. `build_hpa(config: ServiceConfig) -> dict` — a `HorizontalPodAutoscaler` (autoscaling/v2) targeting 70% CPU utilization.
+
+The startup probe must use `failureThreshold: 30` + `periodSeconds: 10` (5 minutes total).
+
+### Constraints
+
+- Return plain Python dicts (JSON-serializable).
+- API keys injected via `secretKeyRef` from `config.secret_name`.
+- Use `apps/v1` for Deployment, `autoscaling/v2` for HPA.
+""",
+        "starter_code": """\
+from __future__ import annotations
+from dataclasses import dataclass
+
+
+@dataclass
+class ServiceConfig:
+    name: str
+    image: str
+    replicas: int = 2
+    cpu_request: str = "250m"
+    cpu_limit: str = "1000m"
+    memory_request: str = "512Mi"
+    memory_limit: str = "2Gi"
+    port: int = 8000
+    secret_name: str = "llm-api-keys"
+    min_replicas: int = 1
+    max_replicas: int = 10
+
+
+def build_deployment(config: ServiceConfig) -> dict:
+    # TODO: build Deployment with startup/liveness/readiness probes, resources, secret env vars
+    raise NotImplementedError
+
+
+def build_service(config: ServiceConfig) -> dict:
+    # TODO: build ClusterIP Service
+    raise NotImplementedError
+
+
+def build_hpa(config: ServiceConfig) -> dict:
+    # TODO: build HPA targeting 70% CPU utilization
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+from dataclasses import dataclass
+
+
+@dataclass
+class ServiceConfig:
+    name: str
+    image: str
+    replicas: int = 2
+    cpu_request: str = "250m"
+    cpu_limit: str = "1000m"
+    memory_request: str = "512Mi"
+    memory_limit: str = "2Gi"
+    port: int = 8000
+    secret_name: str = "llm-api-keys"
+    min_replicas: int = 1
+    max_replicas: int = 10
+
+
+def build_deployment(config: ServiceConfig) -> dict:
+    return {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": config.name, "labels": {"app": config.name}},
+        "spec": {
+            "replicas": config.replicas,
+            "selector": {"matchLabels": {"app": config.name}},
+            "template": {
+                "metadata": {"labels": {"app": config.name}},
+                "spec": {
+                    "terminationGracePeriodSeconds": 45,
+                    "containers": [
+                        {
+                            "name": config.name,
+                            "image": config.image,
+                            "ports": [{"containerPort": config.port}],
+                            "resources": {
+                                "requests": {"cpu": config.cpu_request, "memory": config.memory_request},
+                                "limits": {"cpu": config.cpu_limit, "memory": config.memory_limit},
+                            },
+                            "env": [
+                                {
+                                    "name": "OPENAI_API_KEY",
+                                    "valueFrom": {"secretKeyRef": {"name": config.secret_name, "key": "openai-api-key"}},
+                                },
+                                {
+                                    "name": "ANTHROPIC_API_KEY",
+                                    "valueFrom": {"secretKeyRef": {"name": config.secret_name, "key": "anthropic-api-key"}},
+                                },
+                            ],
+                            "startupProbe": {
+                                "httpGet": {"path": "/health/live", "port": config.port},
+                                "failureThreshold": 30,
+                                "periodSeconds": 10,
+                            },
+                            "livenessProbe": {
+                                "httpGet": {"path": "/health/live", "port": config.port},
+                                "periodSeconds": 30,
+                                "timeoutSeconds": 5,
+                                "failureThreshold": 3,
+                            },
+                            "readinessProbe": {
+                                "httpGet": {"path": "/health/ready", "port": config.port},
+                                "initialDelaySeconds": 5,
+                                "periodSeconds": 10,
+                                "timeoutSeconds": 5,
+                                "failureThreshold": 3,
+                            },
+                        }
+                    ],
+                },
+            },
+        },
+    }
+
+
+def build_service(config: ServiceConfig) -> dict:
+    return {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {"name": config.name, "labels": {"app": config.name}},
+        "spec": {
+            "type": "ClusterIP",
+            "selector": {"app": config.name},
+            "ports": [{"name": "http", "port": 80, "targetPort": config.port, "protocol": "TCP"}],
+        },
+    }
+
+
+def build_hpa(config: ServiceConfig) -> dict:
+    return {
+        "apiVersion": "autoscaling/v2",
+        "kind": "HorizontalPodAutoscaler",
+        "metadata": {"name": f"{config.name}-hpa"},
+        "spec": {
+            "scaleTargetRef": {"apiVersion": "apps/v1", "kind": "Deployment", "name": config.name},
+            "minReplicas": config.min_replicas,
+            "maxReplicas": config.max_replicas,
+            "metrics": [
+                {
+                    "type": "Resource",
+                    "resource": {
+                        "name": "cpu",
+                        "target": {"type": "Utilization", "averageUtilization": 70},
+                    },
+                }
+            ],
+        },
+    }
+
+
+# Demo and assertions
+config = ServiceConfig(name="llm-gateway", image="myregistry.io/llm-gateway:v1.2.0", replicas=2, memory_limit="4Gi")
+deployment = build_deployment(config)
+service = build_service(config)
+hpa = build_hpa(config)
+
+assert deployment["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 45
+assert deployment["spec"]["template"]["spec"]["containers"][0]["startupProbe"]["failureThreshold"] == 30
+assert len(deployment["spec"]["template"]["spec"]["containers"][0]["env"]) == 2
+assert hpa["spec"]["metrics"][0]["resource"]["target"]["averageUtilization"] == 70
+assert service["spec"]["type"] == "ClusterIP"
+
+containers = deployment["spec"]["template"]["spec"]["containers"][0]
+print(f"terminationGracePeriodSeconds: {deployment['spec']['template']['spec']['terminationGracePeriodSeconds']}")
+print(f"memory limit: {containers['resources']['limits']['memory']}")
+print(f"startupProbe failureThreshold: {containers['startupProbe']['failureThreshold']} (= {containers['startupProbe']['failureThreshold'] * containers['startupProbe']['periodSeconds']}s max startup)")
+print(f"secret env vars: {[e['name'] for e in containers['env']]}")
+print(f"HPA: min={hpa['spec']['minReplicas']}, max={hpa['spec']['maxReplicas']}, CPU target=70%")
+print("All assertions passed.")
+""",
+        "explanation_md": """\
+## Walkthrough: Kubernetes Manifests for LLM Services
+
+**The startup probe is the most important difference from a standard web service.** `failureThreshold: 30` with `periodSeconds: 10` gives 5 minutes before Kubernetes kills the container. Without this, the liveness probe fires before the service is ready and triggers a restart loop.
+
+**Liveness vs readiness in the manifest:** Liveness checks less frequently (every 30s) with higher tolerance (3 failures) because a liveness failure triggers a disruptive container restart. Readiness checks more frequently (every 10s) so traffic re-routing after recovery happens quickly.
+
+**Secrets via `secretKeyRef`:** Never put API keys in the manifest as plain strings. Use `valueFrom.secretKeyRef` to inject from a Kubernetes Secret. The Secret is created separately (`kubectl create secret generic llm-api-keys --from-literal=openai-api-key=sk-...`) and never appears in version control.
+
+**`terminationGracePeriodSeconds: 45`:** When Kubernetes kills a pod (scale-down or rolling update), it sends SIGTERM and waits this long before sending SIGKILL. In-flight LLM calls can take 10-30 seconds — a value of 45 ensures current requests complete.
+
+**HPA on CPU vs custom metrics:** CPU-based autoscaling is a reasonable starting point. For more accurate LLM service scaling, use custom metrics like queue depth or P95 latency. Start with CPU and refine once you have production traffic data.
+""",
+        "tags_json": ["deployment", "kubernetes", "containerization", "health-checks", "reliability"],
+    },
+]
 
 KNOWLEDGE_ARTICLES = [
     {
@@ -14201,6 +19014,557 @@ You have that understanding when you can point to a metric, a trace, and a cause
         "source_links_json": ["https://docs.anthropic.com/en/docs/build-with-claude/tool-use", "https://platform.openai.com/docs/guides/evals"],
         "tags_json": ["agents", "evaluation", "metrics", "testing", "observability"],
     },
+    {
+        "title": "Python patterns every AI engineer should know",
+        "slug": "python-patterns-ai-engineers",
+        "category": "python",
+        "summary": "The specific Python patterns that matter for AI engineering: Pydantic boundaries, async concurrency, generator pipelines, and structured logging.",
+        "content_md": """\
+## Python patterns every AI engineer should know
+
+AI engineering Python is not about algorithms. It is about reliability under operational pressure: provider APIs that change their response shapes, ingestion scripts that need to run safely on a schedule, async pipelines that hit rate limits, and debugging sessions where the real question is "which chunk was retrieved and why?"
+
+The patterns below are the ones that separate Python code that works in demos from Python code that works in production.
+
+## Pattern 1: Pydantic at every external boundary
+
+Every point where data enters your system from outside — provider API responses, uploaded files, queue payloads, environment variables — is a boundary that should be validated with Pydantic.
+
+```python
+from pydantic import BaseModel, Field, model_validator
+
+class LLMResponse(BaseModel):
+    request_id: str = Field(min_length=1)
+    content: str
+    model: str
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    finish_reason: str = "stop"
+
+    @model_validator(mode="after")
+    def content_not_empty(self) -> "LLMResponse":
+        if not self.content.strip():
+            raise ValueError("LLM returned empty content")
+        return self
+```
+
+The rule: validate at the boundary, then pass typed objects inward. If a provider changes their response schema, only the boundary model changes.
+
+## Pattern 2: Async with bounded concurrency
+
+LLM calls are I/O-bound. Processing 50 documents serially takes 10× longer than processing them concurrently with a semaphore:
+
+```python
+import asyncio
+
+async def process_batch(items, client, max_concurrent=5):
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def _one(item):
+        async with semaphore:
+            return await asyncio.wait_for(client.generate(item), timeout=30.0)
+
+    results = await asyncio.gather(*[_one(i) for i in items], return_exceptions=True)
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, Exception)]
+    return successes, failures
+```
+
+`return_exceptions=True` prevents one failure from cancelling all remaining tasks. `asyncio.wait_for` prevents a hung provider from blocking the event loop indefinitely.
+
+## Pattern 3: Generators for memory-efficient pipelines
+
+List comprehensions materialize all results in memory. For large corpora, use generator pipelines:
+
+```python
+from pathlib import Path
+from typing import Iterator
+import json
+
+def read_jsonl(path: Path) -> Iterator[dict]:
+    with path.open() as f:
+        for line in f:
+            if line.strip():
+                yield json.loads(line)
+
+def validate(records: Iterator[dict]) -> Iterator[dict]:
+    for r in records:
+        if r.get("body") and len(r["body"]) >= 100:
+            yield r
+
+def normalize(records: Iterator[dict]) -> Iterator[dict]:
+    for r in records:
+        yield {**r, "body": r["body"].strip()}
+
+# Compose: constant memory regardless of file size
+pipeline = normalize(validate(read_jsonl(Path("docs.jsonl"))))
+```
+
+Each stage is lazy: it pulls one item from the previous stage when the next stage asks for one. A 10GB file and a 10MB file use the same peak memory.
+
+## Pattern 4: Structured logging for AI debugging
+
+Standard application logging records what happened. AI debugging needs to record what the model saw and why it made the decisions it made:
+
+```python
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+
+async def call_provider(request):
+    start = time.monotonic()
+    try:
+        response = await client.generate(request.model_dump())
+        logger.info("provider_call_ok", extra={
+            "request_id": request.request_id,
+            "model": request.model,
+            "latency_ms": int((time.monotonic() - start) * 1000),
+            "finish_reason": response.finish_reason,
+            "output_tokens": response.output_tokens,
+        })
+        return response
+    except Exception as exc:
+        logger.error("provider_call_failed", extra={
+            "request_id": request.request_id,
+            "model": request.model,
+            "latency_ms": int((time.monotonic() - start) * 1000),
+            "error": str(exc),
+        })
+        raise
+```
+
+Structured log events (`extra={}` dict) are queryable. When debugging at 2 AM, you want `filter by request_id`, not `grep for strings`.
+
+## Pattern 5: Idempotent scripts
+
+Scripts that run on a schedule, process datasets, or run evaluations must be safely re-runnable:
+
+- Write to a new output file or use an explicit `--overwrite` flag
+- Skip already-processed rows rather than reprocessing blindly
+- Capture per-row failures instead of aborting the run
+- Print a summary count at the end: processed, skipped, failed
+
+## The underlying principle
+
+These patterns are all the same idea applied to different layers: **explicit boundaries, explicit errors, explicit state**. Python that hides failures, propagates raw dicts, or side-steps structure is hard to debug. Python that makes boundaries explicit and validates at them is debuggable when something goes wrong.
+
+## Reference
+
+- [Pydantic v2 docs](https://docs.pydantic.dev/latest/)
+- [asyncio documentation](https://docs.python.org/3/library/asyncio.html)
+- [Python typing module](https://docs.python.org/3/library/typing.html)
+""",
+        "source_links_json": [
+            "https://docs.pydantic.dev/latest/",
+            "https://docs.python.org/3/library/asyncio.html",
+        ],
+        "tags_json": ["python", "patterns", "pydantic", "async", "generators"],
+    },
+    {
+        "title": "Managing LLM response variability in production",
+        "slug": "managing-llm-response-variability",
+        "category": "python",
+        "summary": "Practical patterns for parsing, validating, and recovering from the structured output failures that LLMs produce in production.",
+        "content_md": """\
+## Managing LLM response variability in production
+
+LLMs are probabilistic. Even at temperature 0, the same prompt can return slightly different output on different days as providers update their models. When your application parses that output, variability becomes reliability risk.
+
+This article covers the patterns that manage variability at the application layer.
+
+## What variability looks like in practice
+
+The failures that actually occur in production are predictable:
+
+1. **JSON wrapped in markdown fences** — `\`\`\`json\n{...}\n\`\`\`\`` instead of raw JSON
+2. **Extra prose before or after the JSON** — "Here is the result: {...}"
+3. **Missing required fields** — the model omits a field that was in the schema
+4. **Wrong types** — `"3"` instead of `3`, `null` instead of an empty list
+5. **Schema drift** — the model's interpretation of "list" vs "object" changes between runs
+6. **Empty content** — the model returns an empty string or whitespace only
+
+None of these are rare. In a high-volume feature, all of them will occur.
+
+## Layer 1: Prompt constraints
+
+Before parsing, constrain the model's output format as tightly as possible:
+
+- Use `response_format: {"type": "json_object"}` when the provider supports it
+- Show an example of the exact JSON structure in the prompt
+- Specify which fields are required and what their types are
+- Use system-level instructions to enforce format, not just user-level
+
+These constraints reduce variability but do not eliminate it. Your parsing layer still needs to handle failures.
+
+## Layer 2: Robust JSON extraction
+
+```python
+import json
+import re
+from pydantic import BaseModel, ValidationError
+from dataclasses import dataclass
+from typing import TypeVar, Type
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
+@dataclass
+class ParseResult:
+    success: bool
+    data: BaseModel | None
+    error: str | None
+
+def parse_llm_json(raw: str, model_class: Type[ModelT]) -> ParseResult:
+    text = raw.strip()
+    # Strip markdown fences
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\n?", "", text)
+        text = re.sub(r"\n?```$", "", text.strip())
+    # Find outermost JSON object
+    match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
+    if not match:
+        return ParseResult(False, None, "No JSON found in output")
+    try:
+        data = json.loads(match.group(1))
+        validated = model_class.model_validate(data)
+        return ParseResult(True, validated, None)
+    except json.JSONDecodeError as e:
+        return ParseResult(False, None, f"JSON parse error: {e}")
+    except ValidationError as e:
+        return ParseResult(False, None, f"Schema mismatch: {e.error_count()} error(s)")
+```
+
+## Layer 3: Graceful failure handling
+
+Decide what failure means for your use case:
+
+| Failure type | Appropriate response |
+|---|---|
+| Missing optional field | Use default value |
+| Missing required field | Retry once, then skip |
+| Malformed JSON | Retry with stronger format constraint |
+| Empty content | Log warning, skip this item |
+| Schema drift | Alert engineering team |
+
+Do not treat all failures the same. A missing optional field is not the same as empty content.
+
+## Layer 4: Output monitoring
+
+Track structured output failure rates in your observability system:
+
+```python
+class OutputMetrics:
+    def __init__(self):
+        self._results = {"success": 0, "fence_stripped": 0, "schema_error": 0, "empty": 0}
+
+    def record(self, parse_result: ParseResult, was_fenced: bool = False):
+        if parse_result.success:
+            self._results["success"] += 1
+            if was_fenced:
+                self._results["fence_stripped"] += 1
+        else:
+            category = "schema_error" if "Schema" in (parse_result.error or "") else "empty"
+            self._results[category] += 1
+
+    def failure_rate(self) -> float:
+        total = sum(self._results.values())
+        return (total - self._results["success"]) / total if total > 0 else 0.0
+```
+
+A failure rate above 5% is a signal to improve the prompt. Above 15%, the feature is unreliable.
+
+## The practical rule
+
+Every structured LLM output should flow through a parse-validate-handle pipeline. Validate explicitly. Handle failures explicitly. Monitor the failure rate. When the rate exceeds your threshold, improve the prompt before changing the parsing logic.
+""",
+        "source_links_json": [
+            "https://platform.openai.com/docs/guides/structured-outputs",
+            "https://docs.pydantic.dev/latest/",
+        ],
+        "tags_json": ["python", "llm-output", "validation", "reliability", "pydantic"],
+    },
+    {
+        "title": "The async patterns that actually matter for AI workloads",
+        "slug": "async-patterns-ai-workloads",
+        "category": "python",
+        "summary": "Which async Python patterns produce real throughput gains for LLM-heavy code, and which common patterns introduce new failure modes.",
+        "content_md": """\
+## The async patterns that actually matter for AI workloads
+
+Async Python is not automatically faster. The patterns that produce real throughput gains for AI workloads are specific, and the patterns that introduce new failure modes are equally specific. This article covers both.
+
+## Why async matters for AI workloads
+
+LLM calls take 300ms to 3 seconds. Embedding 1000 documents at 100ms each takes 100 seconds serially. With async and a semaphore of 10, it takes 10 seconds. The math is straightforward: async concurrency is the single highest-leverage optimization for I/O-bound AI work.
+
+CPU-bound work (document parsing, tokenization, scoring) does not benefit from async. Use `ProcessPoolExecutor` for CPU-bound parallelism.
+
+## Pattern 1: asyncio.gather with return_exceptions=True
+
+```python
+async def batch_process(items, fn, max_concurrent=5):
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def _one(item):
+        async with semaphore:
+            return await fn(item)
+
+    raw = await asyncio.gather(*[_one(i) for i in items], return_exceptions=True)
+    successes = [(i, r) for i, r in zip(items, raw) if not isinstance(r, Exception)]
+    failures = [(i, r) for i, r in zip(items, raw) if isinstance(r, Exception)]
+    return successes, failures
+```
+
+`return_exceptions=True` is the most important parameter. Without it, one failure cancels all pending tasks. With it, you handle each item's result independently.
+
+## Pattern 2: asyncio.wait_for for per-call timeouts
+
+```python
+async def call_with_timeout(client, prompt, timeout_s=30.0):
+    try:
+        return await asyncio.wait_for(client.generate(prompt), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        raise TimeoutError(f"Provider call timed out after {timeout_s}s")
+```
+
+Every provider call needs an explicit timeout. Without one, a hung provider blocks your task indefinitely. The right timeout is your P95 call latency × 2, not an arbitrary constant.
+
+## Pattern 3: Shared AsyncClient lifecycle
+
+```python
+import httpx
+
+class ProviderClient:
+    def __init__(self, base_url, api_key):
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=httpx.Timeout(30.0),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+
+    async def generate(self, payload):
+        resp = await self._client.post("/v1/generate", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def close(self):
+        await self._client.aclose()
+```
+
+A shared `AsyncClient` reuses TCP connections. Creating one client per request means a new TCP handshake and TLS negotiation for every call. At 10 requests/second, that overhead is measurable.
+
+## Common mistakes that introduce failure modes
+
+**Blocking calls inside async functions.** `time.sleep()`, `requests.get()`, synchronous file I/O, or any other blocking call inside `async def` stalls the entire event loop. Use `asyncio.sleep()`, `httpx.AsyncClient`, and `asyncio.to_thread()` for blocking code.
+
+```python
+# WRONG: blocks the event loop
+async def bad_read(path):
+    return open(path).read()  # blocking I/O
+
+# RIGHT: runs blocking I/O in a thread pool
+async def good_read(path):
+    return await asyncio.to_thread(Path(path).read_text)
+```
+
+**Missing timeout on gather.** Per-item timeouts catch slow individual calls. But if you need a hard wall clock limit for the entire batch, add a timeout on the gather itself:
+
+```python
+try:
+    results = await asyncio.wait_for(
+        asyncio.gather(*tasks, return_exceptions=True),
+        timeout=total_budget_s,
+    )
+except asyncio.TimeoutError:
+    # Some tasks are still running — they are now abandoned
+    pass
+```
+
+**Treating semaphore count as a performance maximizer.** `max_concurrent` is an operational constraint (provider rate limit, downstream capacity), not a number to maximize. Start with 5, measure, and increase carefully.
+
+## When to use asyncio vs ProcessPoolExecutor
+
+| Work type | Use |
+|---|---|
+| API calls, network I/O | `asyncio.gather` |
+| Database queries | `asyncio` with an async driver |
+| CPU-intensive parsing | `ProcessPoolExecutor` |
+| CPU + I/O mix | `asyncio` for I/O, `to_thread` for CPU stages |
+
+## Practical starting point
+
+For any AI batch job:
+1. Start with `asyncio.gather` + `Semaphore(5)` + `wait_for(timeout=30)`
+2. Measure actual throughput and provider 429 rate
+3. Adjust `max_concurrent` based on measurements, not intuition
+""",
+        "source_links_json": [
+            "https://docs.python.org/3/library/asyncio.html",
+            "https://www.python-httpx.org/async/",
+        ],
+        "tags_json": ["python", "async", "concurrency", "performance", "patterns"],
+    },
+]
+
+# ── Additional RAG knowledge articles ───────────────────────────────────────
+KNOWLEDGE_ARTICLES += [
+
+    {
+        "title": "Hybrid retrieval: when to use it and how to tune it",
+        "slug": "hybrid-retrieval-when-to-use-and-tune",
+        "category": "architecture",
+        "summary": "Combine vector and keyword search using RRF, understand when each method wins, and tune the balance for your query distribution.",
+        "content_md": """## Hybrid Retrieval
+
+Most production RAG systems use hybrid retrieval — combining vector (semantic) search with keyword (BM25) search and merging the results. This is not a complex choice: it is the default architecture for any RAG system that serves a real user population.
+
+## Why hybrid is necessary
+
+**Vector search fails on exact entities.** A user asking about "GPT-4o-mini rate limits" or "ORD-58291 status" expects the document that contains those exact strings. Embedding similarity does not optimize for exact match — it finds semantically similar text. A document that contains "GPT-4o" and discusses rate limits will score highly even if it never mentions "GPT-4o-mini."
+
+**Keyword search fails on paraphrases.** A user asking "how do I undo a payment" will not match a document titled "reversing a transaction" unless the document also contains the word "undo." Embedding similarity handles synonyms and paraphrases naturally; BM25 does not.
+
+**Combined, they cover each other's failure modes.** For any realistic query distribution — factual lookups, explanatory questions, entity-specific queries, paraphrase-heavy natural language — hybrid retrieval consistently outperforms either method alone.
+
+## Reciprocal Rank Fusion
+
+The standard merging strategy is Reciprocal Rank Fusion (RRF). Each method independently ranks candidates. For each document, the RRF score is the sum of `1/(k + rank)` across all methods (k=60 is the standard default).
+
+RRF has one important property: it uses only rank positions, not absolute scores. This means you do not need to normalize cosine similarity scores (0 to 1) against BM25 scores (unbounded). Each method just needs to rank its candidates. This makes RRF robust to differences in score distribution between methods.
+
+## When to weight differently
+
+The default k=60 treats both methods roughly equally. Adjust when:
+
+- Your corpus is heavy on exact entity queries (product names, IDs, error codes): lower k to reward top-ranked keyword results more aggressively.
+- Your users ask mostly natural language questions: lower k to reward top-ranked vector results more.
+- You have a third retrieval method (e.g., a graph-based retriever for structured data): add it to the RRF sum with the same formula.
+
+## Common mistakes
+
+**Only using vector search** because it is easier to set up. This consistently degrades quality for entity-specific queries. Add BM25 before your first production launch, not after users complain.
+
+**Treating both methods as interchangeable.** Vector search and keyword search fail on different query types. When you see a quality regression, always check which method was responsible for the failure before tuning.
+
+**Not logging which method contributed each result.** When debugging retrieval failures, you need to know whether the failing result came from the vector search, the keyword search, or only appeared after merging. Log `source_methods` per result.
+
+## Practical takeaway
+
+Start with BM25 + vector search merged with RRF k=60. Run your Recall@K eval harness to establish a baseline. Then experiment with k values and method weights if you have a labeled test set large enough to detect differences. Most systems do not need to go beyond the default.
+""",
+        "source_links_json": ["https://platform.openai.com/docs/guides/embeddings"],
+        "tags_json": ["rag", "retrieval", "hybrid-search", "bm25", "rrf"],
+    },
+    {
+        "title": "RAG context window management: fitting retrieved chunks into prompts",
+        "slug": "rag-context-window-management",
+        "category": "architecture",
+        "summary": "Manage the LLM context window as a scarce resource: token budgets, deduplication, relevance-ordered assembly, and the lost-in-the-middle effect.",
+        "content_md": """## RAG Context Window Management
+
+The context window is a finite resource. Every token you give to retrieved chunks is a token you cannot give to the system prompt, conversation history, or expected output. Getting context assembly wrong silently degrades answer quality without raising any errors.
+
+## The three layers of the context budget
+
+A typical RAG prompt has three layers competing for context space:
+
+1. **System prompt** — instructions, persona, safety rules. Usually 100–500 tokens. Fixed cost per request.
+2. **Retrieved context** — chunks from retrieval. Variable, needs active management.
+3. **Output space** — tokens the model needs to generate the answer. Set via `max_tokens`. If you underestimate, the model truncates.
+
+A common mistake is allocating the full context window to retrieved context and then discovering the system prompt and output together exceed what remains.
+
+## Token budgeting in practice
+
+```
+effective_context_budget = model_context_limit - system_prompt_tokens - max_output_tokens - safety_margin
+```
+
+For `gpt-4o` with a 128K context window, a 500-token system prompt, and 1000 output tokens: effective context budget is ~126,500 tokens. That is generous. For `gpt-4o-mini` with an 128K context: same math, same result. For fine-tuned models or edge deployments with 8K or 16K contexts, the budget is tight.
+
+## Deduplication before assembly
+
+Embedding retrieval often returns multiple chunks from the same section of the same document — slightly different phrasings of the same content. Filling your context budget with near-duplicate passages wastes tokens without improving answer quality.
+
+Before assembling context, check each candidate chunk against already-selected chunks using Jaccard similarity or cosine similarity on their embeddings. Drop near-duplicates (>80% word overlap) before counting their tokens against the budget.
+
+## The lost-in-the-middle effect
+
+Research consistently shows that LLMs are best at using context that appears at the beginning and end of the context window, and systematically miss information in the middle. For RAG:
+
+- Place the most relevant chunks first and last.
+- If you are retrieving 5 chunks, do not place the highest-scored chunk in position 3.
+- For synthesis queries across multiple sources, consider interleaving sources rather than placing all chunks from source A before source B.
+
+## Citation headers enable grounding
+
+Every chunk in the context should carry a citation header: `[Source: document_name, Section: section_name]`. This gives the LLM three things: the information it needs to cite sources in its answer, the context to understand where each piece of information came from, and a structural signal that helps separate facts from different sources.
+
+Without citation headers, the model produces answers that are faithful but uncitable, and users cannot verify individual claims.
+
+## Practical takeaway
+
+Treat context assembly as a resource allocation problem, not a concatenation problem. Budget explicitly for system prompt and output. Deduplicate before filling the budget. Order by relevance (highest first). Include citation headers. Log which chunks were truncated so you can detect when your token budget is too small for your retrieval quality targets.
+""",
+        "source_links_json": ["https://platform.openai.com/docs/guides/text-generation"],
+        "tags_json": ["rag", "context-window", "token-budget", "prompting"],
+    },
+    {
+        "title": "Production RAG: the operational checklist before you launch",
+        "slug": "production-rag-operational-checklist",
+        "category": "architecture",
+        "summary": "The eight operational concerns that separate a demo RAG system from one you can run reliably: caching, fallbacks, monitoring, cost, freshness, access control, evaluation, and latency.",
+        "content_md": """## Production RAG: Operational Checklist
+
+Most RAG tutorials end with a working demo. Production RAG requires eight additional concerns that are not discussed in tutorials because they are not interesting to write about — but they determine whether the system keeps working after launch.
+
+## 1. Query caching
+
+Identical or near-identical queries should not hit the embedding model and vector DB every time. Cache by query hash with a TTL appropriate for your content freshness requirements. Help-center bots typically see 20–40% of queries repeat within an hour — caching eliminates that retrieval and generation cost entirely.
+
+Caching also significantly improves latency for the repeated query case. Users who ask common questions get near-instant responses instead of waiting for the full pipeline.
+
+## 2. Retrieval and generation fallbacks
+
+Define fallback strategies before launch, not after an outage:
+- Primary retriever fails → fall back to a secondary index or a simpler keyword-only retrieval.
+- Primary LLM fails → fall back to a cheaper, faster model with a more conservative prompt.
+- Both fail → return a graceful "I'm unable to answer right now" message instead of a 500 error.
+
+Use a circuit breaker on the primary retriever so consecutive failures stop adding timeout latency to every request.
+
+## 3. Latency monitoring by pipeline step
+
+Log latency separately for embedding, retrieval, reranking, and generation. Do not just measure total latency. When a user complains about slowness, you need to know which step caused it. P50 and P95 per step tell you whether the problem is consistent or spiky.
+
+## 4. Cost visibility per query
+
+Calculate cost per query from day one: embedding tokens, input context tokens, output tokens, and any reranking API calls. At low volume this is negligible; at scale it determines your unit economics. Attribute cost by feature (not all RAG queries are the same product feature) so you can see which features are expensive before a traffic spike surprises you.
+
+## 5. Incremental indexing
+
+Do not re-index the entire corpus on every deploy. Track document content hashes. Only re-embed documents that have changed. Delete old vectors by document ID when content changes. This reduces indexing cost and prevents stale content from sitting in the index.
+
+## 6. Access control enforcement at retrieval time
+
+If your corpus contains documents with different access levels, enforce access control at retrieval — not at the application layer after retrieval. A user who should not see document X should not receive it as a retrieved chunk even if the model does not quote it directly. The only safe place to enforce this is the metadata filter applied before semantic scoring.
+
+## 7. Evaluation regression tracking
+
+Run your Recall@K test set and faithfulness eval on every significant deployment. A change to chunking, embedding model, or retrieval configuration should be validated against your eval suite before reaching production. Without this, quality regressions are invisible until users complain.
+
+## 8. Content freshness rules
+
+Decide what "fresh enough" means for your corpus. Documents that expire should be deleted from the index, not just deprioritized. Stale content in the index produces confidently wrong answers — the most damaging failure mode for user trust.
+
+## Practical takeaway
+
+Go through this list before any RAG feature ships to production. Most of these concerns are low implementation cost but high operational impact. The ones you skip will be the ones that cause your first incident.
+""",
+        "source_links_json": ["https://platform.openai.com/docs", "https://docs.pinecone.io"],
+        "tags_json": ["rag", "production", "operations", "caching", "monitoring"],
+    },
 ]
 
 ARTICLE_NOTES = [
@@ -14393,6 +19757,254 @@ This project is strong evidence that you understand evaluation as an engineering
 Add diff views for prompt and retrieval changes so you can connect metric movement to a concrete engineering decision.
 """,
         "portfolio_score": 88,
+    },
+    {
+        "title": "Observability patterns for production LLM services",
+        "slug": "observability-patterns-production-llm-services",
+        "category": "deployment",
+        "summary": "What to measure, trace, and alert on in production AI services — beyond basic uptime and latency.",
+        "content_md": """\
+## Why standard observability falls short for AI services
+
+Web service observability answers: is it up? Is it fast? Are requests failing? These questions are necessary but not sufficient for LLM services. A service that is 100% available and sub-second can still be failing its users if the model outputs are consistently low-quality, if costs are spiraling, or if the response quality silently degraded after a model update.
+
+Production LLM observability needs to cover three layers that traditional APM tools do not address.
+
+## Layer 1: Infrastructure observability (what you already have)
+
+The standard signals still matter:
+
+- **Latency percentiles (P50, P95, P99)** — LLM latency is highly variable. A P50 of 800ms with a P99 of 12 seconds indicates long-tail issues that users will notice.
+- **Error rate by status code** — distinguish provider errors (5xx from the LLM API) from your application errors and rate limit responses (429).
+- **Queue depth** — if you run a request queue, rising queue depth indicates your inference capacity is not keeping up with demand.
+
+These come from your standard metrics stack (Prometheus, Datadog, CloudWatch).
+
+## Layer 2: LLM-specific operational metrics
+
+These require instrumentation in your application code:
+
+**Token usage per request and per feature.** Track `input_tokens`, `output_tokens`, and derived `cost_usd` for every LLM call. Aggregate by feature and alert when daily spend on any feature exceeds budget.
+
+**Cache hit rate.** If you run a semantic or exact-match cache, track the fraction of requests served from cache. A hit rate below 15% suggests the cache is not helping much for your traffic pattern.
+
+**Provider selection and fallback rate.** In a multi-provider setup, track how often each provider is used. A sudden shift from primary to secondary provider indicates the primary is degraded.
+
+**Model version distribution.** When running A/B tests or canary deployments, track the fraction of requests going to each model version. This confirms the routing is behaving as configured.
+
+## Layer 3: Quality observability
+
+This layer is unique to AI services and the hardest to build:
+
+**Sampled quality scoring.** Run a lightweight quality check on a random sample of responses (e.g., 1-5% of traffic). Use a cheap classifier or LLM judge to score each response. Alert when the rolling average quality score drops below a threshold.
+
+**Output anomaly detection.** Track response length distribution, refusal rate (responses containing "I cannot" or similar patterns), and empty/truncated response rate. Anomalies in these signals often precede quality complaints.
+
+**User feedback signal.** If your product has thumbs up/down or explicit feedback, wire this into your observability stack. Even a 0.1% feedback response rate provides a meaningful quality signal.
+
+## The trace as the fundamental unit
+
+Every production LLM request should produce a trace with spans covering:
+
+1. Request received + routing decision
+2. Cache lookup (hit or miss)
+3. Context retrieval (if RAG) + retrieved chunk count and top score
+4. Prompt construction + token count
+5. LLM call + model, input tokens, output tokens, latency
+6. Response post-processing + any validation failures
+
+A trace that captures all of these makes it possible to answer "why did this specific request produce a bad response?" in under five minutes.
+
+## Practical alert thresholds
+
+| Signal | Alert condition |
+|--------|----------------|
+| P95 LLM latency | > 8 seconds (5-minute window) |
+| Provider error rate | > 2% (5-minute window) |
+| Cache hit rate | < 10% (1-hour window) |
+| Quality score (sampled) | < 0.80 rolling 100 requests |
+| Daily feature cost | > 120% of budget |
+| Fallback rate | > 5% (1-hour window) |
+
+Start with loose thresholds and tighten them as you understand your normal operating range.
+
+## What NOT to alert on
+
+Resist the temptation to alert on every metric. Alert fatigue is the enemy of operational discipline. Only alert when a metric indicates a user-impacting problem that requires human action in the next 30 minutes. Model latency trending up over a week is a planning item, not a 3 AM page.
+""",
+        "source_links_json": ["https://opentelemetry.io/docs/", "https://docs.datadoghq.com/tracing/"],
+        "tags_json": ["deployment", "observability", "monitoring", "llm-ops", "tracing"],
+    },
+    {
+        "title": "Deployment patterns for LLM applications: from demo to production",
+        "slug": "deployment-patterns-llm-demo-to-production",
+        "category": "deployment",
+        "summary": "The engineering decisions that separate a working demo from a production AI feature: reliability, cost controls, rollout strategy, and degradation planning.",
+        "content_md": """\
+## The demo-to-production gap
+
+An LLM demo that works 100% of the time in a controlled environment will encounter conditions in production that the demo never hit: users with unusual input patterns, provider outages at 2 AM, model updates that change output format, token budget exhaustion, and cost spikes from unexpected traffic.
+
+This gap is not about model capability. It is about engineering discipline applied to an AI-specific deployment surface.
+
+## Decision 1: Synchronous or asynchronous response
+
+For requests that take 2-20 seconds, you have two choices:
+
+**Synchronous (HTTP request-response):** The client waits with a long-polling connection. Simple to implement. Works well when P99 latency is under 15 seconds and users expect real-time feedback. Stream the response with SSE (Server-Sent Events) to improve perceived performance.
+
+**Asynchronous (queue-based):** The client submits a job and gets a `job_id`. It polls or subscribes to a result channel. Better when latency is unpredictable or when you need to buffer demand during traffic spikes. Required when processing involves multiple LLM calls chained together (agents, multi-step pipelines).
+
+For most web product features, start synchronous with streaming. Move to async when P99 latency exceeds user tolerance or when you need to decouple ingestion from inference capacity.
+
+## Decision 2: Deployment unit for the AI feature
+
+**Monolith extension:** Add LLM calls directly to your existing service. Fastest path to production. Fine when LLM calls are a small fraction of traffic. Risk: a provider outage or latency spike can degrade your entire service.
+
+**Sidecar LLM service:** A separate microservice handles all LLM calls. The main product calls it over HTTP. Isolates LLM-specific concerns (rate limiting, caching, cost tracking, circuit breakers). Adds network hop complexity but contains failure blast radius.
+
+**Serverless function:** Deploy LLM features as serverless functions with per-invocation billing. Eliminates idle cost. Cold start latency (3-8 seconds for Python + large deps) makes this a bad fit for interactive features. Better for batch processing and scheduled jobs.
+
+For new features in an existing product, the sidecar approach is often the right call — it lets you deploy LLM-specific reliability patterns without mixing them into your main service's codebase.
+
+## Decision 3: Prompt and model version management
+
+The most important operational pattern most teams skip: treat prompts as versioned artifacts.
+
+```
+prompts/
+  summarize_v1.txt  ← previous production version
+  summarize_v2.txt  ← current production version
+  summarize_v3.txt  ← candidate being tested
+```
+
+Load the active version from configuration:
+```python
+version = os.environ.get("PROMPT_VERSION_SUMMARIZE", "v2")
+```
+
+This gives you:
+- **Version history** via git diff
+- **Instant rollback** without a code deployment
+- **Canary testing** by routing some users to v3 before full promotion
+
+Without this, a prompt change that breaks production has no clean rollback path.
+
+## Decision 4: Rollout strategy for AI features
+
+**Hard launch (100% at once):** Only for features with comprehensive eval coverage and where quality regression is easily detected. High risk.
+
+**Feature flag rollout:** Deploy the feature off. Enable for internal users first. Expand to 5%, 20%, 50%, 100% while monitoring quality signals. Most common pattern for AI features.
+
+**Canary by model version:** Keep the current model version serving 90% of traffic. Route 10% to the new version. Compare quality metrics before promoting.
+
+**Shadow mode:** Run the new version in parallel with the current one, log both outputs, but only return the current version's response to users. Use shadow mode to evaluate a new model or prompt against real traffic before exposing it.
+
+## Decision 5: Cost controls before launch
+
+Before any AI feature goes to production:
+
+1. **Token budget enforcement** — cap prompt size at construction time. Never let user input flow directly into a prompt without a size check.
+2. **Per-user daily limits** — rate limit how many LLM calls a single user can make per day.
+3. **Cost monitoring** — instrument every LLM call with feature label and model. Generate daily cost reports grouped by feature.
+4. **Budget alerts** — configure an alert in your provider billing console at 80% of your monthly budget. Configure an in-application alert when daily feature cost exceeds a threshold.
+
+Cost controls are much easier to add before a feature launches than after users have formed expectations about what the feature does.
+
+## The minimum viable production checklist
+
+Before shipping an AI feature to production, verify:
+
+- [ ] Provider API key stored in a secret manager, not in code or environment variables
+- [ ] Retry with exponential backoff on transient provider errors
+- [ ] Timeout on every LLM call (max 30-60 seconds)
+- [ ] Circuit breaker or fallback when the provider is down
+- [ ] Token budget enforcement on prompt construction
+- [ ] Cost event logged for every LLM call
+- [ ] Health check endpoint that probes provider reachability
+- [ ] Eval gate in CI (even a simple 20-case golden test suite)
+- [ ] At least one graceful degradation path
+""",
+        "source_links_json": ["https://12factor.net/", "https://docs.anthropic.com/en/docs/build-with-claude/overview"],
+        "tags_json": ["deployment", "architecture", "reliability", "cost-management", "production"],
+    },
+    {
+        "title": "Semantic caching: when to use it and how to tune the threshold",
+        "slug": "semantic-caching-when-to-use-and-tune",
+        "category": "deployment",
+        "summary": "Semantic caching reduces LLM costs and latency for FAQ-style workloads. This guide covers when it helps, when it hurts, and how to calibrate the similarity threshold.",
+        "content_md": """\
+## What semantic caching is
+
+Exact-match caching serves the same stored response when the input hash is identical. Semantic caching serves a stored response when the input is semantically equivalent — "What is your return policy?" and "How do I return a product?" should return the same cached answer.
+
+The mechanism: embed each query with an embedding model. On a new query, compare its embedding to stored embeddings using cosine similarity. If the best match exceeds a threshold (e.g., 0.92), return the cached response.
+
+## When semantic caching helps
+
+Semantic caching delivers significant value in specific workload shapes:
+
+**FAQ and support features.** A support bot for a SaaS product handles thousands of queries per day, but only a few hundred distinct question types. Caching the most common question clusters achieves 30-60% hit rates.
+
+**Documentation lookups.** "How do I configure X?" questions cluster tightly in embedding space. Hit rates of 40-70% are achievable.
+
+**Repetitive analysis tasks.** If users submit similar documents or run similar reports, embeddings of the input queries will cluster and benefit from caching.
+
+Semantic caching does NOT help for:
+- **Creative generation** (different users want different creative content)
+- **Personalized responses** (user A and user B should get different answers)
+- **Real-time data queries** (anything where staleness matters)
+- **Highly variable queries** where no two inputs are semantically close
+
+## The threshold calibration problem
+
+The similarity threshold is the most important tuning parameter. It controls the tradeoff between:
+
+- **High threshold (e.g., 0.97):** Low hit rate, high response accuracy. Only serves cached results when queries are nearly identical.
+- **Low threshold (e.g., 0.80):** High hit rate, risk of serving wrong cached answer. "How do I cancel my subscription?" might incorrectly match "How do I pause my subscription?" at low thresholds.
+
+### How to calibrate
+
+1. **Collect real traffic samples.** Sample 500-1000 real query pairs from your production logs.
+
+2. **Manually label pairs as equivalent or different.** "What is your return policy?" and "How do I return a purchase?" are equivalent. "What is your return policy?" and "What is your privacy policy?" are different despite some lexical similarity.
+
+3. **Compute cosine similarity for each pair.** Plot the distribution of similarities for equivalent pairs and different pairs.
+
+4. **Find the threshold that maximizes precision at acceptable recall.** You want the threshold where most equivalent pairs are above it and most different pairs are below it.
+
+For general English text with high-quality embeddings (text-embedding-3-small or similar), the separation typically occurs around 0.90-0.95. For domain-specific text (medical, legal, code), the distribution shifts and you may need a different threshold.
+
+5. **Monitor hit rate and false positive rate in production.** Track what fraction of cache hits were "correct" (user was satisfied with the cached response). A false positive rate above 5% suggests the threshold is too low.
+
+## Cache invalidation
+
+Semantic caches need expiration policies. A cached answer about your pricing from three months ago may now be wrong. Options:
+
+- **TTL-based expiration** — simplest; expire entries after N days. Set TTL based on how often the underlying information changes.
+- **Document-update invalidation** — when a source document changes (FAQ updated, policy changed), invalidate all cache entries whose cached queries are semantically similar to the changed document.
+- **Manual invalidation** — maintain an admin endpoint to flush cache entries by topic or keyword. Useful when you make a major product change and want to clear related cached answers.
+
+## Cost math: is it worth it?
+
+At $0.00015/1k tokens (gpt-4o-mini) with average 500 input tokens and 200 output tokens per request:
+- Cost per request without cache: ~$0.00021
+- At 40% hit rate with 10,000 daily requests: saves ~4,000 LLM calls/day = ~$0.84/day = ~$25/month
+
+For a feature with gpt-4o at $0.0025/$0.01 per 1k tokens:
+- Cost per request: ~$0.003
+- Same 40% hit rate at 10,000 requests/day: saves ~$12/day = ~$360/month
+
+The math favors caching more aggressively as model tier increases. For expensive models on repetitive workloads, semantic caching often pays for the infrastructure cost many times over.
+
+## Implementation note on embedding cost
+
+Embedding every query has a cost (~$0.00002 per query with text-embedding-3-small at 200 tokens). For 10,000 daily queries, that is $0.20/day — well worth it if the cache hit rate saves even 10 LLM calls.
+
+Store embeddings with queries rather than recomputing them. Recompute only when you upgrade embedding models (which also invalidates the cached similarity scores).
+""",
+        "source_links_json": ["https://platform.openai.com/docs/guides/embeddings", "https://docs.trychroma.com/"],
+        "tags_json": ["deployment", "caching", "cost-management", "embeddings", "semantic-search"],
     },
 ]
 
@@ -16588,7 +22200,1339 @@ The interviewer wants to see that you treat the prompt as a first-class artifact
 """,
         "tags_json": ["deployment", "ci-cd", "prompts", "evaluation", "canary"],
     },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you use Python generators to build memory-efficient data pipelines for large AI corpora?",
+        "answer_outline_md": """\
+## What this question tests
 
+The interviewer wants to see that you understand the memory implications of list-based vs generator-based processing, and that you can compose generator pipelines for real use cases like document ingestion and embedding.
+
+## The core concept
+
+A list comprehension materializes all results in memory simultaneously. A generator yields one item at a time, keeping memory usage constant regardless of corpus size. For a 10GB JSONL file, a list approach fails with OOM; a generator pipeline succeeds with the same peak memory as processing a 1MB file.
+
+```python
+# List approach: loads all 100K documents into RAM
+chunks = [chunk for doc in documents for chunk in split(doc)]  # O(n) memory
+
+# Generator approach: processes one document at a time
+def stream_chunks(documents):
+    for doc in documents:
+        yield from split(doc)  # O(1) memory
+```
+
+## Composing generators into a pipeline
+
+Each stage is a generator that lazily pulls from the previous stage:
+
+```python
+from pathlib import Path
+from typing import Iterator
+import json
+
+def read_jsonl(path: Path) -> Iterator[dict]:
+    with path.open() as f:
+        for line in f:
+            if line.strip():
+                yield json.loads(line)
+
+def validate(records: Iterator[dict]) -> Iterator[dict]:
+    for r in records:
+        if r.get("body") and len(r["body"]) >= 100:
+            yield r
+
+def normalize(records: Iterator[dict]) -> Iterator[dict]:
+    for r in records:
+        yield {**r, "body": r["body"].strip()}
+
+def write_jsonl(records: Iterator[dict], path: Path) -> int:
+    count = 0
+    with path.open("w") as f:
+        for r in records:
+            f.write(json.dumps(r) + "\\n")
+            count += 1
+    return count
+
+# Compose: single pass, constant memory
+pipeline = normalize(validate(read_jsonl(Path("docs.jsonl"))))
+written = write_jsonl(pipeline, Path("docs-clean.jsonl"))
+```
+
+The entire pipeline runs in a single pass. Adding a new transformation means inserting one function in the chain.
+
+## Batching for embedding APIs
+
+Embedding APIs accept batches. Use a batching generator to group stream items:
+
+```python
+def batch(items: Iterator[dict], size: int) -> Iterator[list[dict]]:
+    buf = []
+    for item in items:
+        buf.append(item)
+        if len(buf) >= size:
+            yield buf
+            buf = []
+    if buf:
+        yield buf
+
+# 1000 docs → 10 API calls (batch_size=100) instead of 1000
+for doc_batch in batch(pipeline, size=100):
+    texts = [d["text"] for d in doc_batch]
+    embeddings = client.embed(texts)
+```
+
+## Key points to emphasize
+
+- Never collect generator output into a list before writing — this defeats the point
+- Write results to the output file (or database) inside the generator loop
+- Add error handling per record, not at the pipeline level — one bad record should not abort the run
+- Generator pipelines compose cleanly; each stage is independently testable
+
+## Common follow-up question
+
+"How do you add instrumentation to a generator pipeline without modifying the stage functions?"
+
+Use wrapping generators: `def count(gen, counter): for item in gen: counter[0] += 1; yield item`
+""",
+        "tags_json": ["python", "generators", "pipelines", "data-engineering"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you handle unreliable LLM structured output in production — when the model sometimes returns malformed JSON or violates the schema?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you have encountered real LLM output failures and have a systematic approach to parsing, validating, and recovering from them. Strong candidates describe a parse-validate-handle pipeline rather than ad-hoc cleanup code.
+
+## The failures you will encounter
+
+LLMs produce structured output failures in a predictable set of ways:
+- JSON wrapped in markdown code fences
+- Extra prose before or after the JSON object
+- Missing required fields
+- Wrong types (string instead of int, null instead of empty list)
+- Empty or whitespace-only content
+
+These are not rare edge cases. In a feature that runs 10,000 calls/day, all of them will occur.
+
+## The parse-validate-handle pipeline
+
+### Step 1: Robust JSON extraction
+
+```python
+import json
+import re
+from pydantic import BaseModel, ValidationError
+from dataclasses import dataclass
+from typing import TypeVar, Type
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
+@dataclass
+class ParseResult:
+    success: bool
+    data: BaseModel | None
+    error: str | None
+    raw: str
+
+def parse_llm_output(raw: str, model_class: Type[ModelT]) -> ParseResult:
+    text = raw.strip()
+    # Strip markdown fences
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\\n?", "", text)
+        text = re.sub(r"\\n?```$", "", text.strip())
+    # Find outermost JSON
+    match = re.search(r"(\\{[\\s\\S]*\\}|\\[[\\s\\S]*\\])", text)
+    if not match:
+        return ParseResult(False, None, "No JSON found", raw)
+    try:
+        data = json.loads(match.group(1))
+        validated = model_class.model_validate(data)
+        return ParseResult(True, validated, None, raw)
+    except json.JSONDecodeError as e:
+        return ParseResult(False, None, f"JSON error: {e}", raw)
+    except ValidationError as e:
+        return ParseResult(False, None, f"Schema error: {e.error_count()} issues", raw)
+```
+
+### Step 2: Decide what failure means
+
+Not all failures deserve the same response:
+
+| Failure | Response |
+|---|---|
+| Missing optional field | Use default value |
+| Missing required field | Retry with stronger format constraint in prompt |
+| Malformed JSON | Retry once, then skip and log |
+| Empty content | Log warning, skip this item |
+| Schema drift (new fields) | Alert team — prompt or model changed |
+
+### Step 3: Monitor failure rates
+
+A failure rate above 5% means the prompt needs improvement. Above 15%, the feature is unreliable. Track this in your observability system.
+
+## What to emphasize
+
+- Return a `ParseResult` dataclass rather than raising exceptions — callers can handle failures explicitly without try/except
+- Store `raw` in the result so you can inspect actual LLM output when debugging failures
+- Use provider `response_format: {"type": "json_object"}` when available to reduce fence-wrapping failures
+- Test your parser against real LLM outputs, not just clean test inputs
+
+## Common follow-up question
+
+"What if the schema changes? How do you detect that?"
+
+Compare the parsed model's field names against what the model returned. Unexpected extra fields or missing expected optional fields often signal a model update changed the output format.
+""",
+        "tags_json": ["python", "llm-output", "validation", "pydantic", "reliability"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you track token usage and compute costs across multiple LLM calls in a multi-feature AI backend?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you think about cost as an operational concern, not an afterthought. Strong candidates have a clear pattern for recording, attributing, and reporting token usage across calls.
+
+## Why cost tracking matters
+
+Without explicit token tracking, you discover your AI feature's cost from the monthly billing invoice. With it, you can answer:
+- Which feature costs the most per user session?
+- Is this prompt getting more expensive as corpus size grows?
+- What is the P95 cost per call?
+- Did last week's prompt change increase or decrease cost?
+
+## The pattern
+
+A `CostTracker` with one `.record()` call per LLM response:
+
+```python
+from dataclasses import dataclass, field
+from collections import defaultdict
+
+MODEL_COSTS = {
+    "gpt-4o": {"input_per_1k": 0.0025, "output_per_1k": 0.01},
+    "gpt-4o-mini": {"input_per_1k": 0.00015, "output_per_1k": 0.0006},
+    "claude-3-5-sonnet": {"input_per_1k": 0.003, "output_per_1k": 0.015},
+}
+
+@dataclass
+class CostTracker:
+    _records: list = field(default_factory=list)
+
+    def record(self, model: str, input_tokens: int, output_tokens: int, feature: str):
+        pricing = MODEL_COSTS[model]
+        cost = (input_tokens / 1000 * pricing["input_per_1k"]) + \\
+               (output_tokens / 1000 * pricing["output_per_1k"])
+        self._records.append({
+            "model": model, "feature": feature,
+            "input_tokens": input_tokens, "output_tokens": output_tokens,
+            "cost_usd": cost,
+        })
+
+    def cost_by_feature(self) -> dict[str, float]:
+        totals = defaultdict(float)
+        for r in self._records:
+            totals[r["feature"]] += r["cost_usd"]
+        return dict(totals)
+
+    def total_cost_usd(self) -> float:
+        return sum(r["cost_usd"] for r in self._records)
+```
+
+### Usage in a service
+
+```python
+tracker = CostTracker()
+
+response = await provider.generate(request)
+tracker.record(
+    model=response.model,
+    input_tokens=response.input_tokens,
+    output_tokens=response.output_tokens,
+    feature="document_qa",
+)
+```
+
+## Production extensions
+
+- Add `timestamp: datetime` to each record and slice by time window
+- Store records to a database rather than in memory so data survives restarts
+- Add cost thresholds that emit alerts when a single call exceeds a limit
+- Add a `session_id` field for per-user session cost attribution
+
+## What to emphasize
+
+- `record()` is called after every successful LLM call — not batched or deferred
+- The cost formula separates input and output token costs because every major provider prices them differently
+- Keep a `MODEL_COSTS` lookup table that is easy to update when providers change pricing
+- Round costs at the summary layer, not the record layer — keep full precision in records
+
+## Common follow-up question
+
+"How do you handle cost for a provider that doesn't return token counts in the response?"
+
+Estimate from the text: approximately 1 token per 4 characters for English text. This is a rough approximation, but it is better than recording zero. Use tiktoken for accurate counting if the provider uses a known tokenizer.
+""",
+        "tags_json": ["python", "cost-tracking", "token-counting", "llm-ops", "observability"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How do you design a Python retry policy that handles rate limits, transient server errors, and authentication failures differently?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you understand the difference between recoverable and non-recoverable errors in AI API calls, and that you have implemented retry logic that does not blindly retry everything (or blindly retry nothing).
+
+## The failure taxonomy
+
+AI API failures fall into distinct categories with different retry behaviors:
+
+| HTTP Status | Category | Retry? |
+|---|---|---|
+| 429 | Rate limited | Yes, with long delay (60s base) |
+| 500, 503 | Server error | Yes, with short backoff (1s base) |
+| 401, 403 | Auth error | No — retrying won't help |
+| 400 | Bad request | No — your request is malformed |
+| TimeoutError | Timeout | Yes, up to 3 attempts |
+| ValidationError | Bad schema | No — fix your code |
+
+## The implementation
+
+```python
+from dataclasses import dataclass
+from enum import Enum
+
+class ErrorCategory(Enum):
+    RATE_LIMITED = "rate_limited"
+    SERVER_ERROR = "server_error"
+    AUTH_ERROR = "auth_error"
+    TIMEOUT = "timeout"
+    VALIDATION_ERROR = "validation_error"
+    UNKNOWN = "unknown"
+
+@dataclass
+class RetryPolicy:
+    should_retry: bool
+    max_attempts: int
+    base_delay_s: float
+
+def classify(exc: Exception) -> ErrorCategory:
+    msg = str(exc).lower()
+    status = getattr(exc, "status_code", 0) or 0
+    if status == 429 or "rate limit" in msg:
+        return ErrorCategory.RATE_LIMITED
+    if isinstance(exc, TimeoutError) or "timed out" in msg:
+        return ErrorCategory.TIMEOUT
+    if isinstance(exc, ValueError) or "validation" in msg:
+        return ErrorCategory.VALIDATION_ERROR
+    if status in (401, 403) or "unauthorized" in msg:
+        return ErrorCategory.AUTH_ERROR
+    if status >= 500:
+        return ErrorCategory.SERVER_ERROR
+    return ErrorCategory.UNKNOWN
+
+POLICIES = {
+    ErrorCategory.RATE_LIMITED: RetryPolicy(True, 5, 60.0),
+    ErrorCategory.SERVER_ERROR: RetryPolicy(True, 3, 1.0),
+    ErrorCategory.TIMEOUT: RetryPolicy(True, 3, 1.0),
+    ErrorCategory.UNKNOWN: RetryPolicy(True, 1, 2.0),
+    ErrorCategory.AUTH_ERROR: RetryPolicy(False, 0, 0.0),
+    ErrorCategory.VALIDATION_ERROR: RetryPolicy(False, 0, 0.0),
+}
+
+async def with_retry(coro_fn, *args, **kwargs):
+    attempt = 0
+    while True:
+        try:
+            return await coro_fn(*args, **kwargs)
+        except Exception as exc:
+            category = classify(exc)
+            policy = POLICIES[category]
+            if not policy.should_retry or attempt >= policy.max_attempts:
+                raise
+            delay = min(policy.base_delay_s * (2 ** attempt), 300.0)
+            # Add jitter to prevent thundering herd
+            delay += random.uniform(0, delay * 0.1)
+            await asyncio.sleep(delay)
+            attempt += 1
+```
+
+## Key design decisions
+
+**Jitter prevents thundering herd.** When many workers hit the same rate limit simultaneously, identical retry delays cause them all to retry at exactly the same moment. A small random jitter spreads the retries across time.
+
+**Auth errors never retry.** Retrying a 401 consumes your rate limit and API budget without any chance of success. Fail fast and alert.
+
+**The policy lookup dict.** Adding a new error category means adding one entry to `POLICIES` and one case to `classify`. No `if/elif` chains to maintain.
+
+**Cap total delay.** `min(delay, 300.0)` prevents exponential backoff from waiting more than 5 minutes. After 5 minutes, the operator should know about it.
+
+## What to emphasize
+
+- The classify function handles both exception objects and HTTP status code attributes
+- Rate limit delays are much longer (60s) than server error delays (1s) — they model different recovery expectations
+- `should_retry: False` in the policy prevents any retry — the `if not policy.should_retry` check is the guard
+- In production, log the error category and attempt number on every retry so you can see which error types are causing retry storms
+
+## Common follow-up question
+
+"How do you handle a provider that uses a Retry-After header in 429 responses?"
+
+Extract the header value: `retry_after = getattr(exc, "headers", {}).get("Retry-After", None)`. If present, use that value as the delay instead of the computed backoff.
+""",
+        "tags_json": ["python", "retry-policy", "error-handling", "resilience", "async"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "What is the difference between using TypedDict, dataclasses, and Pydantic BaseModel in Python AI backends, and when would you choose each?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you understand the tradeoffs between Python's data modeling options and can make deliberate architectural decisions about where each pattern belongs in an AI system.
+
+## The three options and their tradeoffs
+
+### TypedDict — static typing with no runtime overhead
+
+```python
+from typing import TypedDict
+
+class ChunkMetadata(TypedDict):
+    doc_id: str
+    chunk_index: int
+    source: str
+```
+
+**Use when:** You need type hints for IDE/mypy support but have no runtime validation needs. The data is already guaranteed to be correct (e.g., you created it yourself in the same function). TypedDict has zero runtime overhead — it is erased at runtime and only exists for static analysis.
+
+**Do not use when:** The data comes from an external source that could have wrong types or missing fields. TypedDict will silently accept any dict at runtime.
+
+### dataclass — typed data containers with lightweight behavior
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class ProcessingResult:
+    doc_id: str
+    chunks: list[str]
+    elapsed_ms: int
+    success: bool = True
+```
+
+**Use when:** You want a typed container with `__init__`, `__repr__`, and optionally `__eq__` generated automatically. Dataclasses are for internal data transfer between functions — they represent processed data that your code produced.
+
+**Use `@dataclass(frozen=True)` when:** The object should be immutable after creation (e.g., a configuration value, a result that should not be modified).
+
+**Do not use when:** You need runtime validation of field types, field constraints (ge, le, min_length), or cross-field validation.
+
+### Pydantic BaseModel — validated data at external boundaries
+
+```python
+from pydantic import BaseModel, Field, model_validator
+
+class LLMResponse(BaseModel):
+    request_id: str = Field(min_length=1)
+    text: str
+    model: str
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def text_not_empty(self) -> "LLMResponse":
+        if not self.text.strip():
+            raise ValueError("Empty LLM response")
+        return self
+```
+
+**Use when:** Data comes from an external source — provider API responses, user uploads, environment variables, queue payloads, or any untrusted input. Pydantic validates types, runs field constraints, and runs cross-field validators at instantiation time.
+
+**Do not use for:** Internal data that you created and control. Using Pydantic everywhere adds overhead and verbosity where TypedDict or dataclasses are sufficient.
+
+## The architectural rule
+
+```
+External source → Pydantic BaseModel (validate at boundary)
+Internal transfer → dataclass (typed, no validation overhead)
+Static type hints only → TypedDict (zero runtime cost)
+```
+
+## A concrete example in an AI pipeline
+
+```python
+# Boundary: incoming from provider API → Pydantic
+class RawChunk(BaseModel):
+    doc_id: str = Field(min_length=1)
+    text: str = Field(min_length=10)
+    metadata: dict = {}
+
+# Internal transfer: processed by our code → dataclass
+@dataclass
+class NormalizedChunk:
+    doc_id: str
+    text: str
+    char_count: int
+    source: str
+
+# Type hint only: for static analysis → TypedDict
+class EmbedRequest(TypedDict):
+    texts: list[str]
+    model: str
+```
+
+## What to emphasize
+
+- Pydantic runs at runtime and throws exceptions; TypedDict only helps mypy
+- Using Pydantic everywhere is over-engineering; using TypedDict at external boundaries is under-engineering
+- The boundary is the key concept: external → Pydantic, internal → dataclass/TypedDict
+- For configuration objects that come from environment variables, Pydantic's settings classes (`pydantic-settings`) are the right tool
+
+## Common follow-up question
+
+"When would you use `@dataclass(frozen=True)`?"
+
+For objects that represent a decision or result that should not change after creation — routing decisions, experiment configurations, evaluation scores. Immutability prevents subtle bugs where shared mutable state is modified unexpectedly.
+""",
+        "tags_json": ["python", "type-safety", "pydantic", "dataclasses", "architecture"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How would you implement rate-limited batch processing for a large document corpus that needs to stay within provider RPM and TPM limits?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you have thought through the operational constraints of high-volume LLM API usage and have a concrete pattern for processing large corpora without triggering rate limit errors.
+
+## The two dimensions of rate limiting
+
+Provider rate limits operate in two dimensions simultaneously:
+- **RPM (requests per minute):** How many API calls you can make in a 60-second window
+- **TPM (tokens per minute):** How many tokens (input + output) you can send/receive in a 60-second window
+
+A naive approach that only counts requests will hit TPM limits on large documents. A robust rate limiter tracks both.
+
+## The sliding window approach
+
+Track timestamps and token counts for calls made in the last 60 seconds:
+
+```python
+import time
+from collections import deque
+
+class RateLimiter:
+    WINDOW_S = 60.0
+
+    def __init__(self, rpm_limit: int, tpm_limit: int):
+        self.rpm_limit = rpm_limit
+        self.tpm_limit = tpm_limit
+        self._req_times: deque[float] = deque()
+        self._token_records: deque[tuple[float, int]] = deque()
+
+    def _purge(self, now: float):
+        cutoff = now - self.WINDOW_S
+        while self._req_times and self._req_times[0] < cutoff:
+            self._req_times.popleft()
+        while self._token_records and self._token_records[0][0] < cutoff:
+            self._token_records.popleft()
+
+    def wait_if_needed(self, batch_tokens: int) -> None:
+        while True:
+            now = time.time()
+            self._purge(now)
+            at_rpm = len(self._req_times) >= self.rpm_limit
+            at_tpm = sum(t for _, t in self._token_records) + batch_tokens > self.tpm_limit
+            if not at_rpm and not at_tpm:
+                break
+            # Sleep until the oldest entry expires
+            oldest = min(
+                self._req_times[0] if self._req_times else now,
+                self._token_records[0][0] if self._token_records else now,
+            )
+            sleep_s = self.WINDOW_S - (now - oldest) + 0.1
+            time.sleep(min(sleep_s, self.WINDOW_S))
+
+    def record(self, tokens: int) -> None:
+        now = time.time()
+        self._req_times.append(now)
+        self._token_records.append((now, tokens))
+```
+
+## Batch processing loop
+
+```python
+def process_corpus(docs: list[dict], process_fn, batch_size: int, limiter: RateLimiter):
+    results = []
+    for i in range(0, len(docs), batch_size):
+        batch = docs[i : i + batch_size]
+        batch_tokens = sum(d.get("tokens", 0) for d in batch)
+        limiter.wait_if_needed(batch_tokens)
+        batch_results = process_fn(batch)
+        limiter.record(batch_tokens)
+        results.extend(batch_results)
+    return results
+```
+
+## Key design decisions
+
+**`deque` for the sliding window.** Deques support O(1) popleft operations. A list with `list.pop(0)` is O(n) because it shifts all remaining elements.
+
+**Check both RPM and TPM before each batch.** A batch that exceeds TPM even though RPM is fine should wait. Both conditions must pass before sending.
+
+**Sleep only as long as needed.** The sleep duration is `window_size - age_of_oldest_entry`, not a fixed 60 seconds. This maximizes throughput while staying within limits.
+
+**Add jitter.** `+ 0.1` in the sleep adds a small buffer. Waking up exactly at the window boundary and immediately sending can race with the provider's window reset.
+
+## What to emphasize
+
+- Rate limiting based on request count alone will fail on long documents — always track tokens
+- The sliding window is more accurate than a fixed bucket that resets on a schedule
+- In production, add exponential backoff on 429s as a safety net — even with rate limiting, occasional 429s still occur
+- For async code, replace `time.sleep` with `asyncio.sleep` and protect the limiter state with an `asyncio.Lock`
+
+## Common follow-up question
+
+"How would you parallelize this while still respecting rate limits?"
+
+Use an asyncio semaphore for concurrency and a shared async rate limiter (protected by a lock) for rate limit tracking. The semaphore limits how many coroutines run at once; the rate limiter decides when each coroutine is allowed to make its API call.
+""",
+        "tags_json": ["python", "rate-limiting", "batch-processing", "async", "llm-ops"],
+    },
+]
+
+# ── AI Deployment & MLOps interview questions ─────────────────────────────────
+INTERVIEW_QUESTIONS += [
+    {
+        "category": "deployment",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "What is the difference between a liveness probe and a readiness probe, and why does it matter for LLM services?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you understand container lifecycle management beyond "add a health check." Strong candidates distinguish the two probes by their failure semantics, not just their endpoint names.
+
+## The semantics, not the syntax
+
+**Liveness probe** answers: "Is this container alive?" When it fails, Kubernetes kills and restarts the container. Use for unrecoverable states — infinite loop, OOM, config error that cannot self-heal. Should almost always return healthy.
+
+**Readiness probe** answers: "Is this container ready to receive traffic?" When it fails, Kubernetes removes the pod from the load balancer rotation but does NOT restart it. Use for transient states — model still loading, provider API unavailable, queue saturated.
+
+The critical distinction: a readiness failure is graceful (traffic is rerouted); a liveness failure is disruptive (container restarts).
+
+## Why this matters specifically for LLM services
+
+```
+Startup sequence for an LLM gateway service:
+  0s  — container starts
+  3s  — Python interpreter loads
+  8s  — dependencies imported
+ 15s  — embedding model loaded into memory
+ 18s  — connection to Redis cache established
+ 20s  — provider API connectivity verified
+ 21s  — service ready to handle requests
+```
+
+Without a startup probe with `failureThreshold: 30` and `periodSeconds: 10`, the liveness probe fires at ~10s, finds the service not yet ready, and kills the container — creating an infinite restart loop.
+
+## The Kubernetes manifest pattern
+
+```yaml
+startupProbe:
+  httpGet: {path: /health/live, port: 8000}
+  failureThreshold: 30   # 30 × 10s = 5 minutes for startup
+  periodSeconds: 10
+
+livenessProbe:
+  httpGet: {path: /health/live, port: 8000}
+  periodSeconds: 30
+  failureThreshold: 3    # restarts after 90s of unhealthy
+
+readinessProbe:
+  httpGet: {path: /health/ready, port: 8000}
+  periodSeconds: 10
+  failureThreshold: 3    # 30s to re-route traffic after unhealthy
+```
+
+## What the readiness endpoint should check
+
+- Provider API reachability (async HTTP probe with 2s timeout)
+- Required secrets present and non-empty
+- Queue depth within acceptable range
+- Model loaded (if running local inference)
+
+Failing non-critical checks should set `degraded: true` in the response body without failing the probe — keep the service receiving traffic but flag it as degraded for monitoring.
+
+## Interview takeaway
+
+The core answer: liveness failure restarts; readiness failure reroutes. For LLM services, set a generous startup probe to avoid restart loops during model loading, and make the readiness probe check all dependencies needed to actually serve a request.
+""",
+        "tags_json": ["deployment", "kubernetes", "health-checks", "reliability", "llm-ops"],
+    },
+    {
+        "category": "deployment",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How would you design an observability system for a production LLM application?",
+        "answer_outline_md": """\
+## What this question tests
+
+This is a system design question testing whether you understand that LLM services have quality failure modes that infrastructure metrics do not capture. Strong candidates describe three distinct observability layers and explain why each is necessary.
+
+## Layer 1: Infrastructure metrics (table stakes)
+
+Standard application metrics: latency percentiles (P50/P95/P99), error rate by HTTP status code, request throughput, and queue depth if you use a request queue.
+
+For LLM services, P95 and P99 latency are especially important because generation latency is highly variable — a P50 of 800ms with a P99 of 15s indicates a tail latency problem that affects a meaningful fraction of users.
+
+## Layer 2: LLM-specific operational metrics
+
+These require application-level instrumentation:
+
+- **Token usage and cost per request, per feature, per model** — essential for cost management. Track as a cost event on every LLM call: `{feature, model, input_tokens, output_tokens, cost_usd}`.
+- **Cache hit rate** — if you run a semantic or exact-match cache, track the fraction of requests served from cache. Low hit rate (< 15%) indicates the cache is not helping.
+- **Provider fallback rate** — in a multi-provider setup, track how often the fallback provider is used. Sudden shift indicates primary provider degradation.
+- **Model version distribution** — during A/B tests or canary deployments, confirm routing is behaving as configured.
+
+## Layer 3: Quality observability (unique to AI)
+
+Infrastructure metrics show the service is healthy. Quality metrics show the responses are good:
+
+- **Sampled quality scoring** — run a lightweight LLM judge on a random 1-5% sample of responses. Alert when rolling average quality drops below threshold (e.g., 0.80).
+- **Output anomaly detection** — track response length distribution, refusal rate ("I cannot" patterns), and empty/truncated response rate. These are leading indicators of quality degradation.
+- **User feedback signal** — wire thumbs up/down or explicit feedback into your observability stack.
+
+## The trace as the fundamental unit
+
+Every request should produce an OpenTelemetry-compatible trace with spans:
+
+```
+request_received (total duration)
+  ├─ cache_lookup (hit: true/false, latency_ms)
+  ├─ retrieval (num_results: 5, top_score: 0.91, latency_ms)
+  ├─ prompt_construction (token_count: 1250, truncated: false)
+  └─ llm_call (model, input_tokens, output_tokens, latency_ms, cost_usd)
+```
+
+A trace that captures all of these makes "why was this specific request slow or bad?" answerable in under five minutes.
+
+## Alerting strategy
+
+Alert only on user-impacting conditions requiring human action in the next 30 minutes:
+- P95 latency > 8 seconds (5-minute window)
+- Provider error rate > 2% (5-minute window)
+- Quality score (sampled) < 0.80 (rolling 100 requests)
+- Daily feature cost > 120% of budget
+
+Trending metrics (slowly rising latency, gradually decreasing quality) belong in dashboards and weekly reviews — not alerts.
+
+## Interview takeaway
+
+Three layers: infrastructure, LLM-specific operations, and quality. The trace is the data primitive. Alert sparingly on user-impacting conditions. The question "why was this specific response bad?" should be answerable from traces in under five minutes.
+""",
+        "tags_json": ["deployment", "observability", "tracing", "monitoring", "llm-ops"],
+    },
+    {
+        "category": "deployment",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you implement and tune a semantic cache for an LLM-powered feature?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you understand semantic caching at an implementation level and can reason about the threshold calibration problem — not just that you know what a semantic cache is.
+
+## The basic implementation
+
+A semantic cache stores `(query_text, embedding, response)` tuples. On each incoming request:
+
+1. Embed the query (cost: ~$0.00002 for 200 tokens)
+2. Compute cosine similarity between the query embedding and all stored embeddings
+3. If best match similarity >= threshold: return cached response (no LLM call)
+4. If below threshold: call the LLM, store the new `(query, embedding, response)` tuple
+
+```python
+class SemanticCache:
+    def get(self, query_embedding: list[float], threshold: float = 0.92) -> str | None:
+        best_score, best_entry = 0.0, None
+        for entry in self._entries:
+            score = cosine_similarity(query_embedding, entry.embedding)
+            if score > best_score:
+                best_score, best_entry = score, entry
+        return best_entry.response if best_score >= threshold else None
+```
+
+## The threshold calibration problem
+
+The threshold controls the tradeoff between hit rate (cost savings) and accuracy (answer correctness).
+
+**Too high (0.97):** Only identical or near-identical queries hit the cache. Low hit rate, high accuracy.
+**Too low (0.80):** "What is your return policy?" incorrectly matches "What is your privacy policy?" High hit rate, false positives.
+
+To calibrate properly:
+1. Sample 500 real query pairs from production logs
+2. Label each pair: "equivalent" or "different"
+3. Compute cosine similarity for each pair
+4. Find the threshold where equivalent pairs are mostly above it and different pairs are mostly below it
+
+For general English with text-embedding-3-small, the right threshold is typically 0.90-0.95. Domain-specific text (medical, legal) often needs different calibration.
+
+## When to use semantic caching
+
+Use it for: FAQ features, documentation lookup, support bots — workloads where questions cluster into a manageable number of intent types.
+
+Do not use it for: creative generation, personalized responses, real-time data queries, or any feature where the correct answer depends on the specific user.
+
+## Cache management
+
+TTL-based expiration is the simplest cache management. Set TTL based on how often the underlying information changes. A support FAQ might change monthly — use a 30-day TTL. Pricing information might change weekly — use a 7-day TTL.
+
+Track `hit_rate()` and false positive rate in production. A hit rate below 10% suggests the cache adds overhead without meaningful benefit for your workload.
+
+## Interview takeaway
+
+Semantic caching reduces cost and latency for repetitive-query workloads by serving cached responses for semantically equivalent inputs. The threshold is the key tuning parameter — calibrate it empirically against real query pairs, not intuitively. Monitor hit rate and false positive rate to confirm the threshold is correct.
+""",
+        "tags_json": ["deployment", "caching", "cost-management", "embeddings"],
+    },
+    {
+        "category": "deployment",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "Walk through how you'd safely roll out a new model version to production with minimal user impact.",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see mature deployment thinking: that you do not just swap model versions and hope for the best, that you have evaluation gates, staged rollout, monitoring, and a rollback plan.
+
+## Step 1: Eval gate before any deployment
+
+Before a new model version sees any production traffic, it must pass your evaluation suite:
+
+- Run your golden test set (50-200 representative cases) against the new model version at `temperature=0`
+- Require pass rate >= your threshold (e.g., 85%)
+- Check for regressions: any case that scored 0.15+ worse than the baseline fails the gate
+
+If the new model version fails the eval gate, do not deploy it. Investigate whether the regression is real or whether your eval cases need updating.
+
+## Step 2: Shadow mode (optional but recommended for high-stakes features)
+
+Run the new model version in parallel with the current one. For every real request, call both models, log both responses, but return only the current model's response to the user.
+
+Shadow mode lets you evaluate the new version against real traffic distributions without exposing users to potentially degraded responses.
+
+## Step 3: Canary deployment
+
+Route a small percentage of real traffic to the new model version (typically 5-10%).
+
+Use sticky user assignment — the same user always gets the same model version during the canary period. This prevents a user from getting inconsistent experiences.
+
+```python
+def get_model_version(user_id: str) -> str:
+    canary_pct = float(os.environ.get("MODEL_CANARY_PCT", "0"))
+    if canary_pct > 0 and (hash(f"model_canary:{user_id}") % 100) / 100 < canary_pct:
+        return os.environ.get("MODEL_CANARY_VERSION", "v1")
+    return os.environ.get("MODEL_VERSION", "v1")
+```
+
+During the canary phase, compare:
+- Latency percentiles (P95, P99) between canary and control
+- Error rates
+- Quality scores from sampled evaluations
+- User feedback signals (if available)
+
+Wait for statistically meaningful data — at least 500 requests per variant.
+
+## Step 4: Promote or roll back
+
+**Promote:** If quality metrics match or exceed the control group, update `MODEL_VERSION` to the new version. `MODEL_CANARY_PCT` goes to 0. No service restart required.
+
+**Roll back:** If quality metrics show degradation, set `MODEL_CANARY_PCT` to 0. The canary version immediately stops receiving traffic. No code deployment needed.
+
+The entire rollout is environment variable changes — the code is already deployed.
+
+## Step 5: Monitor after full promotion
+
+Even after full rollout, watch quality metrics for 24-48 hours. Model quality can appear acceptable at low traffic levels but degrade at scale due to distribution shifts in real queries.
+
+## Interview takeaway
+
+The rollout process is: eval gate -> shadow mode (optional) -> canary at 5-10% -> quality monitoring -> promote or roll back. Rollout and rollback are both environment variable changes, not code deployments. Never go from 0% to 100% without data from a canary phase.
+""",
+        "tags_json": ["deployment", "model-versioning", "ab-testing", "ci-cd", "reliability"],
+    },
+    {
+        "category": "deployment",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you prevent LLM API costs from spiraling in a production application?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you have systematic cost controls — not just vague awareness that LLMs cost money. Strong answers cover visibility, enforcement, and optimization as distinct concerns in the right order.
+
+## Step 1: Visibility (do this first)
+
+You cannot manage what you cannot measure. Before doing any optimization, instrument every LLM call:
+
+```python
+@dataclass
+class CostEvent:
+    feature: str          # "document_qa", "code_review"
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float       # computed at record time
+```
+
+Aggregate daily cost by feature and model. When you first do this, you will almost always find that one feature is generating 60-80% of your total cost. That is your optimization target.
+
+## Step 2: Enforcement (before optimization)
+
+**Token budget enforcement at prompt construction time.** The most common cost runaway is unbounded context — users pasting large documents, retrieval returning too many chunks, conversation history growing without pruning. Cap prompt size before the API call:
+
+```python
+def build_prompt(system, history, context_chunks, query, max_tokens=4000):
+    # Fill in order of priority until budget is exhausted
+    ...
+```
+
+**Per-user daily limits.** Rate limit how many LLM calls a single user can make per day. Without this, one heavy user can consume a disproportionate share of your budget.
+
+**Budget alerts.** Set an alert in your provider billing console at 80% of your monthly budget. Set an in-application alert when any single feature exceeds its daily budget.
+
+## Step 3: Optimization
+
+Only optimize after visibility and enforcement are in place.
+
+**Caching.** Exact-match caching eliminates identical repeat requests. Semantic caching handles paraphrased versions of the same question. For FAQ-style features, cache hit rates of 30-60% are achievable — eliminating 30-60% of your LLM spend for that feature.
+
+**Model routing.** Not every request needs your most expensive model. Route simple classification and short-answer requests to mini/haiku tier (10-50x cheaper). Reserve expensive models for complex generation.
+
+```python
+def route_request(query_complexity: str) -> str:
+    if query_complexity in ("simple", "classification"):
+        return "gpt-4o-mini"  # $0.00015/1k input
+    return "gpt-4o"           # $0.0025/1k input
+```
+
+**Prompt compression.** Long system prompts are paid on every request. A 500-token system prompt on 10,000 daily requests is 5M tokens/day. Use prompt caching where available (Anthropic and OpenAI both support it for repeated system prompts).
+
+## The sequence that matters
+
+Visibility -> enforcement -> optimization. Jumping to optimization without visibility is guesswork. Optimizing before enforcement means costs will spiral again as traffic grows.
+
+## Interview takeaway
+
+Three phases: visibility (instrument every call), enforcement (token budgets and rate limits), optimization (caching, model routing, prompt efficiency). The sequence matters — visibility first reveals where the money is going.
+""",
+        "tags_json": ["deployment", "cost-management", "token-budgets", "caching", "model-routing"],
+    },
+    {
+        "category": "deployment",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "What does a production-ready LLM service health check endpoint look like?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you understand the difference between a trivial `/ping` endpoint and a meaningful health check that actually validates the service's ability to handle requests.
+
+## The two endpoints pattern
+
+Production LLM services should expose two health endpoints with different semantics:
+
+**`GET /health/live`** — liveness check. Answers: is the process running and non-fatal? Almost always returns 200. Only returns non-200 on unrecoverable conditions (OOM, config failure, explicit fatal error set by application code). Kubernetes uses this to decide whether to restart.
+
+**`GET /health/ready`** — readiness check. Answers: can I handle a request right now? Checks all dependencies needed to serve. Kubernetes uses this to decide whether to route traffic.
+
+## What the readiness check should verify
+
+```python
+async def health_ready():
+    checks = {}
+
+    # Critical: service cannot function without these
+    checks["provider_reachability"] = await probe_provider(timeout=2.0)
+    checks["config_valid"] = validate_config()
+
+    # Non-critical: service degrades but continues
+    checks["cache_available"] = await probe_redis(timeout=1.0)
+    checks["queue_depth_ok"] = get_queue_depth() < MAX_QUEUE_DEPTH
+
+    all_critical_ok = checks["provider_reachability"] and checks["config_valid"]
+    any_non_critical_failed = not (checks["cache_available"] and checks["queue_depth_ok"])
+
+    status = 200 if all_critical_ok else 503
+    return JSONResponse(
+        status_code=status,
+        content={
+            "healthy": all_critical_ok,
+            "degraded": all_critical_ok and any_non_critical_failed,
+            "checks": checks,
+        }
+    )
+```
+
+## Per-check timeouts are essential
+
+Each dependency check should have its own timeout (1-2 seconds). Without individual timeouts, one slow check (a hung Redis connection, a slow provider ping) makes your entire readiness endpoint slow, causing Kubernetes to mark your pod as unhealthy and reroute traffic — even though your service might be fine.
+
+## The `degraded` flag
+
+Return a `degraded: true` body field when non-critical checks fail but the service is still accepting traffic. This lets your load balancer send traffic (200 status) while your monitoring system alerts on the degraded state. Users keep getting responses; the team knows something needs attention.
+
+## Common mistakes
+
+**Checking the wrong things.** A health check that only verifies "the process is running" (`return 200 OK`) is useless for an LLM service. It needs to verify provider reachability.
+
+**No timeout on dependency checks.** A network call to a provider without a timeout will hang indefinitely during a provider outage, making your health check itself fail.
+
+**Conflating liveness and readiness.** A single `/health` endpoint that checks everything and triggers restarts on any dependency failure causes unnecessary container restarts when the provider has a transient issue.
+
+**Slow health checks blocking traffic.** Health check endpoints should respond in under 500ms. Run dependency checks concurrently with `asyncio.gather` or equivalent.
+
+## Interview takeaway
+
+Two endpoints with different semantics: liveness (is the process alive?) and readiness (can I serve requests?). The readiness endpoint checks all critical dependencies with per-check timeouts. The `degraded` flag separates "healthy enough to serve" from "all systems optimal."
+""",
+        "tags_json": ["deployment", "health-checks", "kubernetes", "reliability", "observability"],
+    },
+]
+
+# ── Additional RAG interview questions ──────────────────────────────────────
+INTERVIEW_QUESTIONS += [
+    {
+        "category": "rag",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "Walk through how you would implement hybrid search for a production RAG system.",
+        "answer_outline_md": """## What this question tests
+
+The interviewer wants to see that you understand why hybrid search is necessary (not just that it exists), how RRF works mechanically, and what the practical implementation looks like. Strong candidates have implemented this, not just read about it.
+
+## Why hybrid search is necessary
+
+Pure vector search fails for queries with specific entities, product names, error codes, or technical identifiers. Embedding similarity does not optimize for exact string match — it finds semantically similar content. A user asking about "GPT-4o-mini pricing" may not find the exact pricing page if the model returns semantically similar content about LLM pricing in general.
+
+Pure keyword search (BM25) fails for natural language questions with paraphrases. "How do I undo a payment" does not match "reversing a transaction" via BM25. Users do not know your document's vocabulary.
+
+Hybrid search covers both failure modes, and consistently outperforms either method alone across real query distributions.
+
+## The implementation
+
+Two parallel retrieval methods:
+
+**Vector search**: Embed the query, find the top-20 most similar chunk embeddings by cosine similarity.
+
+**BM25 keyword search**: Score all documents by BM25(query, doc) using term frequency, inverse document frequency, and length normalization. Return the top-20.
+
+Both produce independent ranked lists. Merge them using Reciprocal Rank Fusion:
+
+```python
+def rrf_score(ranked_lists, k=60):
+    scores = defaultdict(float)
+    for ranked_list in ranked_lists:
+        for rank, doc_id in enumerate(ranked_list):
+            scores[doc_id] += 1.0 / (k + rank + 1)
+    return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+```
+
+RRF uses only rank positions, not absolute scores. This is important: cosine similarity is 0–1, BM25 scores are unbounded. RRF makes them comparable without normalization.
+
+## Practical implementation notes
+
+For the vector index: Chroma, Pinecone, pgvector, or Weaviate. For BM25: `rank_bm25` in Python, Elasticsearch/OpenSearch in production at scale.
+
+The standard retrieve-then-rerank pattern: retrieve top-20 from each method, merge with RRF, pass top-20 merged results to a cross-encoder reranker, return top-5.
+
+## What to log for debugging
+
+For each retrieved result, log which methods contributed it (`source_methods: ["vector", "keyword"]` or `["vector"]` only). When debugging a retrieval failure, this tells you whether the failure was in both methods or just one.
+
+## Self-study prompts
+
+- Implement a minimal BM25 index from scratch (it is only ~50 lines of Python)
+- Build the RRF merge function and verify it handles ties correctly
+- Run Recall@K on vector-only vs. hybrid for a set of 20 labeled queries in your domain
+
+## Interview takeaway
+
+The answer should include: why each method fails alone, what RRF does mechanically, where in the pipeline merging happens, and what logging you add for debugging. "I would use a library" is insufficient — explain the algorithm.
+""",
+        "tags_json": ["rag", "hybrid-search", "bm25", "rrf", "retrieval"],
+    },
+    {
+        "category": "rag",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you handle document updates in a RAG system's vector index?",
+        "answer_outline_md": """## What this question tests
+
+This question tests whether you have thought about the operational side of RAG — not just the initial indexing, but what happens when content changes. Most engineers have an answer for first-time indexing but struggle with updates because they have not shipped a RAG system that ran for more than a few weeks.
+
+## The problem with naive approaches
+
+**Re-indexing everything on every update** is the simplest approach and the wrong one at scale. At 100K documents, re-indexing takes hours and significant API cost. You cannot update a single document without reprocessing the entire corpus.
+
+**Append-only indexing** (just add new chunks without removing old ones) creates stale content. A document that was updated or deleted is still in the index, still retrieved, and still produces confident-sounding wrong answers.
+
+## The correct approach: incremental indexing with content hashing
+
+Track the state of what is indexed in a separate document store:
+
+```python
+{
+    "doc_id": "policy-v2.pdf",
+    "content_hash": "sha256:abc123...",
+    "chunk_ids": ["policy-v2-0", "policy-v2-1", "policy-v2-2"],
+    "indexed_at": "2024-03-15T10:00:00Z"
+}
+```
+
+On each update cycle:
+1. Compute the SHA-256 hash of each document's content.
+2. If the hash matches what is stored, skip it.
+3. If the hash differs (or the document is new):
+   a. Delete old vectors by filtering on `source_doc_id` metadata.
+   b. Chunk the new content.
+   c. Embed and insert the new chunks.
+   d. Update the state record with the new hash and chunk IDs.
+4. For deleted documents: detect missing doc IDs and delete their vectors.
+
+## Implementation detail: deletion
+
+Most vector databases support deletion by metadata filter:
+```python
+collection.delete(where={"source_doc_id": doc_id})
+```
+
+This is why storing `source_doc_id` as metadata on every chunk at ingestion time is important. Without it, you cannot efficiently delete all chunks from a specific document.
+
+## Handling document deletion
+
+Compare the set of doc IDs in your source system against the set in your state store. Documents present in state but absent from the source system should be deleted from the index and from state.
+
+## Freshness requirements
+
+Define what "fresh" means before building the indexing pipeline:
+- **Daily batch updates**: run the incremental indexer on a schedule, process only changed documents.
+- **Near-real-time**: trigger indexing on document save events via webhooks or message queue.
+- **Time-sensitive content**: add a `valid_until` timestamp to metadata and filter out expired chunks at retrieval time.
+
+## Self-study prompts
+
+- Implement the `upsert_document` function with content hashing and deletion
+- Add a `staleness_check` that identifies documents in the index that are no longer in the source system
+- Test what happens when a document is split differently on re-chunking (does the old version get fully replaced?)
+
+## Interview takeaway
+
+The key insight is that incremental indexing requires tracking state separately from the vector index. The vector DB does not know what the "current" version of a document is — your state store does. The SHA-256 hash is the detection mechanism; the metadata filter is the deletion mechanism. These two pieces together make updates safe and cheap.
+""",
+        "tags_json": ["rag", "indexing", "production", "incremental", "operations"],
+    },
+    {
+        "category": "rag",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "Describe how you would add access control to a RAG system that serves multiple user roles.",
+        "answer_outline_md": """## What this question tests
+
+Access control in RAG systems is a security and architecture question that trips up many engineers. The critical mistake — which is also the most common one — is enforcing access control at the application layer after retrieval instead of at the retrieval layer. This question tests whether you know the difference and why it matters.
+
+## The wrong approach: application-layer filtering
+
+Many implementations retrieve chunks first, then filter out chunks the user should not see before building the context. This is wrong for two reasons:
+
+1. **Efficiency**: you are doing expensive semantic search over documents the user has no right to see, then discarding those results.
+2. **Safety leakage**: with some prompting techniques, a model that receives a restricted chunk as context can leak information about it even if you tell it not to use that chunk. The only safe approach is never retrieving restricted content in the first place.
+
+## The correct approach: metadata pre-filtering
+
+Store access control metadata on every chunk at ingestion time. Apply the metadata filter before semantic scoring:
+
+```python
+# At ingestion:
+chunk.metadata = {
+    "source": "hr-policy.pdf",
+    "access_roles": ["hr", "manager"],
+    "department": "hr",
+}
+
+# At retrieval time:
+user_roles = get_user_roles(user_id)
+results = index.search(
+    query=query,
+    where={
+        "$or": [
+            {"access_roles": {"$contains": role}}
+            for role in user_roles
+        ]
+    }
+)
+```
+
+The metadata filter runs before HNSW search in the vector DB, so restricted documents never enter the scoring process.
+
+## Implementation considerations
+
+**Metadata schema for ACL**: keep it simple — a list of roles or a list of team/department identifiers. Avoid complex nested permission structures that are expensive to evaluate per-chunk.
+
+**At ingestion time**: extract the document's access level from the source system (Confluence space ACL, SharePoint permissions, JIRA project membership) and store it as chunk metadata. Every chunk inherits the document's permissions.
+
+**Handling permission changes**: when a user's role changes or a document's permissions change, update the metadata in the vector DB. This is a metadata-only update (no re-embedding needed) and is fast.
+
+**Multi-tenancy**: for SaaS products serving multiple organizations, add an `org_id` metadata field and include it in every query filter. This ensures complete tenant isolation even if tenant A's content is semantically similar to tenant B's query.
+
+## Testing access control
+
+Build an explicit test: create a user with restricted permissions, craft a query that would normally retrieve a restricted document, and assert that the restricted document never appears in the results. This should be part of your automated test suite, not a manual check.
+
+## Self-study prompts
+
+- Implement a mock vector index with metadata filtering and write a test that verifies access isolation
+- Research how your chosen vector DB (Chroma, Pinecone, pgvector) handles metadata filtering performance at scale
+- Consider what happens when a document's permissions change — design the update flow
+
+## Interview takeaway
+
+The key phrase: "access control must be enforced at the retrieval layer via metadata pre-filtering, not at the application layer after retrieval." State this clearly and early. Then describe the metadata schema, how permissions flow from source documents to chunk metadata, and how you test the isolation. This question is also often a follow-up to system design questions about internal knowledge bases — the interviewer is checking whether you thought about security.
+""",
+        "tags_json": ["rag", "access-control", "security", "production", "enterprise"],
+    },
+    {
+        "category": "rag",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you measure and improve the faithfulness of a RAG system's answers?",
+        "answer_outline_md": """## What this question tests
+
+Faithfulness is one of the three core RAG evaluation metrics (alongside context relevance and answer relevance). The question tests whether you can separate faithfulness from other quality dimensions and describe a concrete measurement and improvement approach.
+
+## What faithfulness means
+
+A faithful answer contains only claims that are directly supported by the retrieved context. An unfaithful answer adds information from the model's parametric knowledge — which may be factually correct but is not grounded, cannot be cited, and is not verifiable by a user looking at the sources.
+
+Faithfulness does not measure factual correctness. A claim can be faithful (it is in the context) but wrong (the context document is outdated or incorrect). A claim can be correct (accurate fact from parametric knowledge) but unfaithful (not in the retrieved context).
+
+## Measuring faithfulness
+
+**LLM-as-judge approach** (most common in production):
+
+Decompose the answer into individual claims. For each claim, ask a judge model whether it is supported by the provided context. Return the fraction of claims that are supported.
+
+```
+Faithfulness score = (supported claims) / (total claims)
+```
+
+The judge prompt structure:
+1. Present the claim.
+2. Present the retrieved context chunks.
+3. Ask: "Is this claim directly stated or clearly implied by the context? Answer YES or NO."
+
+Use a capable model as the judge (gpt-4o works well). The judgment model should ideally be the same capability level or stronger than the generation model.
+
+**Embedding similarity approach** (cheaper, less accurate): Embed each claim and each context chunk. If the maximum cosine similarity between a claim and any chunk exceeds a threshold (e.g., 0.8), mark the claim as supported. Less accurate than LLM judgment but works well as a fast first pass.
+
+## Improving faithfulness
+
+**Prompt engineering**: Instruct the model explicitly to only use information from the provided context. "Answer ONLY using the provided context. If the answer is not in the context, say you don't know." This reduces parametric contamination.
+
+**Reduce context noise**: Unfaithful answers often occur when the context is irrelevant. If the model receives chunks that do not contain the answer, it fills in with parametric knowledge. Improving retrieval quality (higher Recall@K) is often the most effective faithfulness improvement.
+
+**Use citation-linked generation**: Require the model to cite `[CITE:chunk_id]` after every claim. Phantom citations (citing a non-existent chunk) and uncited claims are both signals of faithfulness failure. Tracking citation rates gives you a faster feedback signal than full LLM judge evaluation.
+
+**Smaller context windows**: Counterintuitively, providing fewer but higher-quality chunks often improves faithfulness. With a large number of chunks, the model has more context to "choose" from — and may choose parametric knowledge when the relevant chunk is diluted by irrelevant ones.
+
+## Self-study prompts
+
+- Implement the LLM-as-judge faithfulness evaluator from the RAG evaluation lesson
+- Run it on a system where you intentionally retrieve irrelevant chunks — does faithfulness drop?
+- Compare faithfulness with and without explicit "only use provided context" instructions in your system prompt
+
+## Interview takeaway
+
+Explain faithfulness clearly (grounded claims, not factual correctness). Describe the LLM-as-judge approach for measurement. For improvement: better prompt instructions reduce parametric contamination, better retrieval reduces unfaithfulness from irrelevant context, and citation-linked generation provides a fast proxy metric. Distinguish faithfulness from answer correctness — a system can be fully faithful and still give wrong answers if the retrieved documents are incorrect.
+""",
+        "tags_json": ["rag", "evaluation", "faithfulness", "llm-as-judge", "quality"],
+    },
+    {
+        "category": "rag",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "What is the difference between context precision and context recall in RAG evaluation, and when does each matter?",
+        "answer_outline_md": """## What this question tests
+
+This is a precision-vs-recall tradeoff question applied to retrieval evaluation specifically. Strong candidates can define both metrics clearly, explain the failure modes each catches, and describe when optimizing for one versus the other is appropriate.
+
+## Context precision
+
+**Definition**: Of the retrieved chunks, what fraction are relevant to the query?
+
+```
+Context precision = (relevant retrieved chunks) / (total retrieved chunks)
+```
+
+High precision means most of what you retrieve is actually useful. Low precision means the context window is polluted with irrelevant information that the model must sift through — or worse, that the model uses as the basis for an answer.
+
+**Low precision failure mode**: The model receives 5 chunks, 4 of which are irrelevant. It may produce a faithful answer based on the irrelevant chunks (correctly citing them but missing the actual answer), or it may produce an unfaithful answer by falling back to parametric knowledge.
+
+**When precision matters most**: Conversational RAG with tight context windows, cases where irrelevant context confuses the model (especially with smaller models), and any system where users will see citations (irrelevant citations destroy trust).
+
+## Context recall
+
+**Definition**: Of all the relevant chunks that exist in the corpus, what fraction were retrieved?
+
+This is equivalent to Recall@K as discussed in the evaluation section — the fraction of test queries where at least one relevant chunk appears in the top-K results.
+
+**Low recall failure mode**: The relevant document is in the corpus but was not retrieved. The model has no information to answer from and either says "I don't know" (good, honest failure) or hallucinates from parametric knowledge (bad, silent failure).
+
+**When recall matters most**: Any use case where missing an answer is more harmful than having noise in the context — medical information, legal compliance, technical troubleshooting. Also matters when your corpus has long-tail queries that cover rare but important topics.
+
+## The precision-recall tradeoff in RAG
+
+Retrieving more chunks (higher K) improves recall but hurts precision (more irrelevant chunks in context). Retrieving fewer chunks improves precision but risks missing relevant content (lower recall).
+
+The standard resolution is two-stage retrieval:
+1. **First stage**: retrieve broadly (top-20) for high recall. Cost is cheap (vector similarity lookup).
+2. **Second stage (reranking)**: a cross-encoder model scores each (query, chunk) pair and selects the top-5. High precision from the reranker.
+
+This achieves high recall (you found the relevant chunk in the top-20) and high precision (the reranker promotes it to the top-5).
+
+## How to measure both
+
+For a labeled test set:
+- **Context recall**: Recall@K — does the relevant document appear in top K?
+- **Context precision**: for retrieved results, how many are judged relevant? Use an LLM judge or manual labeling for a sample.
+
+Track both. A system can have high recall and low precision (retrieves everything but also retrieves noise) or low recall and high precision (only retrieves when very confident, but misses long-tail queries).
+
+## Self-study prompts
+
+- Run your eval harness with K=3, K=5, and K=10 — how does recall change as K increases?
+- Manually review the top-5 retrieved chunks for 10 queries — what fraction are actually relevant?
+- Add a reranker and compare precision before and after reranking
+
+## Interview takeaway
+
+Define both metrics clearly with the fractions (relevant/total retrieved for precision; queries with relevant chunk retrieved for recall). Explain the failure modes each catches. Describe the two-stage retrieval pattern that achieves both. The key statement: "I track both separately because a system can fail in different ways — missing relevant content (recall failure) or drowning the model in noise (precision failure). Reranking is the primary tool for improving precision without sacrificing recall."
+""",
+        "tags_json": ["rag", "evaluation", "context-precision", "context-recall", "reranking"],
+    },
 ]
 
 INTERVIEW_PROMPTS = [
