@@ -23157,6 +23157,920 @@ class CostLatencyDashboard:
 ]
 
 
+# ── Evaluation & Observability exercises (enrichment 2026-03-31) ──────────────
+EXERCISES += [
+    {
+        "title": "Build a multi-metric eval pipeline",
+        "slug": "build-multi-metric-eval-pipeline",
+        "category": "evaluation",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Build a Multi-Metric Eval Pipeline
+
+Production evaluation rarely relies on a single metric. A useful pipeline runs several scorers in parallel, aggregates their outputs into a composite, and flags cases that fail any individual dimension.
+
+### What to build
+
+Implement `MultiMetricPipeline`:
+
+1. **Constructor** — accepts `scorers: dict[str, Callable[[str, str], float]]` mapping metric name to scorer function. Optionally accepts `weights: dict[str, float]` (default: equal weight).
+
+2. **`run(cases: list[dict]) -> list[dict]`** — Each case has `"input"`, `"response"`, and `"reference"`. Returns per-case results: `{"case_id", "scores": {metric: float}, "composite_score", "passed_all", "failed_metrics"}`.
+
+3. **`aggregate(results: list[dict]) -> dict`** — Returns `{"n", "avg_composite", "per_metric_avg": {metric: float}, "cases_failing_any": int}`.
+
+4. **`worst_cases(results, n=5) -> list[dict]`** — Top n cases by lowest composite score, sorted ascending.
+
+### Constraints
+
+- Standard library only. If a scorer raises, record score 0.0 for that metric and continue.
+- Composite score = weighted average of individual metric scores.
+- `passed_all = True` only when every metric score >= 0.7.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import logging
+from typing import Callable
+
+logger = logging.getLogger(__name__)
+
+
+class MultiMetricPipeline:
+    def __init__(
+        self,
+        scorers: dict[str, Callable[[str, str], float]],
+        weights: dict[str, float] | None = None,
+    ):
+        # TODO: store scorers, normalise weights so they sum to 1.0
+        raise NotImplementedError
+
+    def run(self, cases: list[dict]) -> list[dict]:
+        # TODO: run all scorers on every case, compute composite
+        raise NotImplementedError
+
+    def aggregate(self, results: list[dict]) -> dict:
+        # TODO: compute aggregate statistics across all cases
+        raise NotImplementedError
+
+    def worst_cases(self, results: list[dict], n: int = 5) -> list[dict]:
+        # TODO: return n cases with lowest composite score
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import logging
+from typing import Callable
+
+logger = logging.getLogger(__name__)
+
+
+class MultiMetricPipeline:
+    def __init__(
+        self,
+        scorers: dict[str, Callable[[str, str], float]],
+        weights: dict[str, float] | None = None,
+    ):
+        self._scorers = scorers
+        if weights:
+            total = sum(weights.values())
+            self._weights = {k: v / total for k, v in weights.items()}
+        else:
+            n = len(scorers)
+            self._weights = {k: 1.0 / n for k in scorers}
+
+    def _safe_score(self, name: str, response: str, reference: str) -> float:
+        try:
+            return max(0.0, min(1.0, self._scorers[name](response, reference)))
+        except Exception as exc:
+            logger.warning("scorer %s raised: %s", name, exc)
+            return 0.0
+
+    def run(self, cases: list[dict]) -> list[dict]:
+        results = []
+        for i, case in enumerate(cases):
+            case_id = case.get("case_id", str(i))
+            response = case.get("response", "")
+            reference = case.get("reference", "")
+            scores = {name: self._safe_score(name, response, reference) for name in self._scorers}
+            composite = sum(scores[k] * self._weights.get(k, 0.0) for k in scores)
+            failed_metrics = [k for k, s in scores.items() if s < 0.7]
+            results.append({
+                "case_id": case_id,
+                "scores": scores,
+                "composite_score": composite,
+                "passed_all": len(failed_metrics) == 0,
+                "failed_metrics": failed_metrics,
+            })
+        return results
+
+    def aggregate(self, results: list[dict]) -> dict:
+        if not results:
+            return {"n": 0, "avg_composite": 0.0, "per_metric_avg": {}, "cases_failing_any": 0}
+        n = len(results)
+        all_metrics = list(results[0]["scores"].keys())
+        per_metric_avg = {
+            m: sum(r["scores"].get(m, 0.0) for r in results) / n for m in all_metrics
+        }
+        return {
+            "n": n,
+            "avg_composite": sum(r["composite_score"] for r in results) / n,
+            "per_metric_avg": per_metric_avg,
+            "cases_failing_any": sum(1 for r in results if not r["passed_all"]),
+        }
+
+    def worst_cases(self, results: list[dict], n: int = 5) -> list[dict]:
+        return sorted(results, key=lambda r: r["composite_score"])[:n]
+""",
+        "explanation_md": """\
+Normalising weights to sum to 1.0 in the constructor ensures the composite is always a genuine weighted average regardless of what the caller passes. The `_safe_score` wrapper prevents a single flaky scorer from aborting the entire batch — log a warning and keep going. `passed_all` is stricter than the composite: a case with 0.9 faithfulness but 0.3 toxicity should not pass, even if the composite is above threshold.
+""",
+        "tags_json": ["evaluation", "metrics", "pipeline", "testing", "composite-scoring"],
+    },
+    {
+        "title": "Implement a prompt version registry",
+        "slug": "implement-prompt-version-registry",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement a Prompt Version Registry
+
+When you run A/B evals or regression tests across prompt versions, you need a lightweight registry that ties eval results back to exactly the prompt text and metadata that generated them.
+
+### What to build
+
+Implement `PromptRegistry`:
+
+1. **`register(name, template, version, metadata=None) -> str`** — Returns a deterministic `prompt_id` as `"{name}:{version}"`. Raises `ValueError` if that prompt_id already exists.
+
+2. **`render(prompt_id, variables: dict) -> str`** — Substitutes `{variable}` placeholders in the template. Raises `KeyError` if a required variable is missing.
+
+3. **`get(prompt_id) -> dict`** — Returns `{"prompt_id", "name", "version", "template", "metadata"}`. Raises `KeyError` if not found.
+
+4. **`list_versions(name) -> list[str]`** — Returns prompt_ids for all versions of a named prompt, sorted lexicographically.
+
+5. **`diff(prompt_id_a, prompt_id_b) -> dict`** — Returns `{"same": bool, "template_a", "template_b"}` showing the two templates side by side.
+
+### Constraints
+
+- Standard library only. Templates use Python `str.format_map` style `{variable}` placeholders.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import re
+
+
+class PromptRegistry:
+    def __init__(self):
+        raise NotImplementedError
+
+    def register(self, name: str, template: str, version: str, metadata: dict | None = None) -> str:
+        raise NotImplementedError
+
+    def render(self, prompt_id: str, variables: dict) -> str:
+        raise NotImplementedError
+
+    def get(self, prompt_id: str) -> dict:
+        raise NotImplementedError
+
+    def list_versions(self, name: str) -> list[str]:
+        raise NotImplementedError
+
+    def diff(self, prompt_id_a: str, prompt_id_b: str) -> dict:
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import re
+import string
+
+
+class PromptRegistry:
+    def __init__(self):
+        self._store: dict[str, dict] = {}
+
+    def register(self, name: str, template: str, version: str, metadata: dict | None = None) -> str:
+        prompt_id = f"{name}:{version}"
+        if prompt_id in self._store:
+            raise ValueError(f"Prompt already registered: {prompt_id}")
+        self._store[prompt_id] = {
+            "prompt_id": prompt_id, "name": name, "version": version,
+            "template": template, "metadata": metadata or {},
+        }
+        return prompt_id
+
+    def render(self, prompt_id: str, variables: dict) -> str:
+        entry = self._store.get(prompt_id)
+        if entry is None:
+            raise KeyError(f"Prompt not found: {prompt_id}")
+        try:
+            return entry["template"].format_map(variables)
+        except KeyError as e:
+            raise KeyError(f"Missing variable {e} for prompt {prompt_id}") from e
+
+    def get(self, prompt_id: str) -> dict:
+        if prompt_id not in self._store:
+            raise KeyError(f"Prompt not found: {prompt_id}")
+        return dict(self._store[prompt_id])
+
+    def list_versions(self, name: str) -> list[str]:
+        return sorted(pid for pid in self._store if pid.startswith(f"{name}:"))
+
+    def diff(self, prompt_id_a: str, prompt_id_b: str) -> dict:
+        a = self._store.get(prompt_id_a)
+        b = self._store.get(prompt_id_b)
+        if a is None:
+            raise KeyError(f"Prompt not found: {prompt_id_a}")
+        if b is None:
+            raise KeyError(f"Prompt not found: {prompt_id_b}")
+        return {
+            "same": a["template"] == b["template"],
+            "template_a": a["template"],
+            "template_b": b["template"],
+        }
+""",
+        "explanation_md": """\
+The deterministic `prompt_id` format of `name:version` keeps logs and eval results self-describing — any engineer can look at an eval result and immediately know which prompt and version generated it. `format_map` is safer than `format` for partial templates because it raises on the first missing key with a clear name. The `diff` output is intentionally simple: the goal is to surface whether two registered templates are identical, not to compute a diff algorithm.
+""",
+        "tags_json": ["evaluation", "prompt-management", "versioning", "testing"],
+    },
+    {
+        "title": "Implement a quality threshold gate for CI",
+        "slug": "implement-quality-threshold-gate-ci",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement a Quality Threshold Gate for CI
+
+An eval harness only protects your system if it blocks bad deployments. This exercise builds the gate that translates eval results into a deploy/reject decision.
+
+### What to build
+
+Implement `QualityGate`:
+
+1. **Constructor** — accepts a `thresholds: dict` with any subset of these keys: `min_pass_rate` (float, default 0.80), `max_regression_count` (int, default 0), `min_avg_score` (float, default 0.70), `max_failure_rate_by_category: dict[str, float]` (per-category max failure rate).
+
+2. **`check(report: dict) -> GateResult`** — `report` is the dict returned by a `GoldenSuite.report()` call. Returns a `GateResult` dataclass with: `passed: bool`, `violations: list[str]` (human-readable strings per violated threshold), `summary: str` (one-sentence deploy/reject verdict).
+
+3. **`assert_passes(report: dict) -> None`** — Calls `check()` and raises `RuntimeError` with the violations if `passed == False`. Designed for use in CI scripts.
+
+### Constraints
+
+- Standard library only. Each violation message should name the threshold, the actual value, and the threshold value.
+""",
+        "starter_code": """\
+from __future__ import annotations
+from dataclasses import dataclass, field
+
+
+@dataclass
+class GateResult:
+    passed: bool
+    violations: list[str]
+    summary: str
+
+
+class QualityGate:
+    def __init__(self, thresholds: dict | None = None):
+        # TODO: store thresholds with defaults
+        raise NotImplementedError
+
+    def check(self, report: dict) -> GateResult:
+        # TODO: evaluate all thresholds against report
+        raise NotImplementedError
+
+    def assert_passes(self, report: dict) -> None:
+        # TODO: raise RuntimeError with violations if not passed
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+from dataclasses import dataclass, field
+
+
+@dataclass
+class GateResult:
+    passed: bool
+    violations: list[str]
+    summary: str
+
+
+class QualityGate:
+    def __init__(self, thresholds: dict | None = None):
+        t = thresholds or {}
+        self._min_pass_rate = t.get("min_pass_rate", 0.80)
+        self._max_regression_count = t.get("max_regression_count", 0)
+        self._min_avg_score = t.get("min_avg_score", 0.70)
+        self._category_limits: dict[str, float] = t.get("max_failure_rate_by_category", {})
+
+    def check(self, report: dict) -> GateResult:
+        violations: list[str] = []
+
+        pass_rate = report.get("pass_rate", 0.0)
+        if pass_rate < self._min_pass_rate:
+            violations.append(
+                f"pass_rate {pass_rate:.3f} below minimum {self._min_pass_rate:.3f}"
+            )
+
+        regression_count = report.get("regression_count", 0)
+        if regression_count > self._max_regression_count:
+            violations.append(
+                f"regression_count {regression_count} exceeds maximum {self._max_regression_count}"
+            )
+
+        avg_score = report.get("avg_score", 0.0)
+        if avg_score < self._min_avg_score:
+            violations.append(
+                f"avg_score {avg_score:.3f} below minimum {self._min_avg_score:.3f}"
+            )
+
+        by_category = report.get("by_category", {})
+        for cat, max_fail_rate in self._category_limits.items():
+            cat_data = by_category.get(cat, {})
+            cat_pass_rate = cat_data.get("pass_rate", 1.0)
+            cat_fail_rate = 1.0 - cat_pass_rate
+            if cat_fail_rate > max_fail_rate:
+                violations.append(
+                    f"category '{cat}' failure rate {cat_fail_rate:.3f} exceeds limit {max_fail_rate:.3f}"
+                )
+
+        passed = len(violations) == 0
+        summary = "All quality thresholds passed — safe to deploy." if passed else (
+            f"Deploy blocked: {len(violations)} threshold(s) violated."
+        )
+        return GateResult(passed=passed, violations=violations, summary=summary)
+
+    def assert_passes(self, report: dict) -> None:
+        result = self.check(report)
+        if not result.passed:
+            raise RuntimeError(
+                "Quality gate failed:\\n" + "\\n".join(f"  - {v}" for v in result.violations)
+            )
+""",
+        "explanation_md": """\
+Defaulting `max_regression_count` to 0 means any regression blocks the deploy unless explicitly overridden. This is the right default — a regression on a previously-passing case is always worth investigating. The per-category limits let you apply stricter thresholds to safety-sensitive categories (e.g., toxicity) than to general quality. `assert_passes` is the entry point for CI: add it after running the eval suite, and your pipeline fails with a clear error message rather than a cryptic exit code.
+""",
+        "tags_json": ["evaluation", "ci-cd", "quality-gate", "regression-testing", "testing"],
+    },
+    {
+        "title": "Build an eval result storage and comparison layer",
+        "slug": "build-eval-result-storage-comparison",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build an Eval Result Storage and Comparison Layer
+
+Eval results are only useful if you can compare them across runs. This exercise builds the persistence and comparison layer that makes prompt iteration data-driven.
+
+### What to build
+
+Implement `EvalStore`:
+
+1. **`save(run_id: str, report: dict) -> None`** — Persists the report under `run_id`. Raises `ValueError` if run_id already exists.
+
+2. **`load(run_id: str) -> dict`** — Returns the stored report. Raises `KeyError` if not found.
+
+3. **`list_runs() -> list[str]`** — Returns all run_ids in insertion order.
+
+4. **`compare(run_id_a: str, run_id_b: str) -> dict`** — Returns `{"run_a", "run_b", "pass_rate_delta", "avg_score_delta", "regression_count_delta", "improved": bool}`. `improved = True` if `avg_score_delta > 0` and `regression_count_delta <= 0`.
+
+5. **`best_run(metric: str = "avg_score") -> str | None`** — Returns the run_id with the highest value for the given metric key. Returns `None` if empty.
+
+### Constraints
+
+- Standard library only. In-memory store is fine (no file I/O required).
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+
+class EvalStore:
+    def __init__(self):
+        raise NotImplementedError
+
+    def save(self, run_id: str, report: dict) -> None:
+        raise NotImplementedError
+
+    def load(self, run_id: str) -> dict:
+        raise NotImplementedError
+
+    def list_runs(self) -> list[str]:
+        raise NotImplementedError
+
+    def compare(self, run_id_a: str, run_id_b: str) -> dict:
+        raise NotImplementedError
+
+    def best_run(self, metric: str = "avg_score") -> str | None:
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+
+
+class EvalStore:
+    def __init__(self):
+        self._store: dict[str, dict] = {}
+        self._order: list[str] = []
+
+    def save(self, run_id: str, report: dict) -> None:
+        if run_id in self._store:
+            raise ValueError(f"run_id already exists: {run_id}")
+        self._store[run_id] = report
+        self._order.append(run_id)
+
+    def load(self, run_id: str) -> dict:
+        if run_id not in self._store:
+            raise KeyError(f"run_id not found: {run_id}")
+        return self._store[run_id]
+
+    def list_runs(self) -> list[str]:
+        return list(self._order)
+
+    def compare(self, run_id_a: str, run_id_b: str) -> dict:
+        a = self.load(run_id_a)
+        b = self.load(run_id_b)
+        pass_delta = b.get("pass_rate", 0.0) - a.get("pass_rate", 0.0)
+        score_delta = b.get("avg_score", 0.0) - a.get("avg_score", 0.0)
+        reg_delta = b.get("regression_count", 0) - a.get("regression_count", 0)
+        return {
+            "run_a": run_id_a, "run_b": run_id_b,
+            "pass_rate_delta": pass_delta,
+            "avg_score_delta": score_delta,
+            "regression_count_delta": reg_delta,
+            "improved": score_delta > 0 and reg_delta <= 0,
+        }
+
+    def best_run(self, metric: str = "avg_score") -> str | None:
+        if not self._store:
+            return None
+        return max(self._order, key=lambda rid: self._store[rid].get(metric, float("-inf")))
+""",
+        "explanation_md": """\
+Maintaining `_order` separately from `_store` preserves insertion order without relying on dict ordering (which is guaranteed in Python 3.7+ but keeps intent explicit). The `improved` flag combines two signals: `avg_score_delta > 0` (quality improved) AND `regression_count_delta <= 0` (nothing got worse). Improving quality while introducing regressions is not improvement — it is a trade-off that needs human review before deploy.
+""",
+        "tags_json": ["evaluation", "storage", "comparison", "regression-testing", "metrics"],
+    },
+    {
+        "title": "Implement token-level faithfulness scoring",
+        "slug": "implement-token-level-faithfulness-scoring",
+        "category": "evaluation",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Implement Token-Level Faithfulness Scoring
+
+Faithfulness measures whether a generated answer is supported by the retrieved context. A simple approach checks whether sentences from the answer appear verbatim. A better approach uses token-level attribution.
+
+### What to build
+
+Implement `FaithfulnessScorer`:
+
+1. **`score(answer: str, context_chunks: list[str]) -> FaithfulnessResult`** — Returns a `FaithfulnessResult` with: `score` (float 0.0-1.0), `attributed_tokens` (tokens in answer found in any context chunk), `total_tokens`, `coverage` (attributed/total), `unsupported_ngrams` (list of 3-grams from the answer not found in any context chunk).
+
+2. **`score_batch(cases: list[dict]) -> dict`** — Each case has `"answer"` and `"context_chunks"`. Returns `{"avg_score", "avg_coverage", "n", "low_faithfulness_cases": [index]}` where `low_faithfulness_cases` contains indices of cases scoring below 0.5.
+
+### Token approach
+
+- Tokenize by lowercasing and splitting on whitespace and punctuation.
+- An answer token is "attributed" if it appears in any context chunk (after tokenizing the chunk the same way).
+- Unsupported 3-grams: consecutive 3-token sequences in the answer where none of the three tokens appear in any context token set.
+
+### Constraints
+
+- Standard library only. Empty answer or empty context: return score=0.0.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import re
+from dataclasses import dataclass, field
+
+
+@dataclass
+class FaithfulnessResult:
+    score: float
+    attributed_tokens: int
+    total_tokens: int
+    coverage: float
+    unsupported_ngrams: list[str]
+
+
+class FaithfulnessScorer:
+    def score(self, answer: str, context_chunks: list[str]) -> FaithfulnessResult:
+        raise NotImplementedError
+
+    def score_batch(self, cases: list[dict]) -> dict:
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import re
+from dataclasses import dataclass, field
+
+
+@dataclass
+class FaithfulnessResult:
+    score: float
+    attributed_tokens: int
+    total_tokens: int
+    coverage: float
+    unsupported_ngrams: list[str]
+
+
+def _tokenize(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+class FaithfulnessScorer:
+    def score(self, answer: str, context_chunks: list[str]) -> FaithfulnessResult:
+        if not answer.strip() or not context_chunks:
+            return FaithfulnessResult(score=0.0, attributed_tokens=0, total_tokens=0, coverage=0.0, unsupported_ngrams=[])
+
+        answer_tokens = _tokenize(answer)
+        context_token_set: set[str] = set()
+        for chunk in context_chunks:
+            context_token_set.update(_tokenize(chunk))
+
+        total = len(answer_tokens)
+        if total == 0:
+            return FaithfulnessResult(score=0.0, attributed_tokens=0, total_tokens=0, coverage=0.0, unsupported_ngrams=[])
+
+        attributed = sum(1 for t in answer_tokens if t in context_token_set)
+        coverage = attributed / total
+
+        unsupported: list[str] = []
+        for i in range(len(answer_tokens) - 2):
+            trigram = answer_tokens[i:i+3]
+            if not any(t in context_token_set for t in trigram):
+                unsupported.append(" ".join(trigram))
+
+        return FaithfulnessResult(
+            score=coverage,
+            attributed_tokens=attributed,
+            total_tokens=total,
+            coverage=coverage,
+            unsupported_ngrams=list(set(unsupported)),
+        )
+
+    def score_batch(self, cases: list[dict]) -> dict:
+        if not cases:
+            return {"avg_score": 0.0, "avg_coverage": 0.0, "n": 0, "low_faithfulness_cases": []}
+        results = [self.score(c.get("answer", ""), c.get("context_chunks", [])) for c in cases]
+        n = len(results)
+        return {
+            "avg_score": sum(r.score for r in results) / n,
+            "avg_coverage": sum(r.coverage for r in results) / n,
+            "n": n,
+            "low_faithfulness_cases": [i for i, r in enumerate(results) if r.score < 0.5],
+        }
+""",
+        "explanation_md": """\
+The unsupported 3-gram approach catches hallucination patterns that single-token attribution misses. A token like "capital" might appear in context, but the 3-gram "capital of france" may not — that is a hallucinated specific claim. Deduplicating unsupported ngrams with `set()` before returning avoids noise from repeated phrases. Coverage is used as the score directly, which is a simplification — a production system would weight rare or domain-specific tokens more heavily than stop words. The `low_faithfulness_cases` list in `score_batch` is the priority queue for human review.
+""",
+        "tags_json": ["evaluation", "faithfulness", "metrics", "rag", "attribution"],
+    },
+    {
+        "title": "Build a production quality alert system",
+        "slug": "build-production-quality-alert-system",
+        "category": "evaluation",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Build a Production Quality Alert System
+
+Quality alerts should trigger on patterns, not individual events. A single bad response is noise. A 10% decline in pass rate over 4 hours is a signal worth waking someone up for.
+
+### What to build
+
+Implement `QualityAlertSystem`:
+
+1. **`record_event(feature, score, passed, timestamp_s=None)`** — Appends a quality event. Uses `time.time()` if timestamp not provided.
+
+2. **`rolling_stats(feature, window_seconds=3600) -> dict`** — Computes stats for the most recent `window_seconds`: `{"n", "pass_rate", "avg_score", "p5_score", "p95_score"}`. Returns empty dict if no events.
+
+3. **`check_alerts(feature, thresholds: dict | None = None) -> list[dict]`** — `thresholds` supports: `min_pass_rate` (default 0.8), `min_avg_score` (default 0.7), `max_p5_score_floor` (default 0.3, alert if p5 drops below this). Returns list of `{"alert_type", "current_value", "threshold", "feature"}` dicts.
+
+4. **`baseline_drift(feature, baseline_pass_rate: float) -> dict | None`** — Returns `{"delta", "is_drift": bool}` where `is_drift` is True when rolling pass rate is more than 0.05 below baseline. Returns None if fewer than 20 events in window.
+
+### Constraints
+
+- Standard library only. Window eviction uses event timestamps, not wall-clock time.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import time
+import math
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+
+
+@dataclass
+class QualityEvent:
+    feature: str
+    score: float
+    passed: bool
+    timestamp_s: float
+
+
+class QualityAlertSystem:
+    def __init__(self, window_seconds: int = 3600):
+        raise NotImplementedError
+
+    def record_event(self, feature: str, score: float, passed: bool, timestamp_s: float | None = None) -> None:
+        raise NotImplementedError
+
+    def rolling_stats(self, feature: str, window_seconds: int | None = None) -> dict:
+        raise NotImplementedError
+
+    def check_alerts(self, feature: str, thresholds: dict | None = None) -> list[dict]:
+        raise NotImplementedError
+
+    def baseline_drift(self, feature: str, baseline_pass_rate: float) -> dict | None:
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import time
+import math
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+
+
+@dataclass
+class QualityEvent:
+    feature: str
+    score: float
+    passed: bool
+    timestamp_s: float
+
+
+def _pct(data: list[float], p: int) -> float:
+    if not data:
+        return 0.0
+    s = sorted(data)
+    idx = max(0, math.ceil(p / 100 * len(s)) - 1)
+    return s[idx]
+
+
+class QualityAlertSystem:
+    def __init__(self, window_seconds: int = 3600):
+        self._window = window_seconds
+        self._events: deque[QualityEvent] = deque()
+
+    def record_event(self, feature: str, score: float, passed: bool, timestamp_s: float | None = None) -> None:
+        self._events.append(QualityEvent(
+            feature=feature, score=score, passed=passed,
+            timestamp_s=timestamp_s if timestamp_s is not None else time.time(),
+        ))
+
+    def _window_events(self, feature: str, window_seconds: int) -> list[QualityEvent]:
+        cutoff = time.time() - window_seconds
+        return [e for e in self._events if e.feature == feature and e.timestamp_s >= cutoff]
+
+    def rolling_stats(self, feature: str, window_seconds: int | None = None) -> dict:
+        w = window_seconds if window_seconds is not None else self._window
+        events = self._window_events(feature, w)
+        if not events:
+            return {}
+        scores = [e.score for e in events]
+        n = len(events)
+        return {
+            "n": n,
+            "pass_rate": sum(1 for e in events if e.passed) / n,
+            "avg_score": sum(scores) / n,
+            "p5_score": _pct(scores, 5),
+            "p95_score": _pct(scores, 95),
+        }
+
+    def check_alerts(self, feature: str, thresholds: dict | None = None) -> list[dict]:
+        t = thresholds or {}
+        min_pass = t.get("min_pass_rate", 0.80)
+        min_avg = t.get("min_avg_score", 0.70)
+        max_p5_floor = t.get("max_p5_score_floor", 0.30)
+        stats = self.rolling_stats(feature)
+        if not stats:
+            return []
+        alerts = []
+        if stats["pass_rate"] < min_pass:
+            alerts.append({"alert_type": "low_pass_rate", "current_value": stats["pass_rate"],
+                           "threshold": min_pass, "feature": feature})
+        if stats["avg_score"] < min_avg:
+            alerts.append({"alert_type": "low_avg_score", "current_value": stats["avg_score"],
+                           "threshold": min_avg, "feature": feature})
+        if stats["p5_score"] < max_p5_floor:
+            alerts.append({"alert_type": "p5_floor_breached", "current_value": stats["p5_score"],
+                           "threshold": max_p5_floor, "feature": feature})
+        return alerts
+
+    def baseline_drift(self, feature: str, baseline_pass_rate: float) -> dict | None:
+        stats = self.rolling_stats(feature)
+        if not stats or stats.get("n", 0) < 20:
+            return None
+        delta = stats["pass_rate"] - baseline_pass_rate
+        return {"delta": delta, "is_drift": delta < -0.05}
+""",
+        "explanation_md": """\
+Using event timestamps for window eviction (rather than wall-clock on every call) means the stats are reproducible from any stored sequence of events. The `p5_score` alert is the most operationally useful: a high average with a very low p5 means a subset of inputs is systematically failing while the rest look fine — a common pattern when a new query type hits a blind spot in the prompt. `baseline_drift` returns `None` below 20 events rather than a noisy delta, which prevents false alarms during system startup.
+""",
+        "tags_json": ["evaluation", "monitoring", "alerting", "observability", "production"],
+    },
+    {
+        "title": "Implement an evaluation configuration loader",
+        "slug": "implement-evaluation-configuration-loader",
+        "category": "evaluation",
+        "difficulty": "easy",
+        "prompt_md": """\
+## Implement an Evaluation Configuration Loader
+
+Eval pipelines need configuration: which metrics to run, what thresholds to enforce, which model to use as the judge, and which categories to include. Hard-coding these values makes the pipeline difficult to adapt. A configuration loader centralises them in one place.
+
+### What to build
+
+Implement `EvalConfig` (a Pydantic-style dataclass):
+
+Fields: `metrics: list[str]` (default `["faithfulness", "relevance"]`), `pass_threshold: float` (default `0.7`), `regression_threshold: float` (default `0.10`), `judge_model: str` (default `"gpt-4o-mini"`), `categories: list[str]` (default empty = all), `max_cases: int | None` (default `None` = unlimited), `sample_rate: float` (default `1.0`, clamped to 0.0-1.0).
+
+Implement `load_eval_config(source: dict | None = None) -> EvalConfig`:
+- Accepts a dict (from JSON file, env vars, CLI args).
+- Unknown keys are silently ignored.
+- Invalid float ranges raise `ValueError` with a descriptive message.
+- Missing keys use defaults.
+
+Implement `EvalConfig.to_dict() -> dict` returning all fields.
+
+### Constraints
+
+- Standard library only. No Pydantic. Use `dataclasses` and manual validation.
+""",
+        "starter_code": """\
+from __future__ import annotations
+from dataclasses import dataclass, field
+
+
+@dataclass
+class EvalConfig:
+    metrics: list[str] = field(default_factory=lambda: ["faithfulness", "relevance"])
+    pass_threshold: float = 0.7
+    regression_threshold: float = 0.10
+    judge_model: str = "gpt-4o-mini"
+    categories: list[str] = field(default_factory=list)
+    max_cases: int | None = None
+    sample_rate: float = 1.0
+
+    def to_dict(self) -> dict:
+        raise NotImplementedError
+
+
+def load_eval_config(source: dict | None = None) -> EvalConfig:
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+from dataclasses import dataclass, field
+
+
+@dataclass
+class EvalConfig:
+    metrics: list[str] = field(default_factory=lambda: ["faithfulness", "relevance"])
+    pass_threshold: float = 0.7
+    regression_threshold: float = 0.10
+    judge_model: str = "gpt-4o-mini"
+    categories: list[str] = field(default_factory=list)
+    max_cases: int | None = None
+    sample_rate: float = 1.0
+
+    def __post_init__(self):
+        if not (0.0 <= self.pass_threshold <= 1.0):
+            raise ValueError(f"pass_threshold must be in [0.0, 1.0], got {self.pass_threshold}")
+        if not (0.0 <= self.regression_threshold <= 1.0):
+            raise ValueError(f"regression_threshold must be in [0.0, 1.0], got {self.regression_threshold}")
+        self.sample_rate = max(0.0, min(1.0, self.sample_rate))
+
+    def to_dict(self) -> dict:
+        return {
+            "metrics": list(self.metrics),
+            "pass_threshold": self.pass_threshold,
+            "regression_threshold": self.regression_threshold,
+            "judge_model": self.judge_model,
+            "categories": list(self.categories),
+            "max_cases": self.max_cases,
+            "sample_rate": self.sample_rate,
+        }
+
+
+def load_eval_config(source: dict | None = None) -> EvalConfig:
+    if not source:
+        return EvalConfig()
+    known = {"metrics", "pass_threshold", "regression_threshold",
+             "judge_model", "categories", "max_cases", "sample_rate"}
+    filtered = {k: v for k, v in source.items() if k in known}
+    return EvalConfig(**filtered)
+""",
+        "explanation_md": """\
+`__post_init__` runs after the dataclass `__init__`, making it the right place for cross-field validation in a stdlib dataclass. Clamping `sample_rate` silently rather than raising is a deliberate choice — passing `1.2` is probably a rounding error, not an intent to crash. Silently ignoring unknown keys in `load_eval_config` makes config files forward-compatible: adding a new key to the file before the code supports it will not break existing deployments.
+""",
+        "tags_json": ["evaluation", "configuration", "validation", "dataclasses"],
+    },
+    {
+        "title": "Implement a sampling strategy for production evaluation",
+        "slug": "implement-sampling-strategy-production-eval",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Implement a Sampling Strategy for Production Evaluation
+
+You cannot run an expensive LLM judge on every production request. A good sampling strategy applies the expensive scorer to the right requests — not random ones.
+
+### What to build
+
+Implement `EvalSampler`:
+
+1. **`should_sample_random(sample_rate: float) -> bool`** — Returns True with probability `sample_rate`. Use `random.random()`.
+
+2. **`should_sample_rule_based(event: dict) -> bool`** — Returns True if ANY of these apply: event has `"user_feedback": "negative"`, event has `"finish_reason": "max_tokens"`, event has `"auto_score"` and that score is between 0.4 and 0.7 (the uncertain zone), event has `"is_new_query_type": True`.
+
+3. **`classify(event: dict, sample_rate: float = 0.05) -> dict`** — Returns `{"sampled": bool, "reason": str}`. Reason values: `"rule_triggered"`, `"random_sample"`, `"not_sampled"`. Rule-based takes priority over random.
+
+4. **`batch_classify(events: list[dict], sample_rate: float = 0.05) -> dict`** — Returns `{"total", "sampled", "by_reason": dict, "sample_rate_actual": float}`.
+
+### Constraints
+
+- Standard library only. Make `should_sample_random` deterministic when called with a fixed `random.seed`.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import random
+from collections import defaultdict
+
+
+class EvalSampler:
+    @staticmethod
+    def should_sample_random(sample_rate: float) -> bool:
+        raise NotImplementedError
+
+    @staticmethod
+    def should_sample_rule_based(event: dict) -> bool:
+        raise NotImplementedError
+
+    def classify(self, event: dict, sample_rate: float = 0.05) -> dict:
+        raise NotImplementedError
+
+    def batch_classify(self, events: list[dict], sample_rate: float = 0.05) -> dict:
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import random
+from collections import defaultdict
+
+
+class EvalSampler:
+    @staticmethod
+    def should_sample_random(sample_rate: float) -> bool:
+        return random.random() < sample_rate
+
+    @staticmethod
+    def should_sample_rule_based(event: dict) -> bool:
+        if event.get("user_feedback") == "negative":
+            return True
+        if event.get("finish_reason") == "max_tokens":
+            return True
+        auto_score = event.get("auto_score")
+        if auto_score is not None and 0.4 <= float(auto_score) <= 0.7:
+            return True
+        if event.get("is_new_query_type"):
+            return True
+        return False
+
+    def classify(self, event: dict, sample_rate: float = 0.05) -> dict:
+        if self.should_sample_rule_based(event):
+            return {"sampled": True, "reason": "rule_triggered"}
+        if self.should_sample_random(sample_rate):
+            return {"sampled": True, "reason": "random_sample"}
+        return {"sampled": False, "reason": "not_sampled"}
+
+    def batch_classify(self, events: list[dict], sample_rate: float = 0.05) -> dict:
+        if not events:
+            return {"total": 0, "sampled": 0, "by_reason": {}, "sample_rate_actual": 0.0}
+        by_reason: dict[str, int] = defaultdict(int)
+        sampled_count = 0
+        for event in events:
+            result = self.classify(event, sample_rate)
+            if result["sampled"]:
+                sampled_count += 1
+                by_reason[result["reason"]] += 1
+        n = len(events)
+        return {
+            "total": n,
+            "sampled": sampled_count,
+            "by_reason": dict(by_reason),
+            "sample_rate_actual": sampled_count / n,
+        }
+""",
+        "explanation_md": """\
+The rule-based sampler is the most important part. Negative user feedback and `max_tokens` truncation are two of the most reliable signals that something went wrong — these should always get the expensive judge. The uncertain zone (0.4-0.7 auto score) catches cases where your fast scorer is unsure and a human-quality judge would break the tie. Rule-based takes priority over random sampling because a rule-triggered event has already been identified as high-value. Tracking `by_reason` in `batch_classify` lets you see how much of your judge budget comes from each source — if 90% is from `random_sample`, your rules are not triggering enough.
+""",
+        "tags_json": ["evaluation", "sampling", "production", "observability", "cost-optimization"],
+    },
+]
+
+
 # ── AI Deployment knowledge articles ─────────────────────────────────────────
 _DEPLOYMENT_KNOWLEDGE_ARTICLES = [
     {
@@ -26946,6 +27860,296 @@ A well-designed fallback chain improves reliability with minimal code complexity
             "https://docs.anthropic.com/en/api/errors",
         ],
         "tags_json": ["llm-apps", "resilience", "fallback", "providers", "reliability", "architecture"],
+    },
+]
+
+# ── Evaluation & Observability knowledge articles (enrichment 2026-03-31) ─────
+KNOWLEDGE_ARTICLES += [
+    {
+        "title": "LLM-as-judge: design principles and failure modes",
+        "slug": "llm-as-judge-design-principles-failure-modes",
+        "category": "evaluation",
+        "summary": "How to design reliable LLM judge prompts, calibrate them against human labels, and avoid the biases that make automated evaluation misleading.",
+        "content_md": """\
+## LLM-as-Judge: Design Principles and Failure Modes
+
+Using a language model to evaluate language model outputs is the most scalable evaluation technique available. It also introduces a set of failure modes that can silently corrupt your quality signal if you do not design around them.
+
+## Why it works
+
+A well-prompted judge model can apply complex rubrics consistently at scale — tasks that would take human annotators weeks can run overnight for a fraction of the cost. The key insight is that evaluation is a different, often easier task than generation. Asking a model "is this response faithful to the context?" is simpler than asking it to generate a faithful response.
+
+## Rubric design is everything
+
+The single biggest lever in LLM-as-judge quality is the rubric. Vague rubrics produce inconsistent scores. A rubric that says "rate the quality of the response from 1-5" will be interpreted differently by the same judge on different calls.
+
+A good rubric:
+- **Defines each score value** with a concrete criterion, not a label
+- **Gives examples** of responses that earn each score
+- **Specifies what to ignore** — formatting, length, tone — if those are not relevant
+- **Is specific to one dimension** — split helpfulness, faithfulness, and safety into separate rubrics
+
+Example of a weak rubric:
+```
+Rate helpfulness from 1 to 5.
+```
+
+Example of a strong rubric:
+```
+Score: 1.0 — Response directly answers the question using only information from the context, with no unsupported claims.
+Score: 0.5 — Response partially addresses the question or makes one claim not supported by context.
+Score: 0.0 — Response does not address the question or fabricates facts not in context.
+```
+
+## The known biases
+
+**Position bias.** When comparing two responses (A vs B), judges prefer the response in the first position, especially for close comparisons. Mitigate by running each comparison twice with positions swapped and averaging.
+
+**Length bias.** Judges consistently score longer responses higher, all else equal. This is a strong confound — a prompt that produces longer outputs will appear to "improve" quality even if actual quality is unchanged.
+
+**Self-similarity bias.** A model tends to prefer outputs that resemble its own generation style. Never use the same model as both generator and judge if you can avoid it. If you must, increase the specificity of the rubric to reduce subjective latitude.
+
+**Sycophancy.** If the judge sees which response came from the "new" prompt variant, it may favor it. Blind evaluation (judge does not know which variant produced the response) produces more reliable results.
+
+## Calibration process
+
+Before trusting judge scores in production, calibrate against human labels:
+
+1. Select 50-100 diverse cases from your evaluation dataset.
+2. Have two or three humans annotate each case using the same rubric.
+3. Compute inter-rater reliability between humans (aim for Cohen's Kappa > 0.6).
+4. Run the LLM judge on the same cases.
+5. Compare judge scores to human consensus. If disagreement exceeds 20% of cases, revise the rubric.
+
+Calibration is not a one-time task. Recalibrate when you change the judge model, the rubric, or the feature being evaluated.
+
+## When to use reference-based vs reference-free judging
+
+**Reference-based:** the judge compares the response to a gold reference answer. Better for tasks with a known correct answer (factual Q&A, structured extraction). More sensitive to rubric wording around "matches" vs "is equivalent to."
+
+**Reference-free:** the judge evaluates the response on its own merits against criteria. Better for open-ended generation (summaries, recommendations, explanations). More susceptible to length bias.
+
+## Cost management
+
+Running GPT-4o as a judge on every production request can cost more than the feature itself. Practical cost control:
+
+- Use a cheaper judge model (GPT-4o Mini, Claude Haiku) for continuous monitoring; reserve the expensive model for calibration and retrospective analysis.
+- Sample 5-10% of production traffic for judge evaluation.
+- Run full-suite evaluation on the golden dataset on a schedule (nightly or per-deploy), not continuously.
+- Cache judge results for identical (question, response, context) triples.
+
+## The practical summary
+
+LLM-as-judge is powerful but not magic. It is a measurement instrument that needs calibration, maintenance, and an understanding of its biases. Treat judge scores as estimates with uncertainty bounds, not ground truth. The most important operational practice: compare judge scores to human ratings on a regular sample and investigate every large disagreement.
+""",
+        "source_links_json": [
+            "https://arxiv.org/abs/2306.05685",
+        ],
+        "tags_json": ["evaluation", "llm-judge", "metrics", "calibration", "bias"],
+    },
+    {
+        "title": "Observability stack for production LLM applications",
+        "slug": "observability-stack-production-llm-applications",
+        "category": "evaluation",
+        "summary": "What your traces, logs, and dashboards need to contain to debug AI quality issues in production — and how to structure the data pipeline from call to alert.",
+        "content_md": """\
+## Observability Stack for Production LLM Applications
+
+A production LLM feature generates three distinct classes of observable events: system events (latency, errors, provider health), quality events (evaluation scores, judge results, user feedback), and business events (task completion, follow-up rates, session outcomes). Each class needs different instrumentation and different alerting logic.
+
+## The three-tier observability model
+
+### Tier 1: System health
+
+Standard infrastructure monitoring applies here with minor additions:
+
+- **Request rate and error rate** — same as any API
+- **Latency percentiles (P50, P95, P99)** — LLM calls have fat-tailed latency distributions; P50 is fast, P99 is wild
+- **Provider error classification** — distinguish rate limit errors (429) from context length errors (400) from service errors (500); each has a different operational response
+- **Token throughput** — tokens per second, not just requests per second
+- **`finish_reason` distribution** — a spike in `max_tokens` is a silent quality failure, not a system failure
+
+### Tier 2: Quality health
+
+This is where AI-specific instrumentation lives:
+
+- **Sampled judge scores** — faithfulness, relevance, helpfulness on 5-10% of traffic
+- **Pass rate by feature and by category** — not global; category-level granularity surfaces blind spots
+- **Score distribution** — mean and P5; a high mean with a low P5 means a subset of inputs is systematically failing
+- **Human feedback rate** — thumbs down per 100 requests; explicit negative feedback is the strongest quality signal
+- **`auto_score` distribution** — if your inline scorer reports uncertain scores (0.4-0.7) on more than 15% of traffic, something changed
+
+### Tier 3: Business health
+
+Business metrics are the ultimate arbiter of quality:
+
+- **Task completion rate** — for task-oriented features, did users achieve their goal?
+- **Follow-up question rate** — high follow-up rate may indicate the first answer was incomplete
+- **Copy/export action rate** — users copying text signals they found it useful
+- **Session abandonment rate after AI response** — users who leave immediately after a response may have gotten a bad one
+
+## Trace schema design
+
+Every LLM request should produce a trace record with:
+
+```python
+{
+    "trace_id": "uuid",
+    "feature_name": "document_qa",
+    "request_timestamp_ms": 1711900000000,
+    "model": "claude-3-5-sonnet-20241022",
+    "prompt_version": "qa_v3",
+    "prompt_tokens": 1240,
+    "completion_tokens": 312,
+    "latency_ms": 1840,
+    "finish_reason": "end_turn",
+    "retrieval_chunks": 5,
+    "top_chunk_score": 0.87,
+    "auto_score": 0.81,
+    "user_id_hash": "a3f7c...",  # hashed, not raw
+    "session_id": "sess_...",
+}
+```
+
+Never log raw user messages or raw responses by default. Log a truncated preview (200 chars) at INFO level, full content at DEBUG level with shorter retention.
+
+## Data pipeline from trace to alert
+
+```
+LLM call
+    |
+Trace record emitted (structured JSON to stdout)
+    |
+Log aggregator (Datadog, Loki, CloudWatch)
+    |
+Quality metrics pipeline (hourly batch)
+    |
+Dashboard (pass rate, score trend, cost)
+    |
+Alert rules (rolling window breach)
+    |
+On-call notification
+```
+
+The quality metrics pipeline is the component most teams skip. Without it, you have individual trace records but no rolling statistics. The pipeline reads traces, scores a sample with the LLM judge, computes rolling averages by feature and category, and writes the results to a metrics store.
+
+## Alert thresholds to configure before launch
+
+| Signal | Threshold | Cadence |
+|---|---|---|
+| Pass rate | < 80% rolling 4h | Hourly |
+| Avg faithfulness | < 0.70 vs 14-day baseline | Daily |
+| P5 score floor | < 0.30 rolling 1h | Real-time |
+| Negative feedback rate | > 5% rolling 1h | Real-time |
+| Provider error rate | > 2% rolling 5min | Real-time |
+| Cost per request | > 2x 14-day avg | Daily |
+
+## The most common gap
+
+Teams build system health monitoring (Tier 1) and sometimes business monitoring (Tier 3), but skip Tier 2 entirely. The result: you get paged when the service is down, you see business metrics decline over days or weeks, but you have no data connecting the quality degradation to a specific feature, model version, or query category.
+
+Tier 2 is the diagnostic layer. Without it, investigations start from scratch every time.
+""",
+        "source_links_json": [
+            "https://opentelemetry.io/docs/",
+        ],
+        "tags_json": ["evaluation", "observability", "tracing", "monitoring", "production", "alerting"],
+    },
+    {
+        "title": "Regression testing discipline for LLM-powered features",
+        "slug": "regression-testing-discipline-llm-features",
+        "category": "evaluation",
+        "summary": "How to build a regression testing practice that catches quality degradation before deployment, covering dataset curation, CI integration, and triage workflow.",
+        "content_md": """\
+## Regression Testing Discipline for LLM-Powered Features
+
+The hardest problem in AI engineering is not building the feature — it is ensuring that every change you make does not silently break something that was already working. Regression testing closes that loop.
+
+## Why AI regression testing is harder than unit testing
+
+A unit test is deterministic. Run it twice, get the same result. An LLM feature test is probabilistic: the same prompt on the same model may produce different outputs on different calls, but the quality distribution should remain stable.
+
+This means AI regression tests need to:
+1. Tolerate small output variation while detecting meaningful quality drops
+2. Define "passing" as a score above a threshold, not an exact string match
+3. Aggregate across cases to distinguish real degradation from random noise
+
+## The golden dataset
+
+The foundation is a curated dataset of test cases where you know what good looks like. Build it with these principles:
+
+**Seed from real failures.** Every time a production request fails in a way that should not, add it to the golden dataset. This ensures the dataset tracks real failure modes rather than hypothetical ones.
+
+**Include adversarial cases.** Cases that expose known weaknesses — ambiguous queries, requests at the edge of the feature scope, inputs likely to cause hallucination — are the most valuable. Easy cases that always pass add no regression detection value.
+
+**Keep it small enough to run fast.** A 200-case dataset that runs in 3 minutes will actually get run. A 5,000-case dataset that takes 2 hours will be skipped. Start with 50-100 cases and grow deliberately.
+
+**Include category labels.** Tag each case with a category (factual lookup, multi-hop reasoning, safety boundary, format compliance). Per-category scores surface regressions that aggregate metrics hide.
+
+## What to put in each test case
+
+```json
+{
+  "case_id": "multi-hop-001",
+  "input": "What was the annual revenue growth rate between 2022 and 2023?",
+  "reference": "Revenue grew 23% from $1.2B in 2022 to $1.48B in 2023",
+  "context_chunks": ["...", "..."],
+  "category": "multi-hop",
+  "expected_patterns": ["23%", "1.2", "1.48"],
+  "forbidden_patterns": ["I don't know", "cannot determine"],
+  "min_faithfulness_score": 0.8
+}
+```
+
+Each case should have at minimum: the input, a reference answer, and at least one of: expected patterns, a minimum score threshold, or a score function.
+
+## CI integration
+
+The regression suite should run automatically on every pull request that touches prompt code, model configuration, retrieval logic, or embedding models. Gate merge on the regression threshold.
+
+```yaml
+# .github/workflows/eval.yml
+- name: Run eval suite
+  run: python scripts/run_eval.py --dataset eval/golden_set.jsonl --baseline eval/baseline.json
+- name: Check quality gate
+  run: python scripts/check_gate.py --report eval/latest_report.json
+```
+
+Store the baseline report in version control alongside the code. When you intentionally improve a metric, update the baseline explicitly as part of the commit.
+
+## The triage workflow
+
+When regressions are detected:
+
+1. **Identify the regression cases** — which specific case_ids dropped?
+2. **Inspect the response** — what did the model actually return on the failing case?
+3. **Classify the failure mode** — hallucination? Retrieval miss? Format violation? Model refusal?
+4. **Trace to the cause** — what changed? Prompt? Model? Retrieval logic? Index content?
+5. **Fix and re-run** — verify the fix resolves the regression without introducing new ones
+
+The triage steps are predictable, which means they can be documented before anything breaks. Write the runbook before the first production incident.
+
+## Updating the dataset
+
+The golden dataset is a living artifact. Add new cases when:
+- A production failure reveals a category not covered by the current dataset
+- A feature expansion adds new input types
+- An adversarial test finds a new failure mode
+
+Remove cases when:
+- The feature scope changes and a category is no longer relevant
+- A case tests implementation details rather than observable behavior
+
+Archive removed cases rather than deleting them — they may be relevant again after future changes.
+
+## The discipline mindset
+
+Regression testing only works as a practice, not a one-time setup. The teams that do it well treat the golden dataset as a first-class artifact: it gets reviewed in code review, updated alongside feature changes, and its pass rate is tracked in the same dashboard as production quality metrics.
+
+The teams that skip it discover their regressions in production, usually from user complaints.
+""",
+        "source_links_json": [],
+        "tags_json": ["evaluation", "regression-testing", "ci-cd", "golden-dataset", "testing", "quality"],
     },
 ]
 
@@ -31842,6 +33046,336 @@ JOB_POSTINGS = [
         "source_url": "https://example.com/jobs/llm-platform-engineer",
         "description_md": "Best fit for engineers who enjoy abstractions, reliability, observability, and multi-service deployment architecture.",
         "tags_json": ["platform", "providers", "observability", "deployment"],
+    },
+]
+
+
+# ── Evaluation & Observability interview questions (enrichment 2026-03-31) ────
+INTERVIEW_QUESTIONS += [
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "Walk me through how you would set up an LLM-as-judge evaluation pipeline for a production RAG feature.",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you can translate the concept of LLM-as-judge into a concrete, production-ready implementation with appropriate safeguards. Strong candidates go beyond "use GPT-4 to grade the outputs" and address rubric design, calibration, cost management, and integration.
+
+## Start with the rubric, not the code
+
+The most common mistake is jumping to implementation. The first question to answer is: what does "good" mean for this specific feature?
+
+For a RAG Q&A feature, three separate dimensions matter:
+- **Faithfulness** — are all claims in the answer supported by the retrieved context?
+- **Answer relevance** — does the answer address what the user asked?
+- **Context relevance** — was the retrieved context actually useful for the question?
+
+Each dimension gets its own rubric with explicit score definitions. Vague rubrics produce inconsistent results.
+
+## The implementation layers
+
+```python
+@dataclass
+class JudgeResult:
+    score: float        # 0.0-1.0
+    rationale: str      # one-sentence explanation
+    metric: str         # faithfulness | relevance | helpfulness
+    raw_output: str     # preserve for debugging
+```
+
+The judge prompt structure:
+1. Role framing: "You are an impartial evaluation judge."
+2. Rubric (the explicit score definitions)
+3. Labeled inputs: Question, Context, Response
+4. Output format: "Return JSON with score and rationale only."
+
+Parse errors fall back to a neutral score (0.5), not a crash.
+
+## Calibration before trusting scores
+
+Before using judge scores for any decision, validate them against human labels on 50-100 cases. If agreement is below 80%, the rubric is ambiguous. Recalibrate when the judge model changes.
+
+## Cost management in production
+
+Running an expensive judge on every request is rarely justified. A practical production strategy:
+- Run a cheap deterministic check (format, length, forbidden phrases) on 100% of requests
+- Run the LLM judge on 5-10% sampled randomly
+- Run the LLM judge on 100% of cases with negative user feedback
+- Run the full golden suite nightly to detect drift
+
+## What NOT to do
+
+- Do not use the same model to generate and judge without cross-validation
+- Do not skip calibration and trust the scores directly
+- Do not use a single "quality" rubric — decompose into specific, measurable dimensions
+- Do not judge on every request without considering cost
+
+## Interview takeaway
+
+The signal interviewers look for: you treat the judge as an instrument that needs calibration, not an oracle. You think about rubric design before code, you validate against human labels, and you have a cost model for how often to run it.
+""",
+        "tags_json": ["evaluation", "llm-judge", "rag", "production", "calibration"],
+    },
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How would you design a regression testing system that catches quality degradation in an LLM feature before it reaches production?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see systematic thinking about quality as a continuous property that requires active maintenance — not a one-time check. Strong candidates describe the full loop: dataset curation, CI integration, threshold management, and triage workflow.
+
+## The core components
+
+**Golden dataset** — a curated collection of test cases representing the behaviors you must not regress on. Seed it from real failures (most valuable), from edge cases that expose known weaknesses, and from representative examples of each important query category. 50-200 cases is the right size: enough to detect patterns, small enough to run in minutes.
+
+**Scoring layer** — for each case, compute one or more scores. Use deterministic exact-match or pattern checking for non-negotiable requirements (safety patterns, required citations). Use LLM-as-judge or semantic similarity for quality dimensions. Mix both.
+
+**Regression detection** — compare current scores against a stored baseline. A regression is when a specific case's score drops more than a threshold (e.g., 0.10) relative to the baseline, not just a global average decline.
+
+**CI gate** — run the full suite on every pull request that touches prompts, model configuration, or retrieval logic. Fail the build if any regression is detected. Store the result with the git commit hash.
+
+## The baseline update workflow
+
+The baseline should be explicitly versioned and committed alongside the code. When a prompt change intentionally improves a case, the baseline update is part of the review. This makes regressions visible in code review, not just in CI output.
+
+## What makes this hard
+
+- Non-determinism: the same prompt may score differently on two runs. Mitigate with score averaging across 3+ runs for borderline cases, and by using deterministic scoring where possible.
+- Coverage: a passing test suite only catches regressions in what you already test. Use production failure analysis to continuously expand the golden dataset.
+- Flaky tests: cases that pass sometimes and fail others add noise. Either fix the prompt or remove the case from the gated suite.
+
+## The triage workflow
+
+When regressions are detected: identify the failing cases, inspect the actual responses, classify the failure mode (hallucination, retrieval miss, format violation), trace back to what changed, fix, and re-run. Document this workflow before you need it.
+
+## Interview takeaway
+
+The key insight: regression testing for AI is not about deterministic correctness — it is about maintaining a quality distribution. Test against a stable baseline, catch deviations early, and treat the golden dataset as a first-class product artifact.
+""",
+        "tags_json": ["evaluation", "regression-testing", "ci-cd", "golden-dataset", "quality"],
+    },
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How do you measure and control the cost of running LLM evaluations in production without sacrificing quality signal?",
+        "answer_outline_md": """\
+## What this question tests
+
+This question separates engineers who have run evaluations at scale from those who have only run them on small test sets. The insight: evaluation cost is a real engineering constraint, and the answer is a tiered strategy that applies the right instrument to the right signal.
+
+## The cost structure
+
+Evaluation cost has three components:
+- **LLM judge calls** — the most expensive by far; GPT-4o can cost $0.01-0.05 per evaluation
+- **Generation for eval** — running your feature on test cases costs tokens
+- **Human annotation time** — the most expensive per decision, but the most accurate
+
+In production, the optimization is: apply expensive evaluation selectively where it adds the most signal.
+
+## A tiered evaluation strategy
+
+**Tier 1: Free, always-on.** Deterministic checks run on 100% of requests. Format validation, required field presence, content length, forbidden phrase detection, `finish_reason` monitoring. These catch structural failures without LLM cost.
+
+**Tier 2: Cheap, sampled.** A fast classifier or embedding similarity check on 10-20% of requests. Fast to run, not highly accurate, but generates volume statistics for trend monitoring.
+
+**Tier 3: Expensive, targeted.** LLM-as-judge on 5% random sample PLUS 100% of high-priority triggers: negative user feedback, `max_tokens` truncation, auto_score in the uncertain range (0.4-0.7), new query types. This is where your quality budget goes.
+
+**Tier 4: Scheduled batch.** Full golden dataset evaluation nightly or per-deploy. This is your regression detection system — slow and expensive, but complete.
+
+## Cost calculation example
+
+For a feature handling 10,000 requests/day:
+- Tier 1: free
+- Tier 2: 2,000 requests × $0.001 = $2/day
+- Tier 3: ~500 requests × $0.02 = $10/day (5% random + triggers)
+- Tier 4: 200 golden cases × $0.02 = $4/night
+
+Total: ~$16/day for full evaluation coverage. For a feature generating meaningful business value, this is justified. Adjust Tier 3 sample rate based on budget constraints.
+
+## What to cut when budget is tight
+
+Cut Tier 3 sample rate first (5% → 2%), keep the triggered cases. The triggered cases are disproportionately informative. Never cut Tier 1 (it is free) or Tier 4 (it is your regression detection). Reducing golden dataset size is better than removing batch eval entirely.
+
+## Interview takeaway
+
+Show that you think about evaluation as a resource allocation problem. The key principle: target expensive evaluation at high-value cases, use cheap deterministic checks for volume coverage, and maintain a scheduled batch evaluation that is immune to cost pressure.
+""",
+        "tags_json": ["evaluation", "cost-optimization", "production", "sampling", "observability"],
+    },
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "Explain how you would set up structured tracing for an LLM application and what you would include in each trace.",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you understand the difference between standard application logging and the richer observability needed for AI systems. Strong candidates describe span-based tracing, privacy-aware design, and the specific fields that enable cost attribution and quality debugging.
+
+## Why standard logging is insufficient
+
+A web API log says: method, path, status code, latency. An LLM feature trace needs much more:
+- Which model and which prompt version produced the output?
+- How many tokens were consumed (for cost attribution)?
+- Was the context retrieved correctly, or did retrieval fail the question?
+- Did the output validate against the expected format?
+- Was the response truncated by `max_tokens`?
+
+Without this data, debugging a bad AI response requires guesswork.
+
+## Span-based tracing
+
+Borrow the span model from distributed systems. A single LLM feature request is composed of phases:
+
+```
+request_trace (root)
+  |- retrieval_span (vector search, re-ranking)
+  |- prompt_assembly_span (context injection, token count)
+  |- llm_call_span (provider API call)
+  |- post_processing_span (parsing, validation)
+```
+
+Each span records its own latency. You can immediately see whether a slow request was slow because of retrieval or because of the LLM call.
+
+## What to include in each trace
+
+Required fields in every LLM call span:
+- `trace_id` — correlates across spans and services
+- `model` — exact model identifier including version
+- `prompt_version` — which version of the prompt template was used
+- `prompt_tokens`, `completion_tokens` — for cost attribution
+- `latency_ms` — total call time
+- `finish_reason` — critical: `max_tokens` is a silent quality failure
+- `feature_name` — which product feature made this call
+
+## Privacy constraints
+
+Do not log raw user messages or full system prompts by default in production. Raw messages may contain PII. System prompts may contain confidential instructions. Design a `log_level` field: `minimal` (metadata only), `standard` (truncated prompt, 200-char preview), `debug` (full content, short retention window).
+
+## Cost attribution pattern
+
+The trace enables cost attribution by feature:
+```
+daily_cost_by_feature = sum(
+    prompt_tokens * price_per_input_token + completion_tokens * price_per_output_token
+    for trace in daily_traces
+    group_by trace.feature_name
+)
+```
+
+Without `feature_name` and token counts in every trace, you cannot answer "which feature drove the $500 increase in our AI bill this week?"
+
+## Interview takeaway
+
+Tracing is the data collection layer that feeds debugging, cost attribution, and quality monitoring. The three non-negotiables: structured events (not freeform logs), token counts on every call, and a privacy-aware design that does not expose user content by default.
+""",
+        "tags_json": ["evaluation", "observability", "tracing", "logging", "production"],
+    },
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you detect and respond to quality drift in an LLM feature after deployment?",
+        "answer_outline_md": """\
+## What this question tests
+
+Quality drift is the silent failure mode of LLM features: the feature continues working (no errors, normal latency) but the outputs gradually become less useful. Interviewers want to see that you have a proactive monitoring strategy, not just a reactive incident response.
+
+## Why drift happens
+
+LLM feature quality can degrade through several mechanisms:
+- **Model updates** — providers update models unannounced; a "same model" may behave differently after an update
+- **Input distribution shift** — the real user queries arriving over time may not match the distribution you designed and tested for
+- **Context staleness** — for RAG features, the knowledge base content may become outdated while the queries evolve
+- **Prompt decay** — interactions between your prompt and new model versions may produce subtly different outputs
+
+## Detection: what to measure
+
+You cannot detect drift without a baseline. Before launch, record:
+- Pass rate on the golden evaluation dataset
+- Average quality score (faithfulness, relevance) on a sampled set
+- Median latency and cost per request
+
+After launch, track rolling statistics and compare to the baseline:
+- Rolling 24h pass rate vs. baseline
+- Rolling 7-day average score vs. 30-day rolling average
+- A sudden drop is an incident; a gradual decline is drift
+
+## The drift detection signal
+
+Statistical approach: compute a rolling average of the quality metric. Alert when the current value is more than 2 standard deviations below the 30-day mean. This distinguishes normal variance from a sustained decline.
+
+Practical approach: re-run the golden dataset weekly. A 5+ percentage point decline in pass rate over two consecutive weekly runs is worth investigating regardless of statistical significance.
+
+## Response playbook
+
+When drift is detected:
+1. **Check model version** — did the provider update the model?
+2. **Inspect failing cases** — which specific cases regressed?
+3. **Classify failure mode** — is this a prompt-model compatibility issue, retrieval degradation, or input distribution shift?
+4. **Determine if it is a regression or a new failure mode** — existing test cases failing = regression; new input types failing = coverage gap
+5. **Fix** — prompt update, retrieval reindex, or golden dataset expansion
+
+## Interview takeaway
+
+The key distinction: drift detection is a scheduled, proactive measurement practice. It uses the same golden dataset and scoring infrastructure as regression testing, but runs on a different cadence (weekly) against a different baseline (long-term average vs. previous deploy). Build both before you need either.
+""",
+        "tags_json": ["evaluation", "drift-detection", "monitoring", "production", "quality"],
+    },
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How would you design an A/B evaluation framework for comparing two prompt variants before shipping?",
+        "answer_outline_md": """\
+## What this question tests
+
+A/B evaluation for prompts is different from A/B testing in web products. There is no traffic to split — you need to evaluate both variants on the same test cases, which removes randomization as a confound. Interviewers want to see you understand this distinction and the practical details of making comparisons statistically meaningful.
+
+## The core approach: paired comparison
+
+Run both prompt variants on every case in your evaluation dataset. Each case generates two scores — one for variant A, one for variant B. Compute:
+- Win rate: fraction of cases where B scored higher than A
+- Tie rate: cases where scores differ by less than 0.01
+- Loss rate: cases where A scored higher
+- Average score delta (B - A) across all cases
+
+## When to recommend deploying the new variant
+
+Use the score delta as the primary decision signal:
+- delta >= +0.05 → deploy variant B (meaningful improvement)
+- delta <= -0.05 → keep variant A (meaningful regression)
+- -0.05 < delta < +0.05 → inconclusive; do not deploy on quality grounds alone
+
+The 0.05 threshold is a practical heuristic. On fewer than 50 cases, any delta smaller than this is likely noise.
+
+## Statistical considerations
+
+The paired design (same cases for both variants) eliminates case selection as a confound and reduces variance compared to independent sampling. For 50 cases, a 5% delta corresponds to a meaningful, reproducible difference. For 20 cases, even a 10% delta may be within noise range.
+
+Before making a deployment decision, verify that the winning cases are distributed across categories, not concentrated in one easy category that skews the average.
+
+## What to look for in per-case results
+
+The aggregate delta does not tell you what each variant optimizes. Sort per-case results by (B score - A score):
+- Top cases show where B wins — this reveals B's strengths
+- Bottom cases show where A wins — this reveals B's regressions
+
+If B wins on simple cases but loses on complex ones, the aggregate may look like an improvement while hiding a category-level regression.
+
+## Latency and cost in the comparison
+
+Quality is not the only dimension. A variant that improves quality by 3% but doubles output length (and therefore doubles cost and latency) is not necessarily worth shipping. Include latency and token counts in the comparison report.
+
+## Interview takeaway
+
+Frame A/B eval as a decision-making tool, not just a measurement. The output should be a recommendation (deploy B / keep A / inconclusive) with supporting evidence. The most important practical advice: run on at least 50 cases before acting on the results, and examine per-case results — not just the aggregate — to understand what each variant is actually doing differently.
+""",
+        "tags_json": ["evaluation", "ab-testing", "prompt-variants", "testing", "decision-making"],
     },
 ]
 
