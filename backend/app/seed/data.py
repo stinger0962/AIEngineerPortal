@@ -15812,7 +15812,7 @@ class RateLimitedBatcher:
         self.batch_size = batch_size
 
     def _purge_window(self, window: list, now: float) -> list:
-        """Remove entries older than the rate limit window."""
+        # Remove entries older than the rate limit window
         return [entry for entry in window if (now - (entry if isinstance(entry, float) else entry[0])) < self.WINDOW_S]
 
     def _check_rate_limits(
@@ -17892,6 +17892,1388 @@ print("All assertions passed.")
     },
 ]
 
+
+# ── Python-for-AI: python-refresh and data-transformation exercises ───────────
+EXERCISES += [
+    {
+        "title": "Build a type-safe config loader from environment variables",
+        "slug": "type-safe-config-from-env-vars",
+        "category": "python-refresh",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a Type-Safe Config Loader from Environment Variables
+
+AI services are configured through environment variables: API keys, model names, timeout values, rate limits, feature flags. The naive approach — calling `os.environ.get("MODEL")` scattered throughout the codebase — creates invisible coupling between config layout and application code, and lets the service start with missing or invalid config that will fail on the first request.
+
+### What to build
+
+Implement a `ServiceConfig` Pydantic model and a `load_config()` factory function that:
+
+1. **Reads all config from environment variables** — use `pydantic-settings` `BaseSettings` or standard `BaseModel` with `model_validator`.
+2. **Validates types and constraints** — `max_tokens` must be between 1 and 8192, `temperature` between 0.0 and 2.0, `api_key` must be non-empty.
+3. **Provides defaults for non-critical settings** — `timeout_s` defaults to `30.0`, `max_concurrent` defaults to `5`.
+4. **Raises a descriptive error on startup if required values are missing** — do not let the service boot with `api_key = None`.
+5. **Supports a `from_dict` class method** for testing — so tests can pass config without touching `os.environ`.
+
+### Config fields to implement
+
+| Field | Type | Required | Default | Constraint |
+|---|---|---|---|---|
+| `api_key` | `str` | Yes | — | min length 8 |
+| `model` | `str` | Yes | — | non-empty |
+| `max_tokens` | `int` | No | `1024` | 1–8192 |
+| `temperature` | `float` | No | `0.7` | 0.0–2.0 |
+| `timeout_s` | `float` | No | `30.0` | > 0 |
+| `max_concurrent` | `int` | No | `5` | 1–50 |
+
+### Why this matters
+
+Missing or malformed config is one of the most common production failure modes. A service that validates its entire config at boot time fails fast with a clear error — not 10 minutes into the first request with a cryptic `AttributeError`. The `from_dict` method makes tests config-hermetic: no monkeypatching environment variables.
+
+### Constraints
+
+- Use Pydantic v2. Do not use `os.environ` inside the model — inject values via `from_dict` for tests.
+- Raise a `ValueError` with a clear message if `api_key` is missing or too short.
+""",
+        "starter_code": """\
+from __future__ import annotations
+from pydantic import BaseModel, Field, model_validator
+
+
+class ServiceConfig(BaseModel):
+    api_key: str
+    model: str
+    max_tokens: int = Field(default=1024, ge=1, le=8192)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    timeout_s: float = Field(default=30.0, gt=0)
+    max_concurrent: int = Field(default=5, ge=1, le=50)
+
+    @model_validator(mode="after")
+    def validate_api_key(self) -> "ServiceConfig":
+        # TODO: raise ValueError if api_key is missing or shorter than 8 chars
+        raise NotImplementedError
+
+    @classmethod
+    def from_dict(cls, values: dict) -> "ServiceConfig":
+        # TODO: construct config from a plain dict (for testing)
+        raise NotImplementedError
+
+
+def load_config(env: dict | None = None) -> ServiceConfig:
+    # TODO: read from env dict (or os.environ if None) and return a ServiceConfig
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import os
+from pydantic import BaseModel, Field, model_validator
+
+
+class ServiceConfig(BaseModel):
+    api_key: str
+    model: str
+    max_tokens: int = Field(default=1024, ge=1, le=8192)
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    timeout_s: float = Field(default=30.0, gt=0)
+    max_concurrent: int = Field(default=5, ge=1, le=50)
+
+    @model_validator(mode="after")
+    def validate_api_key(self) -> "ServiceConfig":
+        if not self.api_key or len(self.api_key) < 8:
+            raise ValueError(
+                f"api_key must be at least 8 characters, got {len(self.api_key or '')}"
+            )
+        return self
+
+    @classmethod
+    def from_dict(cls, values: dict) -> "ServiceConfig":
+        return cls.model_validate(values)
+
+
+def load_config(env: dict | None = None) -> ServiceConfig:
+    source = env if env is not None else dict(os.environ)
+    return ServiceConfig(
+        api_key=source.get("API_KEY", ""),
+        model=source.get("MODEL", ""),
+        max_tokens=int(source.get("MAX_TOKENS", 1024)),
+        temperature=float(source.get("TEMPERATURE", 0.7)),
+        timeout_s=float(source.get("TIMEOUT_S", 30.0)),
+        max_concurrent=int(source.get("MAX_CONCURRENT", 5)),
+    )
+
+
+# Tests
+config = ServiceConfig.from_dict({
+    "api_key": "sk-test-key-abc123",
+    "model": "gpt-4o-mini",
+    "max_tokens": 2048,
+})
+assert config.model == "gpt-4o-mini"
+assert config.max_tokens == 2048
+assert config.temperature == 0.7  # default
+
+try:
+    ServiceConfig.from_dict({"api_key": "short", "model": "gpt-4o-mini"})
+    assert False, "Should have raised"
+except Exception as exc:
+    assert "api_key" in str(exc).lower() or "8" in str(exc)
+
+config2 = load_config({"API_KEY": "sk-prod-key-xyz789", "MODEL": "gpt-4o"})
+assert config2.model == "gpt-4o"
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The `@model_validator(mode="after")` runs after all individual field validators, so `self.api_key` is already typed and coerced when the validator fires. This is the right hook for cross-field or post-coercion constraints.
+
+`from_dict` delegates to `model_validate`, which is Pydantic v2's preferred way to build models from dicts — it runs all validators including the model validator.
+
+`load_config` accepts an optional `env` dict so tests can call it without touching `os.environ`. Passing `None` falls back to `dict(os.environ)`. This keeps the function testable without monkeypatching.
+
+In production, wire `load_config()` in your application startup and fail fast if it raises — do not catch the exception and continue.
+""",
+        "tags_json": ["python-refresh", "pydantic", "config", "type-safety", "env-vars"],
+    },
+    {
+        "title": "Parse and extract structured data from LLM JSON responses",
+        "slug": "parse-extract-structured-llm-json",
+        "category": "python-refresh",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Parse and Extract Structured Data from LLM JSON Responses
+
+LLMs asked to return JSON do so imperfectly. They wrap output in markdown code fences, add explanatory prose before the JSON, omit required fields, or return strings where you expect numbers. A single fragile `json.loads(response)` call is not a production parsing strategy.
+
+### What to build
+
+Implement three functions and a Pydantic model:
+
+**1. `strip_fences(text: str) -> str`** — remove markdown code fences (` ```json `, ` ``` `) from the start and end of a string.
+
+**2. `extract_json_object(text: str) -> str | None`** — find the first complete `{...}` or `[...]` block in the text using a regex. Return `None` if none is found.
+
+**3. `parse_into(text: str, model_class: type[T]) -> T | None`** — combine the above: strip fences, extract JSON, parse with `json.loads`, validate with Pydantic. Return `None` on any failure, never raise.
+
+**4. `EntityExtraction`** — a Pydantic model with:
+- `entities: list[str]` — required, at least 1 item
+- `sentiment: Literal["positive", "neutral", "negative"]`
+- `confidence: float` — between 0.0 and 1.0
+
+### Test cases to pass
+
+```
+Input: '{"entities": ["Paris", "Eiffel Tower"], "sentiment": "positive", "confidence": 0.9}'
+Expected: EntityExtraction parsed successfully
+
+Input: '```json\\n{"entities": ["London"], "sentiment": "neutral", "confidence": 0.8}\\n```'
+Expected: fences stripped, parsed successfully
+
+Input: 'Here is the result: {"entities": ["NYC"], "sentiment": "positive", "confidence": 0.95}'
+Expected: JSON extracted from prose, parsed successfully
+
+Input: '{"sentiment": "positive", "confidence": 0.7}'  (missing entities)
+Expected: returns None (validation failure)
+
+Input: 'No JSON here at all'
+Expected: returns None
+```
+
+### Why this matters
+
+This three-layer pattern — fence stripping, JSON extraction, schema validation — handles 95% of real LLM structured output failures. Build it once and reuse it across every prompt task that returns structured data.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import json
+import re
+from typing import Literal, TypeVar, Type
+from pydantic import BaseModel, Field
+
+T = TypeVar("T", bound=BaseModel)
+
+
+class EntityExtraction(BaseModel):
+    entities: list[str] = Field(min_length=1)
+    sentiment: Literal["positive", "neutral", "negative"]
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+def strip_fences(text: str) -> str:
+    # TODO: remove leading ```json or ``` and trailing ```
+    raise NotImplementedError
+
+
+def extract_json_object(text: str) -> str | None:
+    # TODO: find and return the first {...} or [...] block, or None
+    raise NotImplementedError
+
+
+def parse_into(text: str, model_class: Type[T]) -> T | None:
+    # TODO: strip fences, extract JSON, parse, validate — return None on any failure
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import json
+import re
+from typing import Literal, TypeVar, Type
+from pydantic import BaseModel, Field, ValidationError
+
+T = TypeVar("T", bound=BaseModel)
+
+
+class EntityExtraction(BaseModel):
+    entities: list[str] = Field(min_length=1)
+    sentiment: Literal["positive", "neutral", "negative"]
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+def strip_fences(text: str) -> str:
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\n?", "", text)
+        text = re.sub(r"\n?```$", "", text.strip())
+    return text.strip()
+
+
+def extract_json_object(text: str) -> str | None:
+    match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
+    return match.group(1) if match else None
+
+
+def parse_into(text: str, model_class: Type[T]) -> T | None:
+    try:
+        cleaned = strip_fences(text)
+        json_str = extract_json_object(cleaned)
+        if json_str is None:
+            return None
+        data = json.loads(json_str)
+        return model_class.model_validate(data)
+    except (json.JSONDecodeError, ValidationError, Exception):
+        return None
+
+
+# Tests
+raw1 = '{"entities": ["Paris", "Eiffel Tower"], "sentiment": "positive", "confidence": 0.9}'
+result1 = parse_into(raw1, EntityExtraction)
+assert result1 is not None and result1.entities == ["Paris", "Eiffel Tower"]
+
+raw2 = '```json\\n{"entities": ["London"], "sentiment": "neutral", "confidence": 0.8}\\n```'
+result2 = parse_into(raw2, EntityExtraction)
+assert result2 is not None and result2.sentiment == "neutral"
+
+raw3 = 'Here is the result: {"entities": ["NYC"], "sentiment": "positive", "confidence": 0.95}'
+result3 = parse_into(raw3, EntityExtraction)
+assert result3 is not None and result3.confidence == 0.95
+
+raw4 = '{"sentiment": "positive", "confidence": 0.7}'
+result4 = parse_into(raw4, EntityExtraction)
+assert result4 is None  # missing entities
+
+result5 = parse_into("No JSON here at all", EntityExtraction)
+assert result5 is None
+
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The three-function design separates concerns: `strip_fences` handles formatting cleanup, `extract_json_object` handles the common "JSON buried in prose" case, and `parse_into` orchestrates the pipeline. Each function is independently testable.
+
+`parse_into` swallows all exceptions and returns `None` on failure. This is appropriate for parsing LLM output where the caller decides whether to retry, log, or use a fallback — the parsing function should not make that decision by raising.
+
+The `min_length=1` on `entities` is a list-level constraint in Pydantic v2, ensuring the list exists and has at least one item. Without this, an empty `entities: []` would pass validation.
+
+In production, track `None` returns as a metric. A parse failure rate above 5% signals the prompt needs a stronger format instruction.
+""",
+        "tags_json": ["python-refresh", "pydantic", "json-parsing", "llm-output", "type-safety"],
+    },
+    {
+        "title": "Count tokens accurately for prompt budget management",
+        "slug": "count-tokens-prompt-budget-management",
+        "category": "python-refresh",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Count Tokens Accurately for Prompt Budget Management
+
+Token counting is a foundational skill in AI engineering. You need it to prevent context window overflow, to estimate request costs before sending them, and to enforce token budgets when assembling prompts with multiple components. The naive approach — counting words or characters — is wrong often enough to cause real problems.
+
+### What to build
+
+Implement a `PromptBudget` class that manages a token budget for assembling multi-component prompts:
+
+1. **`PromptBudget(total_tokens: int, reserve_output: int)`** — initialize with a total context window and an output reservation. The available budget is `total_tokens - reserve_output`.
+
+2. **`count(text: str) -> int`** — use a simple approximation: `len(text.split())` counts words, then multiply by 1.3 to approximate token count (tokens average ~0.77 words for English technical text). Round up.
+
+3. **`fits(text: str) -> bool`** — return `True` if the text would fit in the remaining budget.
+
+4. **`consume(label: str, text: str) -> bool`** — if the text fits, deduct its token count from the budget, record the label and count, and return `True`. If it does not fit, return `False` without modifying the budget.
+
+5. **`remaining() -> int`** — return the number of tokens still available.
+
+6. **`summary() -> dict`** — return a dict of `{label: token_count}` for all consumed components, plus a `"remaining"` key.
+
+7. **`fit_chunks(chunks: list[str]) -> list[str]`** — given a list of chunks in priority order, return as many as fit in the remaining budget (greedy, no splitting).
+
+### Why this matters
+
+Context overflow exceptions are a runtime surprise. A `PromptBudget` that tracks consumption at assembly time gives you the overflow check before the API call, not after. The `summary()` method gives you the data to log which components are eating your budget.
+
+### Constraints
+
+- Use `math.ceil` for rounding up token counts.
+- Do not use `tiktoken` or any external tokenizer — the word-based approximation is sufficient for this exercise.
+- The budget should be stateful: multiple `consume` calls reduce the remaining budget cumulatively.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import math
+
+
+class PromptBudget:
+    def __init__(self, total_tokens: int, reserve_output: int = 1024):
+        self._available = total_tokens - reserve_output
+        self._consumed: dict[str, int] = {}
+
+    def count(self, text: str) -> int:
+        # TODO: word count * 1.3, rounded up with math.ceil
+        raise NotImplementedError
+
+    def fits(self, text: str) -> bool:
+        # TODO: return True if text fits in remaining budget
+        raise NotImplementedError
+
+    def consume(self, label: str, text: str) -> bool:
+        # TODO: if fits, deduct and record; return True. Else return False.
+        raise NotImplementedError
+
+    def remaining(self) -> int:
+        # TODO: return remaining token budget
+        raise NotImplementedError
+
+    def summary(self) -> dict:
+        # TODO: return {label: count, ..., "remaining": N}
+        raise NotImplementedError
+
+    def fit_chunks(self, chunks: list[str]) -> list[str]:
+        # TODO: return as many chunks as fit, in order
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import math
+
+
+class PromptBudget:
+    def __init__(self, total_tokens: int, reserve_output: int = 1024):
+        self._available = total_tokens - reserve_output
+        self._consumed: dict[str, int] = {}
+
+    def count(self, text: str) -> int:
+        return math.ceil(len(text.split()) * 1.3)
+
+    def fits(self, text: str) -> bool:
+        return self.count(text) <= self.remaining()
+
+    def consume(self, label: str, text: str) -> bool:
+        tokens = self.count(text)
+        if tokens > self.remaining():
+            return False
+        self._consumed[label] = self._consumed.get(label, 0) + tokens
+        self._available -= tokens
+        return True
+
+    def remaining(self) -> int:
+        return self._available
+
+    def summary(self) -> dict:
+        return {**self._consumed, "remaining": self._available}
+
+    def fit_chunks(self, chunks: list[str]) -> list[str]:
+        selected = []
+        for chunk in chunks:
+            tokens = self.count(chunk)
+            if tokens <= self.remaining():
+                self._available -= tokens
+                selected.append(chunk)
+        return selected
+
+
+# Tests
+budget = PromptBudget(total_tokens=4096, reserve_output=1024)
+assert budget.remaining() == 3072
+
+system = "You are a helpful assistant. Answer questions using the provided context only."
+assert budget.consume("system", system) is True
+assert budget.remaining() < 3072
+
+user = "What is the capital of France?"
+assert budget.consume("user", user) is True
+
+# fit_chunks
+chunks = ["Paris is the capital of France.", "The Eiffel Tower is in Paris.", "x" * 10000]
+selected = budget.fit_chunks(chunks)
+assert len(selected) == 2  # third is too large
+
+summ = budget.summary()
+assert "system" in summ and "remaining" in summ
+assert summ["remaining"] >= 0
+
+print(f"Budget summary: {summ}")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The 1.3 multiplier for tokens-per-word is a reasonable approximation for English technical text. For production, use `tiktoken` with the correct encoding for your model: `tiktoken.encoding_for_model("gpt-4o")` for OpenAI models. The word-based approximation is good enough for budget estimation in tests and development.
+
+`consume` is stateful by design. This reflects real prompt assembly: you call it once per component (system prompt, context, history, user input) and check the return value to decide whether to include the component.
+
+`fit_chunks` is greedy and does not split chunks. In production, if a chunk is too large to fit, you might want to truncate it rather than skip it — but truncating mid-sentence reduces quality. The exercise keeps the simple version; add truncation as a follow-on if needed.
+
+The `reserve_output` default of 1024 is a starting point. For features with verbose outputs, use your P95 output token length as the reservation.
+""",
+        "tags_json": ["python-refresh", "token-counting", "context-management", "budget", "llm-ops"],
+    },
+    {
+        "title": "Implement batch processing with configurable rate limiting",
+        "slug": "configurable-batch-rate-limiting",
+        "category": "python-refresh",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Implement Batch Processing with Configurable Rate Limiting
+
+Production AI systems routinely send thousands of requests to provider APIs. Without rate limiting, you hit 429 errors, waste time on retries, and destabilize your provider relationship. The right abstraction is a batch processor that enforces a requests-per-minute budget, retries transient failures with backoff, and reports per-item outcomes without aborting the run.
+
+### What to build
+
+Implement a synchronous `RateLimitedBatcher` class that:
+
+1. **`__init__(rpm_limit: int, max_retries: int = 3)`** — configure requests per minute and retry budget.
+
+2. **`process(items: list[dict], fn: Callable[[dict], dict]) -> BatchResult`** — process all items, calling `fn(item)` for each, with:
+   - At most `rpm_limit` calls per 60 seconds (use `time.sleep` to enforce the rate window).
+   - Retry `fn(item)` up to `max_retries` times on `RetryableError` exceptions, with 1-second base backoff doubling each attempt.
+   - Do NOT retry on `FatalError` exceptions — record the failure immediately.
+   - Return a `BatchResult` with `successes: list[dict]`, `failures: list[dict]`, `retry_count: int`.
+
+3. **`RetryableError`** and **`FatalError`** — custom exception classes (no logic needed, just `pass`).
+
+4. **`BatchResult`** — a dataclass with `successes`, `failures`, and `retry_count`.
+
+### Rate limiting logic
+
+The simplest correct implementation: track the timestamp of each call. If you are about to exceed `rpm_limit` calls in the last 60 seconds, sleep until the oldest call in the window is more than 60 seconds ago.
+
+### Why this matters
+
+Uncontrolled batch jobs are the most common source of provider 429 errors in production. A `RateLimitedBatcher` lets you tune throughput against cost without changing caller code. The retry/fatal distinction maps directly to real provider error categories: 429 and 500 are retryable; 400 and 401 are fatal.
+
+### Constraints
+
+- Synchronous (no asyncio) — this is the version for scripts and offline batch jobs.
+- Use `time.sleep` for rate limiting and backoff. Do not mock time in your solution.
+- The `fn` callable simulates the provider — in tests, pass a function that raises on specific inputs.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import time
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+class RetryableError(Exception):
+    pass
+
+
+class FatalError(Exception):
+    pass
+
+
+@dataclass
+class BatchResult:
+    successes: list[dict] = field(default_factory=list)
+    failures: list[dict] = field(default_factory=list)
+    retry_count: int = 0
+
+
+class RateLimitedBatcher:
+    def __init__(self, rpm_limit: int, max_retries: int = 3):
+        self.rpm_limit = rpm_limit
+        self.max_retries = max_retries
+        self._call_times: list[float] = []
+
+    def _enforce_rate_limit(self) -> None:
+        # TODO: sleep if needed to stay within rpm_limit calls per 60s
+        raise NotImplementedError
+
+    def _call_with_retry(self, item: dict, fn: Callable) -> dict:
+        # TODO: call fn(item), retry RetryableError up to max_retries, raise FatalError immediately
+        raise NotImplementedError
+
+    def process(self, items: list[dict], fn: Callable[[dict], dict]) -> BatchResult:
+        # TODO: process all items, enforce rate limit, collect successes and failures
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import time
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+class RetryableError(Exception):
+    pass
+
+
+class FatalError(Exception):
+    pass
+
+
+@dataclass
+class BatchResult:
+    successes: list[dict] = field(default_factory=list)
+    failures: list[dict] = field(default_factory=list)
+    retry_count: int = 0
+
+
+class RateLimitedBatcher:
+    def __init__(self, rpm_limit: int, max_retries: int = 3):
+        self.rpm_limit = rpm_limit
+        self.max_retries = max_retries
+        self._call_times: list[float] = []
+
+    def _enforce_rate_limit(self) -> None:
+        now = time.monotonic()
+        # Remove timestamps older than 60s
+        self._call_times = [t for t in self._call_times if now - t < 60.0]
+        if len(self._call_times) >= self.rpm_limit:
+            # Sleep until the oldest call is 60s old
+            oldest = self._call_times[0]
+            wait = 60.0 - (now - oldest)
+            if wait > 0:
+                time.sleep(wait)
+            # Clean again after sleep
+            now = time.monotonic()
+            self._call_times = [t for t in self._call_times if now - t < 60.0]
+        self._call_times.append(time.monotonic())
+
+    def _call_with_retry(self, item: dict, fn: Callable, result: BatchResult) -> dict:
+        last_exc = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                return fn(item)
+            except FatalError as exc:
+                raise  # never retry
+            except RetryableError as exc:
+                last_exc = exc
+                result.retry_count += 1
+                if attempt < self.max_retries:
+                    time.sleep(1.0 * (2 ** attempt))
+        raise last_exc
+
+    def process(self, items: list[dict], fn: Callable[[dict], dict]) -> BatchResult:
+        result = BatchResult()
+        for item in items:
+            self._enforce_rate_limit()
+            try:
+                output = self._call_with_retry(item, fn, result)
+                result.successes.append({"id": item.get("id"), "output": output})
+            except Exception as exc:
+                result.failures.append({"id": item.get("id"), "error": str(exc)})
+        return result
+
+
+# Tests (using a fast rpm_limit to avoid long sleeps)
+call_count = [0]
+
+def mock_fn(item: dict) -> dict:
+    call_count[0] += 1
+    if item.get("id") == "fail-fatal":
+        raise FatalError("Bad request")
+    if item.get("id") == "fail-retry" and call_count[0] < 3:
+        raise RetryableError("Transient error")
+    return {"result": f"ok-{item['id']}"}
+
+batcher = RateLimitedBatcher(rpm_limit=1000, max_retries=2)
+items = [
+    {"id": "a"},
+    {"id": "b"},
+    {"id": "fail-fatal"},
+]
+result = batcher.process(items, mock_fn)
+assert len(result.successes) == 2, f"Expected 2 successes, got {len(result.successes)}"
+assert len(result.failures) == 1
+assert result.failures[0]["id"] == "fail-fatal"
+print(f"Successes: {len(result.successes)}, Failures: {len(result.failures)}, Retries: {result.retry_count}")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The rate limit implementation tracks actual call timestamps rather than a fixed sleep interval. This is more accurate than sleeping `60 / rpm_limit` seconds between calls: it accounts for varying call durations and batches calls that arrive close together.
+
+`_call_with_retry` separates the retry loop from the rate limiting and the overall batch orchestration. Each concern is isolated.
+
+The `FatalError` / `RetryableError` distinction maps to real provider error semantics: a 400 Bad Request (malformed payload) should never be retried — retrying it wastes quota and time. A 429 Rate Limit or 503 Service Unavailable should be retried. Never merge these into a single catch-all retry policy.
+
+In production, replace `time.sleep` with the async version (`asyncio.sleep` + `asyncio.Semaphore`) for higher throughput. The synchronous version is appropriate for scripts and offline batch jobs.
+""",
+        "tags_json": ["python-refresh", "rate-limiting", "batch-processing", "retry-policy", "llm-ops"],
+    },
+    {
+        "title": "Build a streaming response accumulator for LLM output",
+        "slug": "streaming-response-accumulator",
+        "category": "data-transformation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a Streaming Response Accumulator for LLM Output
+
+Most production LLM APIs support streaming: instead of waiting for the full response, you receive tokens as they are generated. Streaming dramatically reduces time-to-first-token and lets you forward partial output to users in real time. But streaming also means your application needs to handle partial data, detect stream completion, and produce a coherent final result.
+
+### What to build
+
+Implement a `StreamAccumulator` class that processes a stream of token chunks:
+
+1. **`__init__()`** — initialize internal state.
+
+2. **`feed(chunk: str | None) -> None`** — accept one chunk. `None` is the sentinel that signals end-of-stream.
+
+3. **`is_complete() -> bool`** — return `True` after a `None` sentinel has been received.
+
+4. **`full_text() -> str`** — return the concatenation of all received chunks (excluding the sentinel). Raise `RuntimeError` if the stream is not yet complete.
+
+5. **`chunk_count() -> int`** — return the number of non-sentinel chunks received.
+
+6. **`extract_json() -> dict | None`** — after the stream is complete, try to parse the full text as JSON. Return the parsed dict on success, `None` on failure. This is useful for tool call responses that stream as JSON.
+
+Also implement `simulate_stream(text: str, chunk_size: int = 5) -> list[str | None]` — a helper that splits a text into chunks of `chunk_size` characters and appends a `None` sentinel. This simulates a provider stream for testing.
+
+### Why this matters
+
+In a FastAPI streaming endpoint, you forward chunks to a client as they arrive. In a background job, you accumulate the full text and then validate it. The `StreamAccumulator` makes both use cases clean without duplicating the concatenation logic.
+
+### Constraints
+
+- `full_text()` must raise `RuntimeError` if called before the sentinel arrives.
+- `feed(None)` called multiple times should be idempotent (still just marks as complete).
+- Do not assume chunks are single tokens — they can be multi-character strings.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import json
+
+
+class StreamAccumulator:
+    def __init__(self):
+        # TODO: initialize state
+        raise NotImplementedError
+
+    def feed(self, chunk: str | None) -> None:
+        # TODO: accumulate chunk or mark complete on None
+        raise NotImplementedError
+
+    def is_complete(self) -> bool:
+        # TODO: return True after None sentinel
+        raise NotImplementedError
+
+    def full_text(self) -> str:
+        # TODO: return concatenated text; raise RuntimeError if not complete
+        raise NotImplementedError
+
+    def chunk_count(self) -> int:
+        # TODO: return number of non-sentinel chunks
+        raise NotImplementedError
+
+    def extract_json(self) -> dict | None:
+        # TODO: parse full_text() as JSON, return None on failure
+        raise NotImplementedError
+
+
+def simulate_stream(text: str, chunk_size: int = 5) -> list[str | None]:
+    # TODO: split text into chunk_size pieces and append None sentinel
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import json
+
+
+class StreamAccumulator:
+    def __init__(self):
+        self._chunks: list[str] = []
+        self._complete = False
+
+    def feed(self, chunk: str | None) -> None:
+        if chunk is None:
+            self._complete = True
+        else:
+            self._chunks.append(chunk)
+
+    def is_complete(self) -> bool:
+        return self._complete
+
+    def full_text(self) -> str:
+        if not self._complete:
+            raise RuntimeError("Stream is not yet complete — call feed(None) first")
+        return "".join(self._chunks)
+
+    def chunk_count(self) -> int:
+        return len(self._chunks)
+
+    def extract_json(self) -> dict | None:
+        try:
+            return json.loads(self.full_text())
+        except (json.JSONDecodeError, RuntimeError):
+            return None
+
+
+def simulate_stream(text: str, chunk_size: int = 5) -> list[str | None]:
+    chunks: list[str | None] = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+    chunks.append(None)
+    return chunks
+
+
+# Tests
+acc = StreamAccumulator()
+assert not acc.is_complete()
+
+try:
+    acc.full_text()
+    assert False, "Should have raised"
+except RuntimeError:
+    pass
+
+stream = simulate_stream("Hello, world! This is a streaming test.", chunk_size=4)
+for chunk in stream:
+    acc.feed(chunk)
+
+assert acc.is_complete()
+assert acc.full_text() == "Hello, world! This is a streaming test."
+assert acc.chunk_count() == len(stream) - 1  # exclude sentinel
+
+# JSON extraction
+acc2 = StreamAccumulator()
+json_stream = simulate_stream('{"name": "Alice", "score": 0.95}', chunk_size=8)
+for chunk in json_stream:
+    acc2.feed(chunk)
+parsed = acc2.extract_json()
+assert parsed == {"name": "Alice", "score": 0.95}
+
+# Failed JSON extraction
+acc3 = StreamAccumulator()
+acc3.feed("not json")
+acc3.feed(None)
+assert acc3.extract_json() is None
+
+print(f"Accumulated {acc.chunk_count()} chunks: '{acc.full_text()[:30]}...'")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The `None` sentinel pattern is standard in Python streaming: producers put `None` in a queue or yield it from a generator to signal end-of-stream. The accumulator treats it as a state transition — once received, the stream is complete and `full_text()` becomes available.
+
+`full_text()` raising `RuntimeError` before completion is intentional. Silently returning an empty string would hide bugs where callers forget to wait for the sentinel. Explicit errors are better than silent incorrect state.
+
+`extract_json()` is a convenience method that handles the common case where streaming tool call responses contain JSON. It catches `RuntimeError` (incomplete stream) and `JSONDecodeError` (malformed JSON) and returns `None` for both, letting the caller decide how to handle it.
+
+In a real FastAPI streaming endpoint, you would `yield` each chunk as it arrives from the provider, forwarding to the client via `StreamingResponse`. The accumulator is for the background layer that also needs the full text for logging or downstream processing.
+""",
+        "tags_json": ["data-transformation", "streaming", "llm-output", "async-patterns", "python-ai"],
+    },
+    {
+        "title": "Compute per-model cost and usage summaries from request logs",
+        "slug": "compute-per-model-cost-usage-summaries",
+        "category": "data-transformation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Compute Per-Model Cost and Usage Summaries from Request Logs
+
+Every AI service needs basic cost visibility: which models are being used, how many tokens are flowing through each one, and what that costs. These summaries come from request logs — JSONL files or database rows that record per-request token counts. The transformation from raw logs to an actionable cost summary is a standard data engineering task.
+
+### What to build
+
+Implement `summarize_usage(records: list[dict]) -> dict` that takes a list of request log records and returns a nested summary:
+
+```python
+{
+  "gpt-4o-mini": {
+    "request_count": 120,
+    "input_tokens": 48000,
+    "output_tokens": 24000,
+    "total_tokens": 72000,
+    "estimated_cost_usd": 0.0216,
+    "avg_latency_ms": 340.5,
+    "error_count": 3,
+  },
+  "claude-3-5-haiku": { ... },
+  "_totals": {
+    "request_count": ...,
+    "total_tokens": ...,
+    "estimated_cost_usd": ...,
+  }
+}
+```
+
+Each input record has the shape:
+```python
+{
+  "model": "gpt-4o-mini",
+  "input_tokens": 400,
+  "output_tokens": 200,
+  "latency_ms": 320,
+  "status": "ok",  # or "error"
+}
+```
+
+### Pricing table to use
+
+| Model | Input (per 1M tokens) | Output (per 1M tokens) |
+|---|---|---|
+| `gpt-4o-mini` | $0.15 | $0.60 |
+| `gpt-4o` | $2.50 | $10.00 |
+| `claude-3-5-haiku` | $0.80 | $4.00 |
+| `claude-3-7-sonnet` | $3.00 | $15.00 |
+
+For unknown models, use $1.00 / $5.00 as defaults.
+
+### Why this matters
+
+Cost attribution is the first step toward cost optimization. Without per-model summaries, you cannot answer "why did our AI spend increase 40% this month?" or "is the expensive model being used for tasks a cheaper one could handle?" Build this once and run it weekly.
+
+### Constraints
+
+- Handle missing or `None` token fields gracefully (treat as 0).
+- Skip records where `model` is missing.
+- Include a `_totals` key that aggregates all models.
+""",
+        "starter_code": """\
+from __future__ import annotations
+
+PRICING = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    "claude-3-5-haiku": (0.80, 4.00),
+    "claude-3-7-sonnet": (3.00, 15.00),
+}
+DEFAULT_PRICING = (1.00, 5.00)
+
+
+def summarize_usage(records: list[dict]) -> dict:
+    # TODO: group by model, sum tokens, compute cost and error counts
+    # TODO: add _totals key
+    raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+from collections import defaultdict
+
+PRICING = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    "claude-3-5-haiku": (0.80, 4.00),
+    "claude-3-7-sonnet": (3.00, 15.00),
+}
+DEFAULT_PRICING = (1.00, 5.00)
+
+
+def _cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    input_price, output_price = PRICING.get(model, DEFAULT_PRICING)
+    return (input_tokens * input_price + output_tokens * output_price) / 1_000_000
+
+
+def summarize_usage(records: list[dict]) -> dict:
+    groups: dict[str, dict] = defaultdict(lambda: {
+        "request_count": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "estimated_cost_usd": 0.0,
+        "total_latency_ms": 0,
+        "error_count": 0,
+    })
+
+    for rec in records:
+        model = rec.get("model")
+        if not model:
+            continue
+        g = groups[model]
+        inp = int(rec.get("input_tokens") or 0)
+        out = int(rec.get("output_tokens") or 0)
+        g["request_count"] += 1
+        g["input_tokens"] += inp
+        g["output_tokens"] += out
+        g["total_tokens"] += inp + out
+        g["estimated_cost_usd"] += _cost(model, inp, out)
+        g["total_latency_ms"] += int(rec.get("latency_ms") or 0)
+        if rec.get("status") == "error":
+            g["error_count"] += 1
+
+    result: dict = {}
+    for model, g in groups.items():
+        count = g["request_count"]
+        result[model] = {
+            "request_count": count,
+            "input_tokens": g["input_tokens"],
+            "output_tokens": g["output_tokens"],
+            "total_tokens": g["total_tokens"],
+            "estimated_cost_usd": round(g["estimated_cost_usd"], 6),
+            "avg_latency_ms": round(g["total_latency_ms"] / count, 1) if count else 0.0,
+            "error_count": g["error_count"],
+        }
+
+    result["_totals"] = {
+        "request_count": sum(v["request_count"] for v in result.values()),
+        "total_tokens": sum(v["total_tokens"] for v in result.values()),
+        "estimated_cost_usd": round(sum(v["estimated_cost_usd"] for v in result.values()), 6),
+    }
+    return result
+
+
+# Tests
+records = [
+    {"model": "gpt-4o-mini", "input_tokens": 400, "output_tokens": 200, "latency_ms": 300, "status": "ok"},
+    {"model": "gpt-4o-mini", "input_tokens": 600, "output_tokens": 300, "latency_ms": 400, "status": "ok"},
+    {"model": "gpt-4o-mini", "input_tokens": 200, "output_tokens": 100, "latency_ms": 250, "status": "error"},
+    {"model": "claude-3-5-haiku", "input_tokens": 500, "output_tokens": 250, "latency_ms": 450, "status": "ok"},
+    {"model": None, "input_tokens": 100, "output_tokens": 50},  # should be skipped
+]
+
+summary = summarize_usage(records)
+
+assert "gpt-4o-mini" in summary
+assert summary["gpt-4o-mini"]["request_count"] == 3
+assert summary["gpt-4o-mini"]["error_count"] == 1
+assert summary["gpt-4o-mini"]["input_tokens"] == 1200
+assert "claude-3-5-haiku" in summary
+assert "_totals" in summary
+assert summary["_totals"]["request_count"] == 4  # None model skipped
+
+cost = summary["gpt-4o-mini"]["estimated_cost_usd"]
+assert cost > 0
+
+print(f"gpt-4o-mini cost: ${cost:.6f}, avg latency: {summary['gpt-4o-mini']['avg_latency_ms']}ms")
+print(f"Totals: {summary['_totals']}")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+`defaultdict(lambda: {...})` initializes each group with the full set of accumulator keys when first accessed. This is cleaner than checking `if model not in groups` at every record.
+
+Cost is computed per-record and accumulated, rather than computing from totals at the end. Both approaches give the same result, but per-record accumulation makes it easier to add per-record cost fields later if needed.
+
+The `_totals` key uses sum over all model values in the result dict. This means it correctly includes all models, including those with unknown pricing.
+
+In production, persist these summaries to a time-series table (daily aggregates per model) rather than computing them on the fly from raw logs. Raw log tables grow quickly; pre-aggregated summaries make dashboards fast.
+""",
+        "tags_json": ["data-transformation", "cost-tracking", "token-usage", "analytics", "llm-ops"],
+    },
+    {
+        "title": "Build a document chunking pipeline with overlap and metadata",
+        "slug": "document-chunking-pipeline-overlap-metadata",
+        "category": "data-transformation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build a Document Chunking Pipeline with Overlap and Metadata
+
+Before a document can be embedded and indexed for RAG, it must be split into chunks that fit within the embedding model's context window. Naive splitting on fixed character boundaries produces chunks that cut mid-sentence, lose context at chunk boundaries, and discard metadata needed for filtering. A production chunking pipeline respects sentence boundaries, adds overlap between adjacent chunks, and carries document-level metadata through to each chunk.
+
+### What to build
+
+Implement a `ChunkingPipeline` class with:
+
+1. **`__init__(chunk_size: int = 500, overlap: int = 50, min_chunk_size: int = 100)`** — configure chunk size (in characters), overlap (characters shared between adjacent chunks), and minimum chunk size (chunks smaller than this are discarded or merged with the next).
+
+2. **`chunk_text(text: str) -> list[str]`** — split text into chunks of approximately `chunk_size` characters. Prefer to split at sentence boundaries (`.`, `!`, `?` followed by whitespace) rather than mid-word. Each chunk except the first should start with the last `overlap` characters of the previous chunk.
+
+3. **`process_document(doc: dict) -> list[dict]`** — accept a document with `id`, `title`, `body`, and optional `metadata: dict`. Return a list of chunk dicts, each with:
+   - `doc_id`: the document's `id`
+   - `chunk_index`: 0-based position
+   - `text`: the chunk text
+   - `char_start`: character offset in the original body
+   - `metadata`: the document's metadata dict (pass through, do not modify)
+
+4. **`process_batch(docs: list[dict]) -> list[dict]`** — process multiple documents and return a flat list of all chunks.
+
+### Why this matters
+
+Chunk boundary placement directly affects retrieval quality. A chunk that cuts mid-sentence loses context that would have helped the embedding model represent it accurately. Overlap ensures that content near chunk boundaries appears in two adjacent chunks, reducing the chance of a relevant sentence being split across chunks with neither chunk carrying enough context.
+
+### Constraints
+
+- If `body` is missing or empty, return an empty list for that document.
+- Sentence boundary detection does not need to be perfect — a simple regex on `.!?` followed by space is sufficient.
+- Chunks shorter than `min_chunk_size` characters should be dropped (not merged).
+""",
+        "starter_code": """\
+from __future__ import annotations
+import re
+
+
+class ChunkingPipeline:
+    def __init__(self, chunk_size: int = 500, overlap: int = 50, min_chunk_size: int = 100):
+        self.chunk_size = chunk_size
+        self.overlap = overlap
+        self.min_chunk_size = min_chunk_size
+
+    def chunk_text(self, text: str) -> list[str]:
+        # TODO: split into overlapping chunks, prefer sentence boundaries
+        raise NotImplementedError
+
+    def process_document(self, doc: dict) -> list[dict]:
+        # TODO: chunk doc["body"], attach metadata
+        raise NotImplementedError
+
+    def process_batch(self, docs: list[dict]) -> list[dict]:
+        # TODO: process all docs, return flat list
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import re
+
+
+class ChunkingPipeline:
+    def __init__(self, chunk_size: int = 500, overlap: int = 50, min_chunk_size: int = 100):
+        self.chunk_size = chunk_size
+        self.overlap = overlap
+        self.min_chunk_size = min_chunk_size
+
+    def _find_sentence_boundary(self, text: str, target: int) -> int:
+        \"\"\"Find a good split point near target index by looking for sentence end.\"\"\"
+        search_start = max(0, target - 100)
+        search_end = min(len(text), target + 100)
+        window = text[search_start:search_end]
+        matches = list(re.finditer(r'[.!?]\\s', window))
+        if not matches:
+            return target
+        # Find the match closest to target within the window
+        target_in_window = target - search_start
+        best = min(matches, key=lambda m: abs(m.end() - target_in_window))
+        return search_start + best.end()
+
+    def chunk_text(self, text: str) -> list[str]:
+        if not text or len(text) < self.min_chunk_size:
+            return [text] if text and len(text) >= self.min_chunk_size else []
+
+        chunks = []
+        start = 0
+        while start < len(text):
+            end = start + self.chunk_size
+            if end >= len(text):
+                chunk = text[start:]
+            else:
+                end = self._find_sentence_boundary(text, end)
+                chunk = text[start:end]
+
+            if len(chunk) >= self.min_chunk_size:
+                chunks.append(chunk.strip())
+
+            next_start = end - self.overlap
+            if next_start <= start:
+                next_start = start + max(1, self.chunk_size - self.overlap)
+            start = next_start
+
+        return [c for c in chunks if c]
+
+    def process_document(self, doc: dict) -> list[dict]:
+        body = doc.get("body", "") or ""
+        if not body.strip():
+            return []
+
+        raw_chunks = self.chunk_text(body)
+        results = []
+        char_pos = 0
+
+        for i, chunk in enumerate(raw_chunks):
+            # Find char_start in original body
+            idx = body.find(chunk.strip(), char_pos)
+            char_start = idx if idx != -1 else char_pos
+
+            results.append({
+                "doc_id": doc.get("id", ""),
+                "chunk_index": i,
+                "text": chunk,
+                "char_start": char_start,
+                "metadata": doc.get("metadata", {}),
+            })
+            char_pos = char_start + len(chunk)
+
+        return results
+
+    def process_batch(self, docs: list[dict]) -> list[dict]:
+        all_chunks = []
+        for doc in docs:
+            all_chunks.extend(self.process_document(doc))
+        return all_chunks
+
+
+# Tests
+pipeline = ChunkingPipeline(chunk_size=100, overlap=20, min_chunk_size=30)
+
+# Basic chunking
+text = "The quick brown fox jumps over the lazy dog. " * 10
+chunks = pipeline.chunk_text(text)
+assert len(chunks) > 1, "Expected multiple chunks"
+assert all(len(c) >= 30 for c in chunks), "All chunks should meet min size"
+
+# Document processing
+doc = {
+    "id": "doc-001",
+    "title": "Test Document",
+    "body": "Artificial intelligence is transforming software engineering. " * 8,
+    "metadata": {"source": "test", "category": "ai"},
+}
+result = pipeline.process_document(doc)
+assert len(result) > 0
+assert all(c["doc_id"] == "doc-001" for c in result)
+assert all("metadata" in c and c["metadata"]["source"] == "test" for c in result)
+assert result[0]["chunk_index"] == 0
+
+# Empty body
+empty_doc = {"id": "empty", "body": "", "metadata": {}}
+assert pipeline.process_document(empty_doc) == []
+
+# Batch
+batch_result = pipeline.process_batch([doc, empty_doc])
+assert len(batch_result) == len(result)
+
+print(f"Chunked into {len(result)} chunks from a document of {len(doc['body'])} chars")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+`_find_sentence_boundary` searches a ±100 character window around the target split point for the nearest sentence boundary. This produces more natural chunks than hard character splits without the complexity of a full NLP sentence tokenizer.
+
+The overlap is implemented by subtracting `self.overlap` from the next `start` position. This means each chunk (except the last) shares its final `overlap` characters with the start of the next chunk. Overlap of 50 characters is roughly 10-15 words — enough to preserve context for most sentence-boundary cases.
+
+`char_start` tracking lets downstream systems map chunk text back to the original document position. This is useful for citation highlighting in RAG UIs where you want to display the source passage.
+
+The `metadata` passthrough is a design choice: document-level metadata (source, category, date) should live on every chunk. Retrieving a chunk without its metadata means a separate lookup to reconstruct the context for filtering and display.
+""",
+        "tags_json": ["data-transformation", "chunking", "rag", "ingestion", "pipeline"],
+    },
+    {
+        "title": "Implement a JSONL ingestion pipeline with error isolation",
+        "slug": "jsonl-ingestion-pipeline-error-isolation",
+        "category": "data-transformation",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Implement a JSONL Ingestion Pipeline with Error Isolation
+
+JSONL (JSON Lines) is the standard format for AI datasets, evaluation sets, and training data. An ingestion pipeline reads JSONL records, validates them, transforms them, and writes valid records to an output file — while isolating failures per record so a single malformed entry does not abort the whole run.
+
+### What to build
+
+Implement an `IngestionPipeline` class that:
+
+1. **`__init__(schema: type[BaseModel], transform: Callable[[BaseModel], dict])`** — accept a Pydantic model class for input validation and a transform function that converts a validated record to an output dict.
+
+2. **`run(input_path: str, output_path: str, overwrite: bool = False) -> IngestionResult`** — read the JSONL file at `input_path`, validate each line against `schema`, apply `transform`, write valid records to `output_path`, and return an `IngestionResult`.
+
+3. **`IngestionResult`** — a dataclass with:
+   - `total_lines: int` — total lines read (including blank lines)
+   - `processed: int` — successfully validated and transformed
+   - `failed: int` — lines that failed parsing or validation
+   - `skipped: int` — blank or whitespace-only lines
+   - `failures: list[dict]` — each with `line_number`, `raw`, and `error`
+
+4. **Idempotency** — if `output_path` already exists and `overwrite=False`, raise `FileExistsError` with a clear message. If `overwrite=True`, overwrite it.
+
+5. **Atomic write** — write to a temp file first, then rename to `output_path`. This prevents partial output files from being left on disk if the process is interrupted.
+
+### Test schema and transform
+
+```python
+class RawArticle(BaseModel):
+    id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    body: str = Field(min_length=50)
+    source: str
+
+def transform_article(article: RawArticle) -> dict:
+    return {
+        "id": article.id,
+        "title": article.title.strip(),
+        "body_length": len(article.body),
+        "source": article.source,
+    }
+```
+
+### Why this matters
+
+The difference between an idempotent pipeline and one that cannot be safely rerun is a detail that matters enormously at 3 AM when you need to reprocess a dataset. The atomic write prevents the worst case: a half-written output file that looks valid but contains garbage after the interrupt point.
+
+### Constraints
+
+- Use `pathlib.Path` for file operations, not bare `open()`.
+- The temp file should be in the same directory as `output_path` to ensure the rename is atomic on the same filesystem.
+- Empty lines and whitespace-only lines count as `skipped`, not `failed`.
+""",
+        "starter_code": """\
+from __future__ import annotations
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Type
+from pydantic import BaseModel, ValidationError
+
+
+@dataclass
+class IngestionResult:
+    total_lines: int = 0
+    processed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    failures: list[dict] = field(default_factory=list)
+
+
+class IngestionPipeline:
+    def __init__(self, schema: Type[BaseModel], transform: Callable[[BaseModel], dict]):
+        self.schema = schema
+        self.transform = transform
+
+    def run(
+        self,
+        input_path: str,
+        output_path: str,
+        overwrite: bool = False,
+    ) -> IngestionResult:
+        # TODO: check overwrite, read JSONL, validate+transform, write atomically
+        raise NotImplementedError
+""",
+        "solution_code": """\
+from __future__ import annotations
+import json
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable, Type
+from pydantic import BaseModel, Field, ValidationError
+
+
+@dataclass
+class IngestionResult:
+    total_lines: int = 0
+    processed: int = 0
+    failed: int = 0
+    skipped: int = 0
+    failures: list[dict] = field(default_factory=list)
+
+
+class IngestionPipeline:
+    def __init__(self, schema: Type[BaseModel], transform: Callable[[BaseModel], dict]):
+        self.schema = schema
+        self.transform = transform
+
+    def run(
+        self,
+        input_path: str,
+        output_path: str,
+        overwrite: bool = False,
+    ) -> IngestionResult:
+        in_path = Path(input_path)
+        out_path = Path(output_path)
+
+        if out_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"{out_path} already exists. Pass overwrite=True to replace it."
+            )
+
+        result = IngestionResult()
+        # Write to temp file in same directory for atomic rename
+        tmp_path = out_path.with_suffix(".tmp")
+
+        try:
+            with tmp_path.open("w", encoding="utf-8") as out_f:
+                for line_no, raw_line in enumerate(in_path.open(encoding="utf-8"), start=1):
+                    result.total_lines += 1
+                    line = raw_line.strip()
+
+                    if not line:
+                        result.skipped += 1
+                        continue
+
+                    try:
+                        data = json.loads(line)
+                        record = self.schema.model_validate(data)
+                        output = self.transform(record)
+                        out_f.write(json.dumps(output) + "\\n")
+                        result.processed += 1
+                    except (json.JSONDecodeError, ValidationError, Exception) as exc:
+                        result.failed += 1
+                        result.failures.append({
+                            "line_number": line_no,
+                            "raw": line[:200],  # truncate for safety
+                            "error": str(exc),
+                        })
+
+            # Atomic rename
+            tmp_path.replace(out_path)
+
+        except Exception:
+            # Clean up temp file on unexpected failure
+            if tmp_path.exists():
+                tmp_path.unlink()
+            raise
+
+        return result
+
+
+# Tests
+import tempfile
+
+class RawArticle(BaseModel):
+    id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    body: str = Field(min_length=50)
+    source: str
+
+def transform_article(article: RawArticle) -> dict:
+    return {"id": article.id, "title": article.title.strip(), "body_length": len(article.body), "source": article.source}
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    input_file = Path(tmpdir) / "input.jsonl"
+    output_file = Path(tmpdir) / "output.jsonl"
+
+    lines = [
+        '{"id": "a1", "title": "First Article", "body": "' + "A" * 60 + '", "source": "web"}',
+        '{"id": "a2", "title": "Second", "body": "' + "B" * 50 + '", "source": "pdf"}',
+        "",  # blank line
+        '{"id": "", "title": "Bad", "body": "too short", "source": "x"}',  # validation failure
+        "not json at all",  # parse failure
+    ]
+    input_file.write_text("\\n".join(lines))
+
+    pipeline = IngestionPipeline(schema=RawArticle, transform=transform_article)
+    result = pipeline.run(str(input_file), str(output_file))
+
+    assert result.processed == 2, f"Expected 2 processed, got {result.processed}"
+    assert result.skipped == 1
+    assert result.failed == 2
+    assert len(result.failures) == 2
+    assert output_file.exists()
+
+    # Verify overwrite protection
+    try:
+        pipeline.run(str(input_file), str(output_file), overwrite=False)
+        assert False, "Should have raised FileExistsError"
+    except FileExistsError:
+        pass
+
+    # Verify overwrite=True works
+    result2 = pipeline.run(str(input_file), str(output_file), overwrite=True)
+    assert result2.processed == 2
+
+print(f"Processed: {result.processed}, Skipped: {result.skipped}, Failed: {result.failed}")
+print(f"Failures: {[f['error'][:50] for f in result.failures]}")
+print("All tests passed.")
+""",
+        "explanation_md": """\
+The atomic write pattern — write to `.tmp`, then `Path.replace()` — prevents partial output files. `Path.replace()` is an atomic rename on POSIX systems when source and destination are on the same filesystem. Using `.with_suffix(".tmp")` in the same directory guarantees this.
+
+Per-line failure capture with `failures: list[dict]` is the critical pattern. A pipeline that raises on the first bad record requires manual investigation to determine how far it got. One that captures failures per record lets you rerun, inspect the failure list, and fix the source data without manual state reconstruction.
+
+Truncating `raw` to 200 characters in the failure record prevents the failures list from consuming unbounded memory when input lines are very long.
+
+The `overwrite=False` default protects against accidentally clobbering a completed pipeline output when the script is rerun. Always require explicit opt-in to destructive behavior.
+""",
+        "tags_json": ["data-transformation", "ingestion", "jsonl", "error-handling", "idempotent"],
+    },
+]
+
+
 KNOWLEDGE_ARTICLES = [
     {
         "title": "What makes a RAG system trustworthy",
@@ -19606,6 +20988,585 @@ for title, slug, category, summary in ARTICLE_NOTES:
             "tags_json": ["phase-1", "reference", category],
         }
     )
+
+
+# ── Python-for-AI knowledge articles ─────────────────────────────────────────
+KNOWLEDGE_ARTICLES += [
+    {
+        "title": "Token counting and context budget management in Python",
+        "slug": "token-counting-context-budget-python",
+        "category": "python",
+        "summary": "How to count tokens accurately using tiktoken, build token budget managers, and prevent context window overflow before it reaches the API call.",
+        "content_md": """\
+## Token Counting and Context Budget Management in Python
+
+Context window overflow is a runtime surprise you can prevent. A well-designed AI application counts tokens at assembly time — before the API call — and enforces budgets per component. This article covers the mechanics of token counting in Python and the architecture of a reusable budget manager.
+
+## Why token counting matters beyond "avoid overflow"
+
+Token counting has three separate uses in a production AI application:
+
+1. **Overflow prevention** — avoid 400 errors from requests that exceed the model's context window.
+2. **Cost estimation** — calculate approximate request cost before sending it. Input tokens and output tokens are priced separately.
+3. **Component budget allocation** — enforce how many tokens each component (system prompt, retrieved context, history) is allowed to consume so one component cannot crowd out others.
+
+Getting any of these wrong silently degrades quality or creates runtime failures.
+
+## tiktoken: accurate counting for OpenAI models
+
+The `tiktoken` library is OpenAI's official tokenizer. For OpenAI models, it gives exact counts:
+
+```python
+import tiktoken
+
+def count_tokens(text: str, model: str = "gpt-4o") -> int:
+    enc = tiktoken.encoding_for_model(model)
+    return len(enc.encode(text))
+
+# For message arrays (includes per-message overhead):
+def count_messages_tokens(messages: list[dict], model: str = "gpt-4o") -> int:
+    enc = tiktoken.encoding_for_model(model)
+    tokens = 0
+    for msg in messages:
+        tokens += 4  # per-message overhead: role + content formatting
+        tokens += len(enc.encode(msg.get("content", "")))
+    tokens += 2  # reply priming
+    return tokens
+```
+
+Each message in the array has a small overhead (roughly 4 tokens for role formatting) beyond the content tokens. For large batches, this overhead is negligible. For short messages, it can be meaningful.
+
+## Anthropic and other providers
+
+Anthropic does not publish a Python tokenizer for Claude. Use the token-counting API endpoint for exact counts:
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+
+def count_tokens_anthropic(messages: list[dict], model: str = "claude-3-5-haiku-20241022") -> int:
+    response = client.messages.count_tokens(
+        model=model,
+        messages=messages,
+    )
+    return response.input_tokens
+```
+
+For non-OpenAI, non-Anthropic providers where no tokenizer is available, use a character-based approximation:
+
+```python
+def estimate_tokens(text: str) -> int:
+    # English technical text: ~4 chars per token on average
+    # Use math.ceil to err on the side of over-counting
+    import math
+    return math.ceil(len(text) / 4)
+```
+
+This approximation is accurate to within ±15% for typical English text. Use it for budgeting; do not rely on it for billing calculations.
+
+## The PromptBudget pattern
+
+The core pattern is a stateful budget manager that enforces constraints at assembly time:
+
+```python
+import math
+from dataclasses import dataclass, field
+
+
+@dataclass
+class BudgetAllocation:
+    label: str
+    tokens: int
+    included: bool
+
+
+class PromptBudget:
+    def __init__(
+        self,
+        total_tokens: int,
+        reserve_output: int = 1024,
+        count_fn=None,
+    ) -> None:
+        self._available = total_tokens - reserve_output
+        self._allocations: list[BudgetAllocation] = []
+        self._count = count_fn or (lambda t: math.ceil(len(t.split()) * 1.3))
+
+    def consume(self, label: str, text: str, required: bool = False) -> bool:
+        tokens = self._count(text)
+        if tokens > self._available:
+            self._allocations.append(BudgetAllocation(label, tokens, included=False))
+            if required:
+                raise ValueError(f"Required component '{label}' exceeds budget ({tokens} > {self._available})")
+            return False
+        self._available -= tokens
+        self._allocations.append(BudgetAllocation(label, tokens, included=True))
+        return True
+
+    def remaining(self) -> int:
+        return self._available
+
+    def report(self) -> dict:
+        return {
+            a.label: {"tokens": a.tokens, "included": a.included}
+            for a in self._allocations
+        } | {"remaining": self._available}
+```
+
+Usage in a RAG prompt assembly function:
+
+```python
+def assemble_rag_prompt(
+    system: str,
+    user_query: str,
+    chunks: list[str],
+    history: list[dict],
+    model_context_window: int = 16000,
+) -> list[dict]:
+    budget = PromptBudget(model_context_window, reserve_output=2000)
+
+    # Required components first
+    budget.consume("system", system, required=True)
+    budget.consume("user", user_query, required=True)
+
+    # History: newest first, drop oldest if needed
+    included_history = []
+    for msg in reversed(history):
+        if budget.consume(f"history_{msg['role']}", msg["content"]):
+            included_history.insert(0, msg)
+
+    # Retrieved context: add as many chunks as fit
+    included_chunks = []
+    for i, chunk in enumerate(chunks):
+        if budget.consume(f"chunk_{i}", chunk):
+            included_chunks.append(chunk)
+
+    # Assemble
+    context_text = "\\n\\n".join(f"<source>\\n{c}\\n</source>" for c in included_chunks)
+    system_with_context = system + (f"\\n\\n## Context\\n{context_text}" if context_text else "")
+
+    messages = [{"role": "system", "content": system_with_context}]
+    messages.extend(included_history)
+    messages.append({"role": "user", "content": user_query})
+    return messages
+```
+
+## Common mistakes
+
+**No token check before the API call.** The API returns a 400 if you exceed the context window. This is a runtime exception that should be a pre-flight check. Budget management turns a runtime exception into a graceful drop.
+
+**Counting only the user message.** The system prompt, history, and retrieved context all consume tokens. Count the full messages array, not just the latest user turn.
+
+**Using character count as a proxy for tokens without a multiplier.** Raw character count is always lower than token count for code and technical text. Use the 1/4 approximation or `tiktoken` for realistic estimates.
+
+**Forgetting the output reservation.** A model with a 16K context window and a 14K-token input leaves only 2K tokens for output. If your feature needs verbose output, reserve more. Track P95 output token length and use that as your reservation.
+
+## Practical rule
+
+Count tokens at the point where you are assembling the prompt array. If any component exceeds its allocation, decide at that point: truncate, drop, or raise. Never pass the overflow responsibility to the API call.
+""",
+        "source_links_json": [
+            "https://github.com/openai/tiktoken",
+            "https://docs.anthropic.com/en/docs/build-with-claude/token-counting",
+        ],
+        "tags_json": ["python", "token-counting", "context-management", "llm-ops", "budget"],
+    },
+    {
+        "title": "Error handling patterns for AI service integrations",
+        "slug": "error-handling-patterns-ai-service-integrations",
+        "category": "python",
+        "summary": "How to classify provider errors, implement retry policy correctly, build fallback chains, and surface meaningful error context without leaking internals.",
+        "content_md": """\
+## Error Handling Patterns for AI Service Integrations
+
+Most AI service errors fall into a small number of categories, and each category has the right handling strategy. Getting error handling right is the difference between a service that recovers gracefully and one that either retries indefinitely or surfaces cryptic stack traces to users.
+
+## The error taxonomy that actually matters
+
+Provider API errors are not all the same. Treating them uniformly with a single retry policy is incorrect and expensive.
+
+| Error type | HTTP status | Retry? | Strategy |
+|---|---|---|---|
+| Rate limit | 429 | Yes | Exponential backoff, respect `Retry-After` header |
+| Service overload | 503 | Yes | Short backoff, 2-3 attempts |
+| Server error | 500 | Sometimes | Retry once; if persistent, fallback or fail |
+| Bad request | 400 | Never | Fix the request before retrying |
+| Auth failure | 401 | Never | Alert operations, do not retry |
+| Context overflow | 400 (specific) | Never | Trim the prompt, then retry |
+| Timeout | — | Once | With a slightly longer timeout |
+
+The critical distinction: **do not retry errors caused by the request itself** (400, 401, context overflow). Retrying them wastes quota and adds latency. Only retry errors caused by the provider's transient state (429, 503, intermittent 500).
+
+## Classifying errors in Python
+
+```python
+from enum import Enum
+
+
+class ErrorClass(Enum):
+    RETRYABLE = "retryable"      # 429, 503, transient 500
+    FATAL = "fatal"              # 400, 401, 403
+    TIMEOUT = "timeout"          # asyncio.TimeoutError
+    CONTEXT_OVERFLOW = "overflow"  # 400 with specific message
+
+
+def classify_provider_error(exc: Exception) -> ErrorClass:
+    error_str = str(exc).lower()
+    if isinstance(exc, TimeoutError):
+        return ErrorClass.TIMEOUT
+    if hasattr(exc, "status_code"):
+        if exc.status_code == 429:
+            return ErrorClass.RETRYABLE
+        if exc.status_code in (500, 503):
+            return ErrorClass.RETRYABLE
+        if exc.status_code in (400, 401, 403):
+            if "context" in error_str or "token" in error_str or "length" in error_str:
+                return ErrorClass.CONTEXT_OVERFLOW
+            return ErrorClass.FATAL
+    return ErrorClass.RETRYABLE  # conservative default: try once more
+```
+
+## Retry with classification-aware policy
+
+```python
+import asyncio
+import random
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def call_with_policy(
+    client,
+    request: dict,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+) -> dict:
+    last_exc = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return await asyncio.wait_for(client.generate(request), timeout=30.0)
+
+        except asyncio.TimeoutError as exc:
+            error_class = ErrorClass.TIMEOUT
+            last_exc = exc
+            if attempt == 0:  # retry once with longer timeout
+                await asyncio.sleep(1.0)
+                continue
+            break  # give up after second timeout
+
+        except Exception as exc:
+            error_class = classify_provider_error(exc)
+            last_exc = exc
+
+            if error_class == ErrorClass.FATAL:
+                logger.error("provider_fatal_error", extra={
+                    "attempt": attempt, "error": str(exc), "class": error_class.value
+                })
+                raise  # do not retry
+
+            if error_class == ErrorClass.CONTEXT_OVERFLOW:
+                raise  # caller must trim the prompt
+
+            # RETRYABLE: exponential backoff with jitter
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+                logger.warning("provider_retry", extra={
+                    "attempt": attempt + 1,
+                    "max_retries": max_retries,
+                    "delay_s": round(delay, 2),
+                    "error": str(exc),
+                })
+                await asyncio.sleep(delay)
+
+    raise last_exc
+```
+
+## Fallback chains
+
+When retries are exhausted, a fallback chain tries alternative options before returning a user-visible error:
+
+```python
+async def generate_with_fallback(
+    request: dict,
+    primary: ProviderClient,
+    fallback: ProviderClient,
+    cache: TTLCache | None = None,
+) -> dict:
+    # Check cache first
+    if cache:
+        cached = cache.get(request)
+        if cached is not None:
+            return {**cached, "source": "cache"}
+
+    # Try primary
+    try:
+        result = await call_with_policy(primary, request)
+        if cache:
+            cache.set(request, result)
+        return result
+    except Exception as primary_exc:
+        logger.warning("primary_provider_failed_trying_fallback", extra={"error": str(primary_exc)})
+
+    # Try fallback (no cache write — fallback results may be lower quality)
+    try:
+        return await call_with_policy(fallback, {**request, "model": "gpt-4o-mini"})
+    except Exception as fallback_exc:
+        logger.error("all_providers_failed", extra={"fallback_error": str(fallback_exc)})
+        raise RuntimeError("All providers unavailable") from fallback_exc
+```
+
+## Surface meaningful errors without leaking internals
+
+Users should see a useful message. Your logs should see the full context. Application code should see a typed exception.
+
+```python
+class AIServiceError(Exception):
+    def __init__(self, user_message: str, internal_context: dict):
+        super().__init__(user_message)
+        self.user_message = user_message
+        self.internal_context = internal_context
+
+    def log(self, logger) -> None:
+        logger.error("ai_service_error", extra=self.internal_context)
+
+
+# In the request handler:
+try:
+    result = await generate_with_fallback(request, primary, fallback)
+except RuntimeError as exc:
+    service_error = AIServiceError(
+        user_message="I'm having trouble connecting to the AI service. Please try again in a moment.",
+        internal_context={"request_id": request.get("id"), "error": str(exc)},
+    )
+    service_error.log(logger)
+    return {"error": service_error.user_message}
+```
+
+## Common mistakes
+
+**One retry policy for all errors.** Retrying a 400 Bad Request three times burns quota and adds 3-9 seconds of unnecessary latency. Classify first, then apply the right policy.
+
+**Swallowing exceptions without logging context.** `except Exception: return None` hides failures. Always log the error class, request ID, attempt count, and provider name before returning a fallback.
+
+**Not respecting `Retry-After` headers.** Many 429 responses include a `Retry-After` header with the seconds until the rate limit resets. Ignoring it and using a fixed backoff can still cause 429s if your backoff is shorter than the reset window.
+
+**Fallback to same model with same payload.** A fallback that makes the exact same call to a different client often gets the same error. When falling back, also reduce the request (smaller model, fewer tokens, simpler prompt) to improve the fallback success rate.
+
+## The practical rule
+
+Build your error handling with three answers ready before writing any code:
+
+1. What is retryable and what is fatal for this provider?
+2. What is the fallback when retries are exhausted?
+3. What does the user see, and what does the log record?
+""",
+        "source_links_json": [
+            "https://platform.openai.com/docs/guides/error-codes",
+            "https://docs.anthropic.com/en/api/errors",
+        ],
+        "tags_json": ["python", "error-handling", "retry-policy", "resilience", "providers"],
+    },
+    {
+        "title": "Async patterns for high-throughput AI data pipelines",
+        "slug": "async-patterns-high-throughput-ai-pipelines",
+        "category": "python",
+        "summary": "Producer-consumer queues, backpressure, fan-out with semaphores, and the operational tradeoffs between asyncio and multiprocessing for AI workloads.",
+        "content_md": """\
+## Async Patterns for High-Throughput AI Data Pipelines
+
+`asyncio.gather` with a semaphore handles most AI batch jobs. But as pipelines grow — multiple stages, mixed CPU and I/O work, producer-consumer relationships, downstream rate limits — the simple gather pattern breaks down. This article covers the patterns that scale.
+
+## When gather + semaphore is not enough
+
+The basic pattern handles one stage well:
+
+```python
+results = await asyncio.gather(
+    *[process_one(item) for item in items],
+    return_exceptions=True,
+)
+```
+
+It breaks down when:
+
+- **Stages have different rates.** A document parser (CPU-bound, fast) feeds an embedding API (I/O-bound, slow). The parser can overwhelm the embedder if they are tightly coupled.
+- **Output needs to stream to a downstream system.** Waiting for all 10,000 items to complete before writing to the database wastes memory and delays output.
+- **The pipeline has more than two stages.** Gather is a fan-out, not a pipeline. For sequential stages, you need a different pattern.
+
+## Producer-consumer with asyncio.Queue
+
+The `asyncio.Queue` pattern decouples stages and provides natural backpressure:
+
+```python
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def producer(items: list[dict], queue: asyncio.Queue) -> None:
+    for item in items:
+        await queue.put(item)  # blocks if queue is full (backpressure)
+    await queue.put(None)  # sentinel: producer is done
+
+
+async def consumer(
+    queue: asyncio.Queue,
+    output_queue: asyncio.Queue,
+    client,
+    semaphore: asyncio.Semaphore,
+) -> None:
+    while True:
+        item = await queue.get()
+        if item is None:
+            await output_queue.put(None)  # forward sentinel
+            queue.task_done()
+            return
+        async with semaphore:
+            try:
+                result = await asyncio.wait_for(client.process(item), timeout=30.0)
+                await output_queue.put(result)
+            except Exception as exc:
+                logger.warning("consumer_error", extra={"id": item.get("id"), "error": str(exc)})
+        queue.task_done()
+
+
+async def writer(output_queue: asyncio.Queue, output_path: str) -> int:
+    import json
+    from pathlib import Path
+    count = 0
+    with Path(output_path).open("w") as f:
+        while True:
+            result = await output_queue.get()
+            if result is None:
+                return count
+            f.write(json.dumps(result) + "\\n")
+            count += 1
+            output_queue.task_done()
+```
+
+The `maxsize` parameter on `asyncio.Queue(maxsize=N)` creates backpressure: if the consumer is slower than the producer, `await queue.put()` blocks the producer until space is available. Without `maxsize`, the queue grows without bound and consumes all available memory.
+
+## Fan-out with per-stage semaphores
+
+When a pipeline has multiple parallel stages with different rate limits:
+
+```python
+async def run_pipeline(
+    items: list[dict],
+    embedding_client,
+    llm_client,
+    embed_concurrency: int = 10,
+    llm_concurrency: int = 3,
+) -> list[dict]:
+    embed_sem = asyncio.Semaphore(embed_concurrency)
+    llm_sem = asyncio.Semaphore(llm_concurrency)
+
+    async def process_one(item: dict) -> dict:
+        # Stage 1: embed (higher concurrency, cheaper API)
+        async with embed_sem:
+            embedding = await embedding_client.embed(item["text"])
+
+        # Stage 2: generate (lower concurrency, expensive API)
+        async with llm_sem:
+            result = await llm_client.generate(
+                prompt=build_prompt(item["text"], embedding)
+            )
+        return {**item, "embedding": embedding, "result": result}
+
+    raw = await asyncio.gather(*[process_one(i) for i in items], return_exceptions=True)
+    return [r for r in raw if not isinstance(r, Exception)]
+```
+
+Each stage has its own semaphore sized to that stage's rate limit. The embedding API might support 10 concurrent requests; the LLM API might only support 3. Both constraints are enforced without coupling.
+
+## asyncio vs multiprocessing: when to use each
+
+The choice is determined by whether your bottleneck is I/O or CPU:
+
+| Bottleneck | Pattern | Reason |
+|---|---|---|
+| Provider API calls | `asyncio.gather` + `Semaphore` | I/O-bound: async is ideal |
+| Embedding API calls | `asyncio.gather` + `Semaphore` | I/O-bound |
+| Document parsing (text extraction) | `ProcessPoolExecutor` | CPU-bound: GIL prevents threading |
+| Tokenization for large corpora | `ProcessPoolExecutor` | CPU-bound |
+| Mixed: parse then embed | `to_thread` for parsing, `asyncio` for I/O | Blend both |
+
+```python
+import asyncio
+from concurrent.futures import ProcessPoolExecutor
+
+
+def parse_document(path: str) -> dict:
+    # CPU-intensive: runs in a subprocess, no GIL contention
+    text = extract_text_from_pdf(path)
+    return {"path": path, "text": text}
+
+
+async def pipeline(paths: list[str], embedding_client) -> list[dict]:
+    sem = asyncio.Semaphore(8)
+    loop = asyncio.get_event_loop()
+
+    async def process_one(path: str) -> dict:
+        # Run CPU work in a process pool
+        parsed = await loop.run_in_executor(None, parse_document, path)
+        # Run I/O work with asyncio
+        async with sem:
+            embedding = await embedding_client.embed(parsed["text"])
+        return {**parsed, "embedding": embedding}
+
+    results = await asyncio.gather(*[process_one(p) for p in paths], return_exceptions=True)
+    return [r for r in results if not isinstance(r, Exception)]
+```
+
+`loop.run_in_executor(None, fn, *args)` runs a synchronous function in the default `ThreadPoolExecutor`. For CPU-intensive work, pass a `ProcessPoolExecutor` explicitly.
+
+## Monitoring pipeline health
+
+For long-running pipelines, log progress periodically rather than at completion:
+
+```python
+async def monitored_pipeline(items: list[dict], client) -> list[dict]:
+    sem = asyncio.Semaphore(5)
+    results = []
+    processed = 0
+
+    async def _one(item: dict) -> dict:
+        nonlocal processed
+        async with sem:
+            result = await client.process(item)
+            processed += 1
+            if processed % 100 == 0:
+                logger.info("pipeline_progress", extra={
+                    "processed": processed,
+                    "total": len(items),
+                    "pct": round(100 * processed / len(items), 1),
+                })
+            return result
+
+    raw = await asyncio.gather(*[_one(i) for i in items], return_exceptions=True)
+    return [r for r in raw if not isinstance(r, Exception)]
+```
+
+Progress logging every N items is essential for long-running pipelines. Without it, a 10,000-item run with no output for 30 minutes looks like a hang.
+
+## The practical checklist for any async pipeline
+
+1. **Set `maxsize` on all queues** — unbounded queues are memory leaks waiting for a slow consumer.
+2. **Set a timeout on every `await` that touches the network** — use `asyncio.wait_for`.
+3. **Use `return_exceptions=True` in every `gather`** — one failure should not cancel 999 others.
+4. **Size semaphores to provider rate limits, not throughput goals** — the rate limit is a constraint, not a dial.
+5. **Log progress every N items for runs longer than 1 minute** — progress visibility prevents false "it hung" diagnoses.
+""",
+        "source_links_json": [
+            "https://docs.python.org/3/library/asyncio-queue.html",
+            "https://docs.python.org/3/library/concurrent.futures.html",
+        ],
+        "tags_json": ["python", "async", "concurrency", "pipeline", "performance"],
+    },
+]
 
 
 def build_articles():
@@ -23567,6 +25528,786 @@ for category, role_type, difficulty, question_text, outline in INTERVIEW_PROMPTS
             "tags_json": ["phase-1", "interview", category],
         }
     )
+
+
+# ── Python-for-AI interview questions ────────────────────────────────────────
+INTERVIEW_QUESTIONS += [
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you handle LLM structured output failures in production? Walk me through your validation and recovery strategy.",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you treat LLM structured output as unreliable by design — not by assuming it will mostly work and adding ad-hoc fixes when it doesn't. Strong candidates have a layered defense that handles the predictable failure modes systematically.
+
+## The failure modes to acknowledge
+
+Start by naming the failures that actually occur in production — this signals operational experience:
+
+1. **JSON wrapped in markdown fences** — ` ```json {...} ``` ` instead of raw JSON
+2. **Extra prose surrounding the JSON** — "Here is the result: {...}"
+3. **Missing required fields** — the model omits a field that was in the schema
+4. **Wrong field types** — `"3"` instead of `3`, `null` instead of an empty list
+5. **Empty or whitespace-only responses** — the model returns nothing useful
+6. **Schema drift** — the model's interpretation of the schema changes between runs or between model versions
+
+## The three-layer response
+
+**Layer 1: Constrain the prompt.** Use `response_format: {"type": "json_object"}` where supported. Include a concrete example of the expected JSON in the prompt. Put the format constraint in the system prompt, not just the user message.
+
+**Layer 2: Robust parsing.** Never call `json.loads()` directly on LLM output. Build a parser that:
+
+```python
+def parse_llm_json(raw: str, model_class: type[BaseModel]) -> BaseModel | None:
+    text = raw.strip()
+    # Strip markdown fences
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\\n?", "", text)
+        text = re.sub(r"\\n?```$", "", text.strip())
+    # Find outermost JSON structure
+    match = re.search(r"(\\{[\\s\\S]*\\}|\\[[\\s\\S]*\\])", text)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(1))
+        return model_class.model_validate(data)
+    except (json.JSONDecodeError, ValidationError):
+        return None
+```
+
+**Layer 3: Explicit failure handling.** Return a typed result that distinguishes success from failure. Do not raise — let the caller decide whether to retry, log, or use a fallback:
+
+```python
+@dataclass
+class ParseResult:
+    success: bool
+    data: BaseModel | None
+    error: str | None
+```
+
+## Retry strategy for parsing failures
+
+Not all failures warrant a retry:
+- Missing optional field: use default value, do not retry
+- Missing required field: retry once with a stronger format constraint in the prompt
+- Malformed JSON: retry once; if it fails again, escalate
+- Empty content: log and skip — retrying usually produces the same empty result
+
+## Monitoring
+
+Track structured output failure rates as a metric. A rate above 5% signals the prompt needs work. Above 15%, the feature is unreliable by any measure. Alert on week-over-week increases — they often indicate a provider model update.
+
+## Interview takeaway
+
+The theme is: validation is not optional for LLM outputs. Build the parser once, reuse it everywhere, and monitor its failure rate. When the failure rate rises, improve the prompt — not the parser.
+""",
+        "tags_json": ["python", "llm-output", "validation", "pydantic", "production"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "Explain how you implement retry logic for provider API calls. What is different about retrying AI provider calls versus retrying a standard REST API?",
+        "answer_outline_md": """\
+## What this question tests
+
+This question separates engineers who have copy-pasted a generic retry decorator from those who have thought about why AI provider retries are specifically challenging. The key insight is that not all errors are retryable, and retrying the wrong errors makes things worse.
+
+## What makes AI provider retries different
+
+**The error taxonomy matters more.** A standard REST API might have one or two error types that warrant retries. AI providers have several distinct categories that require different handling:
+
+| Error | Retry? | Why |
+|---|---|---|
+| 429 Rate limit | Yes, with backoff | Provider is throttling you |
+| 503 Service unavailable | Yes, 2-3 times | Provider is temporarily overloaded |
+| 500 Server error | Once | Might be transient, might not be |
+| 400 Bad request | Never | Retrying a bad request wastes quota |
+| 401 Auth failure | Never | The key is wrong — retrying won't fix it |
+| Context overflow | Never | The prompt is too long — retrying doesn't help |
+
+**The cost of a retry.** A retried LLM call costs input tokens again. A 400-token prompt retried 3 times costs 1200 tokens instead of 400. Thoughtless retries on fatal errors are money-burning loops.
+
+**Rate limit backoff is more complex.** Provider rate limits often include a `Retry-After` header. Your backoff must respect that value — not just add a fixed delay.
+
+## The correct implementation shape
+
+```python
+async def call_with_retry(
+    client,
+    request: dict,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+) -> dict:
+    last_exc = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return await asyncio.wait_for(client.generate(request), timeout=30.0)
+        except asyncio.TimeoutError as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                await asyncio.sleep(base_delay)
+            continue
+        except ProviderError as exc:
+            if exc.status_code in (400, 401, 403):
+                raise  # fatal: do not retry
+            if exc.status_code == 429:
+                retry_after = float(exc.headers.get("Retry-After", base_delay * (2 ** attempt)))
+                await asyncio.sleep(retry_after + random.uniform(0, 0.5))
+            elif exc.status_code in (500, 503):
+                await asyncio.sleep(base_delay * (2 ** attempt) + random.uniform(0, 0.5))
+            last_exc = exc
+
+    raise last_exc
+```
+
+## The jitter detail
+
+Pure exponential backoff without jitter causes thundering herd problems when multiple coroutines hit a rate limit simultaneously and all back off by the exact same amount — they will all retry at the same time again. Adding `random.uniform(0, 0.5)` scatters the retries across a half-second window.
+
+## Separating retry from application logic
+
+The retry logic belongs in a wrapper around the provider client — not in the application code that calls it. The application code should not know about retry counts or backoff strategies. This keeps the retry policy in one place and makes it easy to test independently.
+
+## Interview takeaway
+
+Know the error taxonomy for your providers. Know which errors are retryable and which are fatal. Implement classification before deciding on retry. And always include jitter to prevent thundering herd effects.
+""",
+        "tags_json": ["python", "retry-policy", "error-handling", "providers", "async"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you build memory-efficient data pipelines in Python for large AI datasets? What is the role of generators?",
+        "answer_outline_md": """\
+## What this question tests
+
+This question is asking whether you understand that list comprehensions and `results = []` accumulation patterns break at AI dataset scale. The interviewer wants to see the generator pipeline pattern and understand when to apply it.
+
+## The core problem with lists
+
+A list comprehension like `chunks = [chunk for doc in docs for chunk in split(doc)]` materializes all results in memory at once. For 1 million documents, this means hundreds of gigabytes of RAM. For 100GB JSONL files, it means the process crashes.
+
+Generators solve this by yielding one item at a time. The key insight: Python's `for` loop pulls from an iterator lazily — the entire pipeline processes one item at a time, not all items simultaneously.
+
+## The generator pipeline pattern
+
+```python
+from pathlib import Path
+from typing import Iterator
+import json
+
+
+def read_jsonl(path: Path) -> Iterator[dict]:
+    with path.open() as f:
+        for line in f:
+            if line.strip():
+                yield json.loads(line)
+
+
+def filter_valid(records: Iterator[dict]) -> Iterator[dict]:
+    for r in records:
+        if r.get("body") and len(r["body"]) >= 100:
+            yield r
+
+
+def normalize(records: Iterator[dict]) -> Iterator[dict]:
+    for r in records:
+        yield {"id": r["id"], "text": r["body"].strip()}
+
+
+def write_jsonl(records: Iterator[dict], path: Path) -> int:
+    count = 0
+    with path.open("w") as f:
+        for record in records:
+            f.write(json.dumps(record) + "\\n")
+            count += 1
+    return count
+
+
+# Usage: processes one record at a time, constant memory
+pipeline = normalize(filter_valid(read_jsonl(Path("input.jsonl"))))
+total = write_jsonl(pipeline, Path("output.jsonl"))
+```
+
+The critical detail: `write_jsonl` pulls from `normalize`, which pulls from `filter_valid`, which pulls from `read_jsonl`. Python's iterator protocol means the entire pipeline processes one record at a time. Peak memory is roughly the size of one record, not the entire dataset.
+
+## When to use `yield from`
+
+For document chunking — one document producing multiple chunks — use `yield from`:
+
+```python
+def stream_chunks(docs: Iterator[dict]) -> Iterator[dict]:
+    for doc in docs:
+        yield from split_into_chunks(doc)  # each doc yields multiple chunks
+```
+
+## Batching within a generator pipeline
+
+Some downstream operations (like embedding APIs) want batches, not single items. Add a batching generator stage:
+
+```python
+def batch(items: Iterator[dict], size: int) -> Iterator[list[dict]]:
+    current = []
+    for item in items:
+        current.append(item)
+        if len(current) >= size:
+            yield current
+            current = []
+    if current:
+        yield current
+```
+
+This composes cleanly: `batch(normalize(filter_valid(read_jsonl(path))), size=100)` yields lists of 100 records, one batch at a time.
+
+## When NOT to use generators
+
+Generators trade memory for CPU overhead (the iterator protocol has some overhead per item). For small datasets (under 10K records), a list comprehension is simpler and the memory difference is irrelevant. Use generators when:
+
+- Input size is unknown or unbounded
+- Peak memory is a constraint (shared servers, containers with memory limits)
+- You need to start writing output before all input is processed
+
+## Interview takeaway
+
+Demonstrate that you understand the lazy evaluation model: composing generators means composing iterators. The pipeline processes one item at a time regardless of how many stages it has. This is the standard pattern for large-scale data work in Python.
+""",
+        "tags_json": ["python", "generators", "pipeline", "memory-efficiency", "data-engineering"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How do you design a Python-based AI service to be observable from day one? What do you instrument and why?",
+        "answer_outline_md": """\
+## What this question tests
+
+Observability for AI services is different from observability for standard web services. The interviewer wants to see that you understand what AI-specific data is worth capturing, not just that you know how to add logging.
+
+## What AI observability adds to standard observability
+
+A standard service observes: request count, latency, error rate, HTTP status codes. These are necessary but insufficient for AI services. You also need to observe:
+
+- **Which model and version produced each response** — model performance changes silently with provider updates
+- **Token counts per request** — input and output tokens separately (they are priced differently and have different performance implications)
+- **Cost per request and per feature** — LLM cost is not flat like compute cost
+- **Finish reason** — `stop`, `length`, `content_filter` — tells you whether the model completed normally or was truncated
+- **Validation outcomes** — how often structured output parsing fails, and why
+- **Retrieval quality signals** — for RAG: how many chunks were retrieved, what scores they had, whether the user's question matched any of them
+- **Cache hit rate** — for any caching layer in front of the provider
+
+## The structured logging approach
+
+Structured log events (key-value pairs, not freeform strings) are queryable. A log query like "find all requests with `finish_reason: length` and `model: gpt-4o-mini`" is only possible with structured events:
+
+```python
+logger.info("llm_request_complete", extra={
+    "request_id": request_id,
+    "model": model,
+    "input_tokens": response.usage.prompt_tokens,
+    "output_tokens": response.usage.completion_tokens,
+    "latency_ms": int((time.monotonic() - start) * 1000),
+    "finish_reason": response.choices[0].finish_reason,
+    "estimated_cost_usd": calculate_cost(model, input_tokens, output_tokens),
+    "feature": feature_name,
+})
+```
+
+## The four observability layers for AI
+
+**Layer 1: Provider call instrumentation.** Every call to a provider records: model, latency, token counts, finish reason, and whether it was a retry or a cache hit. This is the foundational layer — everything else is built on top of it.
+
+**Layer 2: Pipeline stage instrumentation.** For multi-stage pipelines (retrieve → rerank → generate), each stage records its own latency and any quality signals (retrieval scores, reranker scores). This lets you identify which stage is slow or degraded.
+
+**Layer 3: Structured output validation.** Log parse successes and failures separately. A rising parse failure rate often means a provider model update changed behavior.
+
+**Layer 4: Feature-level aggregation.** Aggregate token cost and latency by feature name. This answers "which feature costs the most per user?" — the question that drives optimization investment.
+
+## Traces vs logs
+
+For agent systems and multi-step pipelines, logs are insufficient. You need traces — correlated events that share a trace ID and show the causal sequence:
+
+```python
+import uuid
+
+trace_id = str(uuid.uuid4())
+
+# Each stage logs with the trace_id
+logger.info("retrieval_complete", extra={"trace_id": trace_id, "chunks": 5, "top_score": 0.87})
+logger.info("generation_complete", extra={"trace_id": trace_id, "output_tokens": 342, "latency_ms": 1200})
+```
+
+With a shared `trace_id`, you can reconstruct the full request path from a single query.
+
+## Common observability omissions
+
+**Only logging on errors.** Success paths are as important — you need baseline latency and cost to recognize when they change.
+
+**Not logging token counts.** Token count is the primary cost driver. Without it, you cannot do cost attribution.
+
+**Not logging the model name.** Provider calls from different parts of the application may use different models. Without the model name, you cannot distinguish their behavior in logs.
+
+**Using `print()` instead of structured logging.** Print is fine in notebooks. In services, structured logging gives you queryability, log level filtering, and integration with centralized log platforms.
+
+## Interview takeaway
+
+Observability for AI services is not an afterthought — it is the infrastructure that lets you diagnose quality regressions, attribute costs, and build confidence that the system is behaving correctly. Design it in before the first deploy.
+""",
+        "tags_json": ["python", "observability", "logging", "monitoring", "production"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How do you write Python code for AI systems that is testable without live provider API calls?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you design for testability from the start — not that you know how to mock HTTP calls after the fact. The key insight is that dependency injection at the provider interface level is simpler and more reliable than HTTP-level mocking.
+
+## The dependency injection approach
+
+The cleanest testable architecture depends on an abstract interface, not a concrete provider SDK:
+
+```python
+from abc import ABC, abstractmethod
+from pydantic import BaseModel
+
+
+class GenerateRequest(BaseModel):
+    prompt: str
+    model: str = "gpt-4o-mini"
+    max_tokens: int = 1024
+
+
+class GenerateResponse(BaseModel):
+    text: str
+    input_tokens: int
+    output_tokens: int
+    model: str
+
+
+class LLMProvider(ABC):
+    @abstractmethod
+    async def generate(self, request: GenerateRequest) -> GenerateResponse: ...
+```
+
+Application code accepts `LLMProvider`, never `OpenAI`. Tests inject a `MockProvider`:
+
+```python
+class MockProvider(LLMProvider):
+    def __init__(self, responses: list[str] | None = None) -> None:
+        self._responses = responses or ["mock response"]
+        self._index = 0
+        self.calls: list[GenerateRequest] = []
+
+    async def generate(self, request: GenerateRequest) -> GenerateResponse:
+        self.calls.append(request)
+        text = self._responses[self._index % len(self._responses)]
+        self._index += 1
+        return GenerateResponse(
+            text=text,
+            input_tokens=len(request.prompt.split()),
+            output_tokens=len(text.split()),
+            model="mock",
+        )
+```
+
+In tests:
+
+```python
+async def test_summarizer_uses_correct_prompt():
+    mock = MockProvider(responses=["Summary: This document is about AI."])
+    summarizer = DocumentSummarizer(provider=mock)
+    result = await summarizer.summarize("This is a document about AI engineering.")
+    assert "Summary" in result
+    assert len(mock.calls) == 1
+    assert "document" in mock.calls[0].prompt.lower()
+```
+
+No HTTP mocking. No VCR cassettes. No test isolation issues from shared mock state.
+
+## Testing structured output parsing separately
+
+The JSON parsing logic should be tested independently from the provider call:
+
+```python
+def test_parse_llm_json_strips_fences():
+    raw = '```json\\n{"name": "Alice", "score": 0.9}\\n```'
+    result = parse_llm_json(raw, PersonScore)
+    assert result is not None
+    assert result.name == "Alice"
+
+def test_parse_llm_json_returns_none_on_invalid():
+    result = parse_llm_json("No JSON here", PersonScore)
+    assert result is None
+```
+
+Testing parsing in isolation means you can iterate on the parser without needing a provider call every time.
+
+## Deterministic fakes for eval runs
+
+For evaluation harnesses, a deterministic fake that returns predictable outputs is more useful than a random mock:
+
+```python
+class DeterministicProvider(LLMProvider):
+    def __init__(self, response_map: dict[str, str]) -> None:
+        # Maps prompt substring -> response
+        self._map = response_map
+
+    async def generate(self, request: GenerateRequest) -> GenerateResponse:
+        for key, response in self._map.items():
+            if key in request.prompt:
+                return GenerateResponse(text=response, input_tokens=10, output_tokens=5, model="deterministic")
+        return GenerateResponse(text="default response", input_tokens=10, output_tokens=3, model="deterministic")
+```
+
+This lets you write eval tests that assert specific outputs for specific input patterns without live calls.
+
+## Integration tests with real providers
+
+Unit tests use mocks. Integration tests use real providers but in a controlled way:
+
+- Run integration tests in CI only on specific branches (not every commit)
+- Use a dedicated low-cost model (gpt-4o-mini or claude-3-haiku) for integration tests
+- Assert on response structure, not response content (content is non-deterministic)
+- Track integration test costs as a budget line
+
+## Interview takeaway
+
+Design for testability by depending on abstractions, not implementations. The abstract `LLMProvider` interface is the seam that makes the system testable. The mock provider is just a fast, deterministic implementation of that interface. Nothing special about it.
+""",
+        "tags_json": ["python", "testing", "mocking", "dependency-injection", "tdd"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How do you manage token budget across multiple components in a prompt — system prompt, retrieved context, conversation history, and user input?",
+        "answer_outline_md": """\
+## What this question tests
+
+This is a practical question about prompt assembly engineering. The interviewer wants to see a systematic approach to token budget management — not ad-hoc trimming after context overflow errors.
+
+## The core problem
+
+A model with a 16K context window sounds large until you add up all the components:
+
+- System prompt: 300-800 tokens (grows organically)
+- Retrieved context (RAG): 2,000-6,000 tokens
+- Conversation history: 0 to unbounded
+- Current user input: varies
+- Output reservation: 1,000-2,000 tokens
+
+These components compete for the same fixed budget. Without explicit allocation, the most recently added component (often history) silently consumes budget meant for retrieved context, degrading answer quality.
+
+## Priority ordering
+
+The first design decision is priority: which components are more important when the budget is tight?
+
+**Recommended priority (highest to lowest):**
+
+1. System prompt — always include in full; if it is too large, trim it offline
+2. Current user input — always include; this is the request you are answering
+3. Output reservation — reserve this explicitly before allocating anything else
+4. Retrieved context — high priority for RAG features; include the highest-scored chunks first
+5. Conversation history — lowest priority; drop oldest turns first when budget is tight
+
+This ordering means context overflow manifests as shorter history, not as missing retrieved evidence or missing system instructions.
+
+## The budget manager pattern
+
+```python
+class PromptBudget:
+    def __init__(self, total_tokens: int, reserve_output: int = 1024) -> None:
+        self._available = total_tokens - reserve_output
+        self._allocations: dict[str, int] = {}
+
+    def consume(self, label: str, text: str, required: bool = False) -> bool:
+        tokens = count_tokens(text)
+        if tokens > self._available:
+            if required:
+                raise ValueError(f"Required component '{label}' exceeds budget")
+            return False
+        self._available -= tokens
+        self._allocations[label] = tokens
+        return True
+
+    def fit_items(self, items: list[str]) -> list[str]:
+        selected = []
+        for item in items:
+            tokens = count_tokens(item)
+            if tokens <= self._available:
+                self._available -= tokens
+                selected.append(item)
+        return selected
+```
+
+Usage in prompt assembly:
+
+```python
+budget = PromptBudget(total_tokens=16384, reserve_output=2000)
+budget.consume("system", system_prompt, required=True)
+budget.consume("user_input", user_query, required=True)
+
+# Retrieved chunks in score order (highest first)
+included_chunks = budget.fit_items(sorted_chunks)
+
+# History newest-first, drop oldest if needed
+included_history = []
+for msg in reversed(history):
+    if budget.consume(f"history", msg["content"]):
+        included_history.insert(0, msg)
+```
+
+## Logging the budget allocation
+
+Log the budget summary for every request. When users complain about incomplete answers, the first question is often "were all the context chunks included?":
+
+```python
+logger.info("prompt_budget", extra={
+    "system_tokens": budget._allocations.get("system"),
+    "user_tokens": budget._allocations.get("user_input"),
+    "context_chunks_included": len(included_chunks),
+    "history_turns_included": len(included_history),
+    "remaining_tokens": budget.remaining(),
+})
+```
+
+## Common mistakes
+
+**Dynamic system prompts.** System prompts that grow with per-user customization can consume 2-3x more tokens than expected. Audit your system prompt token count as a metric, not just at design time.
+
+**No output reservation.** Allocating the entire context window to input means the model truncates at the beginning of its response. Reserve at least your P95 output token length.
+
+**Not logging which chunks were dropped.** When budget is tight and chunks are dropped, you need to know — without logs, a missing chunk looks like a retrieval failure, not a budget failure.
+
+## Interview takeaway
+
+Prompt budget management is an engineering discipline, not an afterthought. The key design decisions are priority order (what gets cut first) and where the reservation lives (always subtract output budget before allocating anything). Build a budget manager, use it for every prompt assembly, and log the allocation summary on every request.
+""",
+        "tags_json": ["python", "token-counting", "prompt-engineering", "context-management", "budget"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "What Python patterns do you use to make AI pipeline scripts safe to rerun and safe to interrupt?",
+        "answer_outline_md": """\
+## What this question tests
+
+This is an operational engineering question. The interviewer wants to see that you have run AI pipelines in production — scheduled ingestion runs, overnight dataset processing jobs, evaluation batch runs — and have built the reliability habits that come from that experience.
+
+## Why AI pipeline scripts need special care
+
+AI pipeline scripts are different from typical application code in three ways:
+
+1. **They run for a long time** — minutes to hours — so mid-run failures are common
+2. **They produce persistent outputs** — files, database rows, embeddings — that may be partially written on failure
+3. **They consume rate-limited, billed resources** — reprocessing everything from scratch on a rerun is expensive
+
+## The idempotency checklist
+
+An idempotent script produces the same result whether run once or ten times. For AI pipelines:
+
+**Check 1: Overwrite protection with explicit opt-in.**
+
+```python
+output_path = Path("output.jsonl")
+if output_path.exists() and not args.overwrite:
+    raise SystemExit(f"{output_path} already exists. Pass --overwrite to replace it.")
+```
+
+Never silently overwrite or silently skip. Make the choice explicit.
+
+**Check 2: Per-record failure capture.**
+
+```python
+processed, failed = [], []
+for record in records:
+    try:
+        result = transform(record)
+        processed.append(result)
+    except Exception as exc:
+        failed.append({"id": record.get("id"), "error": str(exc)})
+```
+
+A script that aborts on the first failure leaves you wondering which records were processed. Per-record capture lets you rerun only the failed subset.
+
+**Check 3: Atomic writes.**
+
+```python
+tmp_path = output_path.with_suffix(".tmp")
+try:
+    with tmp_path.open("w") as f:
+        for record in processed:
+            f.write(json.dumps(record) + "\\n")
+    tmp_path.replace(output_path)  # atomic on same filesystem
+finally:
+    if tmp_path.exists():
+        tmp_path.unlink(missing_ok=True)
+```
+
+A partial write followed by a crash leaves a corrupt output file. Writing to `.tmp` and renaming atomically ensures the output file is either complete or absent.
+
+**Check 4: Summary counts at the end.**
+
+```python
+print(f"Done: {len(processed)} processed, {len(failed)} failed")
+if failed:
+    Path("failures.jsonl").write_text("\\n".join(json.dumps(f) for f in failed))
+```
+
+Always print a final summary. "Done: 9,998 processed, 2 failed" is useful. Silence is not.
+
+## Skip-already-processed for resumable pipelines
+
+For very long pipelines where a mid-run restart is expected, track which IDs have been processed:
+
+```python
+completed_ids = set()
+if checkpoint_path.exists():
+    completed_ids = {json.loads(line)["id"] for line in checkpoint_path.open()}
+
+for record in records:
+    if record["id"] in completed_ids:
+        continue  # skip already-processed
+    result = process(record)
+    with checkpoint_path.open("a") as f:
+        f.write(json.dumps({"id": record["id"]}) + "\\n")
+```
+
+Append-mode checkpointing is crash-safe: a failed write mid-line corrupts at most one record, and you can detect it on load.
+
+## Interview takeaway
+
+Idempotency is not a nice-to-have for AI pipelines — it is what makes them operable. The four habits (overwrite protection, per-record failure capture, atomic writes, summary counts) are the minimum viable reliability contract for any script that touches production data.
+""",
+        "tags_json": ["python", "idempotency", "pipeline", "scripts", "reliability"],
+    },
+    {
+        "category": "python",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How do you use Python type annotations and Pydantic to build AI systems that are maintainable as they grow?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you use types as a design tool — not just as documentation. Strong candidates demonstrate that type annotations in AI systems catch real bugs, document contracts, and make refactoring safe.
+
+## The core principle: types at boundaries, data objects inside
+
+AI systems have a clear layered structure:
+
+1. **Boundary layer** — provider API responses, uploaded files, environment config, queue payloads
+2. **Transformation layer** — cleaning, scoring, filtering, reshaping data
+3. **Orchestration layer** — coordinating calls, managing state, branching
+4. **Review layer** — logs, traces, metrics
+
+The rule: use Pydantic models at boundaries (they validate and coerce). Use TypedDicts or dataclasses for data that is already trusted. Do not use raw `dict` anywhere — it hides what keys exist and what types they hold.
+
+## What Pydantic models give you at boundaries
+
+```python
+from pydantic import BaseModel, Field, model_validator
+
+
+class LLMResponse(BaseModel):
+    request_id: str = Field(min_length=1)
+    content: str
+    model: str
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    finish_reason: str = "stop"
+
+    @model_validator(mode="after")
+    def content_not_empty(self) -> "LLMResponse":
+        if not self.content.strip():
+            raise ValueError("Provider returned empty content")
+        return self
+```
+
+When `raw_response = provider.generate(...)` returns `{"content": null}`, you find out immediately at `LLMResponse.model_validate(raw_response)` — not three function calls later as an `AttributeError on NoneType`.
+
+## Discriminated unions for multiple providers
+
+When your system handles multiple providers, discriminated unions give you exhaustive type checking:
+
+```python
+from typing import Literal, Union, Annotated
+from pydantic import Field
+
+class OpenAIResponse(BaseModel):
+    provider: Literal["openai"] = "openai"
+    id: str
+    content: str
+
+class AnthropicResponse(BaseModel):
+    provider: Literal["anthropic"] = "anthropic"
+    id: str
+    text: str
+
+ProviderResponse = Annotated[
+    Union[OpenAIResponse, AnthropicResponse],
+    Field(discriminator="provider"),
+]
+```
+
+When you add a third provider, mypy will tell you every `match` statement or `if isinstance` block that needs a new branch.
+
+## Generics for reusable infrastructure
+
+For abstractions that should preserve type information:
+
+```python
+from typing import Generic, TypeVar
+
+T = TypeVar("T", bound=BaseModel)
+
+class PaginatedResult(BaseModel, Generic[T]):
+    items: list[T]
+    total: int
+    page: int
+    has_more: bool
+
+# Usage: the return type is precise, not Any
+def fetch_results(page: int) -> PaginatedResult[DocumentChunk]:
+    ...
+```
+
+`PaginatedResult[DocumentChunk]` tells callers exactly what is in `items`. `PaginatedResult[Any]` does not.
+
+## What `Any` costs you
+
+`Any` is a type annotation that opts out of checking. In AI systems, `Any` typically appears when:
+
+- A function returns `dict` instead of a typed model
+- A function accepts `payload: dict` instead of a typed request model
+- A Pydantic model has a field typed as `Optional[Any]`
+
+Each `Any` is a place where a type error will become a runtime error. For AI systems where provider schema changes are common, this means production bugs.
+
+## The practical contract
+
+In a well-typed AI service:
+- Functions that call providers return `ProviderResponse`, not `dict`
+- Functions that assemble prompts accept `GenerateRequest`, not `dict`
+- Functions that parse LLM output return `T | None`, not `dict | None`
+- Internal transformation functions accept and return typed dataclasses or TypedDicts
+
+When a provider changes their response format, the only place that changes is the Pydantic model at the boundary. The rest of the system does not need to change because it was never depending on the raw shape.
+
+## Interview takeaway
+
+Types in AI systems are not just documentation — they are the mechanism that localizes the impact of schema changes. Pydantic at boundaries means schema changes break in one predictable place. Generic types mean infrastructure can be reused without losing type information. Both habits are about making the system maintainable as it grows.
+""",
+        "tags_json": ["python", "type-safety", "pydantic", "generics", "maintainability"],
+    },
+]
 
 
 def build_interview_questions():
