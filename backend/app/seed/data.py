@@ -4246,6 +4246,705 @@ class IncrementalIndexer:
 Add timing instrumentation to your RAG pipeline that logs retrieval latency, generation latency, and total latency for every query. Run 50 queries and compute P50 and P95. Which step is the bottleneck? Now add a simple in-memory cache (a dict keyed by query hash with a 5-minute TTL) and re-run the same 50 queries. What is your cache hit rate if queries repeat? What does this tell you about the query distribution for your use case?
 """,
             },
+            {
+                "title": "Advanced RAG patterns",
+                "summary": "Go beyond naive RAG with multi-hop reasoning, self-checking retrieval loops, and corrective fallback strategies for hard questions.",
+                "estimated_minutes": 50,
+                "content_md": """\
+## Why this matters
+
+Naive RAG — embed query, retrieve top-k chunks, generate answer — works well for simple factual lookups. It fails on questions that require connecting information across multiple documents, questions where the first retrieval misses the relevant content, and questions where the retrieved chunks are confidently wrong. These are the exact cases that matter most in production: the complex, ambiguous, hard questions that users ask when they actually need the system.
+
+Advanced RAG patterns address three failure modes: insufficient reasoning depth (multi-hop RAG), overconfident generation on weak retrieval (self-RAG), and silent retrieval failure (corrective RAG). Understanding these patterns gives you the vocabulary and implementation tools to diagnose which failure mode your system has and apply the right fix.
+
+## Core concepts
+
+### Multi-hop RAG
+
+Multi-hop RAG handles questions that require combining information from multiple independent sources. The pattern: decompose the original question into sub-questions, retrieve independently for each sub-question, synthesize the intermediate answers into a final response.
+
+Example question: "Who founded the company that acquired DeepMind, and what was their original product?" This requires three retrieval steps: (1) who acquired DeepMind, (2) who founded that company, (3) what was their original product. A single retrieval pass will not surface all three pieces in one chunk.
+
+**Query decomposition** is the first step. You can use an LLM to generate sub-questions, or use explicit decomposition prompts. The key is making sub-questions independently answerable and covering the full information need.
+
+**Sequential vs parallel retrieval.** Some sub-questions depend on the answer to a previous one ("who founded [company X]" requires knowing company X first). Others are independent and can be retrieved in parallel. Identify dependencies before deciding the retrieval order.
+
+**Synthesis.** After collecting intermediate answers, use a final generation call with all intermediate answers in context to produce the combined response. The synthesis prompt should explicitly reference the intermediate answers.
+
+### Self-RAG
+
+Self-RAG adds a self-checking loop: after retrieving and generating, the model evaluates its own output for factual support. If the generated answer is not well-supported by the retrieved chunks, the system re-retrieves with a refined query and regenerates.
+
+The core insight: a generation that contradicts the retrieved context, or a context that the model is uncertain about, should trigger re-retrieval rather than being surfaced to the user. This is a quality gate inside the RAG loop.
+
+**Confidence signal.** You can implement confidence checking via a separate LLM call ("Does this answer follow directly from the context? Reply yes or no."), via log-probability analysis of the generated tokens, or via structured self-evaluation prompts that ask the model to rate its own confidence.
+
+**Re-retrieval strategy.** When confidence is low, generate a refined query based on what was missing. If the first query was "Python asyncio event loop" and the retrieved context was insufficient, the refined query might be "how Python asyncio event loop executes coroutines internally". Query refinement is the mechanism that makes re-retrieval more likely to succeed.
+
+**Loop limit.** Always cap the number of re-retrieval iterations. One or two retries is usually sufficient. More than that and you are likely dealing with a knowledge gap that no amount of re-retrieval will fix.
+
+### Corrective RAG
+
+Corrective RAG detects low-confidence retrieval early — before generation — and falls back to alternative retrieval strategies. The pattern: retrieve → score retrieval quality → if quality is low, apply fallback (web search, different index, query expansion) → then generate.
+
+**Retrieval quality signals:** average cosine similarity of top-k results (low similarity means the question is far from any indexed content), number of results below a similarity threshold, the spread of similarity scores (a large gap between result #1 and result #5 suggests sparse coverage).
+
+**Fallback strategies:** (1) web search — integrate a search API to retrieve live content when the index lacks the answer, (2) query expansion — generate query variants and re-retrieve, (3) broader scope — relax metadata filters and retrieve from a larger document set, (4) explicit "I don't know" — for very low confidence, return a structured no-answer rather than hallucinating.
+
+## Working example
+
+```python
+from __future__ import annotations
+from dataclasses import dataclass
+
+from openai import OpenAI
+
+client = OpenAI()
+
+
+@dataclass
+class RetrievalResult:
+    text: str
+    score: float
+    metadata: dict
+
+
+@dataclass
+class SelfRAGResult:
+    answer: str
+    iterations: int
+    final_confidence: str  # "high" | "low"
+    queries_used: list[str]
+
+
+def embed_query(query: str) -> list[float]:
+    resp = client.embeddings.create(model="text-embedding-3-small", input=query)
+    return resp.data[0].embedding
+
+
+def retrieve(query: str, index, top_k: int = 5) -> list[RetrievalResult]:
+    \"\"\"Retrieve top-k results from your vector index.\"\"\"
+    embedding = embed_query(query)
+    raw = index.query(embedding, top_k=top_k)
+    return [RetrievalResult(text=r["text"], score=r["score"], metadata=r["metadata"]) for r in raw]
+
+
+def generate_answer(query: str, context: str) -> str:
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Answer the question using only the provided context. Be precise."},
+            {"role": "user", "content": f"Context:\\n{context}\\n\\nQuestion: {query}"},
+        ],
+        temperature=0.1,
+        max_tokens=512,
+    )
+    return resp.choices[0].message.content
+
+
+def check_answer_confidence(query: str, context: str, answer: str) -> str:
+    \"\"\"Ask the model to self-evaluate whether the answer is well-supported. Returns 'high' or 'low'.\"\"\"
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a factual accuracy evaluator. Given a question, retrieved context, "
+                    "and a generated answer, decide if the answer is well-supported by the context. "
+                    "Reply with exactly one word: 'high' or 'low'."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Question: {query}\\n\\nContext:\\n{context}\\n\\nAnswer: {answer}\\n\\n"
+                    "Is this answer well-supported by the context? Reply 'high' or 'low'."
+                ),
+            },
+        ],
+        temperature=0,
+        max_tokens=5,
+    )
+    verdict = resp.choices[0].message.content.strip().lower()
+    return "high" if "high" in verdict else "low"
+
+
+def refine_query(original_query: str, previous_answer: str, context: str) -> str:
+    \"\"\"Generate a more targeted query based on what was missing from previous retrieval.\"\"\"
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a search query optimizer. Given an original question, a previous "
+                    "attempt at answering it, and the retrieved context, generate a more specific "
+                    "search query that would retrieve better information. Return only the query."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Original question: {original_query}\\n"
+                    f"Previous answer (low confidence): {previous_answer}\\n"
+                    "Retrieved context was insufficient. Write a better search query:"
+                ),
+            },
+        ],
+        temperature=0.3,
+        max_tokens=100,
+    )
+    return resp.choices[0].message.content.strip()
+
+
+def self_rag(query: str, index, max_iterations: int = 2, top_k: int = 5) -> SelfRAGResult:
+    \"\"\"
+    Self-RAG loop:
+    1. Retrieve context
+    2. Generate answer
+    3. Check confidence — if low and iterations remain, refine query and retry
+    \"\"\"
+    queries_used = [query]
+    current_query = query
+    answer = ""
+
+    for iteration in range(1, max_iterations + 1):
+        results = retrieve(current_query, index, top_k=top_k)
+        context = "\\n\\n---\\n\\n".join(r.text for r in results)
+        answer = generate_answer(query, context)  # Always answer the original question
+        confidence = check_answer_confidence(query, context, answer)
+
+        if confidence == "high" or iteration == max_iterations:
+            return SelfRAGResult(
+                answer=answer,
+                iterations=iteration,
+                final_confidence=confidence,
+                queries_used=queries_used,
+            )
+
+        refined = refine_query(query, answer, context)
+        queries_used.append(refined)
+        current_query = refined
+
+    return SelfRAGResult(answer=answer, iterations=max_iterations, final_confidence="low", queries_used=queries_used)
+
+
+def retrieval_quality_score(results: list[RetrievalResult]) -> float:
+    \"\"\"Average similarity score. Low score means the query is far from indexed content.\"\"\"
+    if not results:
+        return 0.0
+    return sum(r.score for r in results) / len(results)
+
+
+def web_search_fallback(query: str) -> list[RetrievalResult]:
+    \"\"\"
+    Placeholder for real web search (Brave, Tavily, Serper, etc.).
+    In production: call search API, fetch top pages, chunk and return.
+    \"\"\"
+    return [RetrievalResult(
+        text=f"[Web search result for: {query}] — integrate a real search API here.",
+        score=0.5,
+        metadata={"source": "web", "query": query},
+    )]
+
+
+def corrective_rag(query: str, index, quality_threshold: float = 0.4, top_k: int = 5) -> dict:
+    \"\"\"
+    Corrective RAG: evaluate retrieval quality before generation.
+    Falls back to web search if index retrieval quality is too low.
+    \"\"\"
+    results = retrieve(query, index, top_k=top_k)
+    quality = retrieval_quality_score(results)
+    used_fallback = False
+
+    if quality < quality_threshold:
+        results = web_search_fallback(query)
+        used_fallback = True
+
+    context = "\\n\\n---\\n\\n".join(r.text for r in results)
+    answer = generate_answer(query, context)
+
+    return {
+        "answer": answer,
+        "retrieval_quality": quality,
+        "used_fallback": used_fallback,
+        "sources": [r.metadata for r in results],
+    }
+```
+
+## Common mistakes
+
+1. **Unlimited self-RAG loops.** Without a max iteration cap, a low-confidence system will loop indefinitely. Always set `max_iterations=2` or `max_iterations=3` as an upper bound. Most quality gains happen in the first retry.
+
+2. **Re-querying with the same query.** If the first retrieval was poor, re-retrieving with the identical query returns the same results. Always refine the query before re-retrieval — that is the entire mechanism that makes self-RAG useful.
+
+3. **Using self-RAG for every query.** The extra LLM calls add 200-800ms and cost. Apply self-RAG selectively: only for queries where the stakes are high, or where initial retrieval quality is low. Gate it with a retrieval quality score first.
+
+4. **Treating all fallbacks as equivalent.** Web search returns unstructured, potentially irrelevant, potentially outdated content. Log clearly when fallback was used so you can evaluate whether fallback answers are actually better.
+
+5. **Multi-hop without dependency tracking.** If sub-question B depends on the answer to sub-question A, running them in parallel produces wrong inputs. Map the dependency graph before scheduling retrieval.
+
+## Try it yourself
+
+Take a RAG system you have built (or the one from the previous lesson). Write 10 test questions: 5 that your system answers well and 5 that it answers poorly (wrong, incomplete, or hallucinated). For the 5 poor answers, identify which pattern would fix each: multi-hop (question requires combining multiple sources), self-RAG (answer is generated but not well-supported), or corrective RAG (retrieval quality is low). Implement self-RAG for one of the poor cases and compare the output with and without the confidence-checking loop.
+""",
+            },
+            {
+                "title": "RAG with LangChain",
+                "summary": "Build production RAG pipelines using LangChain document loaders, text splitters, retrievers, and chains — and understand when to use LangChain versus a custom implementation.",
+                "estimated_minutes": 45,
+                "content_md": """\
+## Why this matters
+
+LangChain is the most widely used RAG framework in production Python codebases. Understanding it deeply matters for two reasons: (1) you will encounter it in existing codebases and need to debug it, and (2) it provides high-quality implementations of document loaders, text splitters, and retrievers that would take days to write from scratch. Knowing which abstractions are worth using and which ones add unnecessary complexity is the judgment that separates engineers who use frameworks well from those who fight them.
+
+This lesson covers the LangChain components that are genuinely useful — document loaders, text splitters, and retrievers — and shows you a complete RAG pipeline built with them. It also covers when to abandon LangChain abstractions and use direct API calls instead.
+
+## Core concepts
+
+### Document loaders
+
+LangChain's document loaders handle the messy work of reading content from different sources and normalizing it into `Document` objects (text + metadata). The most useful ones in practice:
+
+**PyPDFLoader** — extracts text from PDFs page by page. Each page becomes a `Document` with `page` and `source` metadata. Handles multi-page PDFs automatically.
+
+**WebBaseLoader** — fetches a URL and strips HTML to plain text using BeautifulSoup. Useful for indexing documentation sites or web content.
+
+**CSVLoader** — each row becomes a `Document`. Columns become metadata fields. Essential for structured data ingestion.
+
+**DirectoryLoader** — recursively loads all files in a directory matching a glob pattern. Useful for batch ingestion of a document corpus.
+
+The key advantage of loaders: they produce a consistent `Document` interface regardless of source format, so your chunking and embedding pipeline does not need to handle format-specific parsing.
+
+### Text splitters
+
+Text splitters divide `Document` objects into chunks. The two most important splitters:
+
+**RecursiveCharacterTextSplitter** — the default choice for most text. Tries to split on paragraph breaks (`\\n\\n`), then line breaks (`\\n`), then sentences (`. `), then spaces, then characters — always trying the coarsest split first. Produces naturally-bounded chunks that respect sentence and paragraph structure.
+
+**SemanticChunker** — uses embedding similarity between consecutive sentences to detect topic boundaries. Splits where similarity drops significantly. Produces chunks that each contain a single coherent topic. Higher quality but much more expensive: requires an embedding call per sentence.
+
+The critical parameters for `RecursiveCharacterTextSplitter`: `chunk_size` (target size in characters), `chunk_overlap` (characters shared between adjacent chunks), and `length_function` (character count by default, token count if you pass a tokenizer).
+
+### Retrievers
+
+LangChain's retriever interface makes it easy to swap search strategies without changing the rest of your pipeline. Every retriever exposes `get_relevant_documents(query: str) -> list[Document]`.
+
+**VectorStoreRetriever** — wraps any LangChain vector store (FAISS, Chroma, Pinecone, etc.) and does embedding-based similarity search. The default.
+
+**BM25Retriever** — keyword-based search using the BM25 algorithm. No embeddings, no API calls. Deterministic and fast. Excellent at exact matches and rare terms that embeddings miss.
+
+**EnsembleRetriever** — combines multiple retrievers with weighted score fusion. The standard setup is 70% vector store + 30% BM25, which consistently outperforms either alone on diverse query sets. This is the hybrid search pattern.
+
+**MultiQueryRetriever** — generates multiple phrasings of the original query using an LLM, retrieves independently for each, and deduplicates results. Increases recall at the cost of extra LLM calls.
+
+### LangChain chains vs custom implementation
+
+LangChain's LCEL (LangChain Expression Language) chains compose the retriever + prompt + LLM into a callable pipeline. They handle orchestration boilerplate and make the pipeline declarative.
+
+Use LangChain chains for: rapid prototyping, standard retrieve-then-generate patterns, built-in tracing via LangSmith.
+
+Write a custom implementation when: you need fine-grained control over prompt formatting, you want to add confidence checking or multi-hop logic (which chains make awkward), or LangChain abstractions obscure what is happening in a way that makes debugging harder.
+
+## Working example
+
+```python
+from __future__ import annotations
+
+from langchain_community.document_loaders import PyPDFLoader, WebBaseLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain.retrievers import BM25Retriever, EnsembleRetriever
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+
+
+# 1. Load documents
+
+def load_pdf(path: str) -> list:
+    return PyPDFLoader(path).load()  # list[Document], one per page
+
+
+def load_url(url: str) -> list:
+    return WebBaseLoader(url).load()
+
+
+# 2. Split into chunks
+
+def split_documents(docs: list, chunk_size: int = 800, overlap: int = 100) -> list:
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=overlap,
+        separators=["\\n\\n", "\\n", ". ", " ", ""],
+    )
+    return splitter.split_documents(docs)
+
+
+# 3. Build indexes
+
+def build_faiss_index(chunks: list, embeddings=None) -> FAISS:
+    if embeddings is None:
+        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    return FAISS.from_documents(chunks, embeddings)
+
+
+def build_ensemble_retriever(chunks: list, faiss_index: FAISS, k: int = 5) -> EnsembleRetriever:
+    \"\"\"
+    Combine FAISS (semantic) and BM25 (keyword) with 70/30 weighting.
+    EnsembleRetriever uses Reciprocal Rank Fusion to merge results.
+    \"\"\"
+    vector_retriever = faiss_index.as_retriever(search_kwargs={"k": k})
+    bm25_retriever = BM25Retriever.from_documents(chunks)
+    bm25_retriever.k = k
+    return EnsembleRetriever(retrievers=[vector_retriever, bm25_retriever], weights=[0.7, 0.3])
+
+
+# 4. Build RAG chain using LCEL
+
+RAG_PROMPT = ChatPromptTemplate.from_template(
+    \"\"\"Answer the question using only the provided context. If the context does not contain enough information, say "I don't have enough information."
+
+Context:
+{context}
+
+Question: {question}
+
+Answer:\"\"\"
+)
+
+
+def format_docs(docs: list) -> str:
+    return "\\n\\n---\\n\\n".join(
+        f"[Source: {doc.metadata.get('source', 'unknown')}, page {doc.metadata.get('page', '?')}]\\n{doc.page_content}"
+        for doc in docs
+    )
+
+
+def build_rag_chain(retriever, model: str = "gpt-4o-mini"):
+    llm = ChatOpenAI(model=model, temperature=0.1)
+    # LCEL: retriever -> format -> prompt -> LLM -> parse output
+    return (
+        {"context": retriever | format_docs, "question": RunnablePassthrough()}
+        | RAG_PROMPT
+        | llm
+        | StrOutputParser()
+    )
+
+
+# 5. Full pipeline: load -> split -> index -> query
+
+def build_rag_pipeline(pdf_path: str) -> dict:
+    raw_docs = load_pdf(pdf_path)
+    chunks = split_documents(raw_docs, chunk_size=800, overlap=100)
+    print(f"Loaded {len(raw_docs)} pages -> {len(chunks)} chunks")
+
+    faiss_index = build_faiss_index(chunks)
+    retriever = build_ensemble_retriever(chunks, faiss_index, k=5)
+    chain = build_rag_chain(retriever)
+
+    return {"chain": chain, "retriever": retriever, "faiss_index": faiss_index, "chunk_count": len(chunks)}
+
+
+# 6. Usage
+
+if __name__ == "__main__":
+    pipeline = build_rag_pipeline("your_document.pdf")
+    chain = pipeline["chain"]
+
+    for q in ["What are the main findings?", "What methodology was used?"]:
+        print(f"\\nQ: {q}")
+        print(f"A: {chain.invoke(q)}")
+
+    # Retrieve without generating to inspect what gets surfaced:
+    retriever = pipeline["retriever"]
+    for i, chunk in enumerate(retriever.get_relevant_documents("main findings")):
+        print(f"\\nChunk {i+1} (page {chunk.metadata.get('page', '?')}):")
+        print(chunk.page_content[:200] + "...")
+```
+
+## Common mistakes
+
+1. **Using LangChain for everything.** LangChain chains handle the simple case well. For self-RAG loops, multi-hop reasoning, or custom confidence logic, you will spend more time working around LangChain abstractions than implementing the logic directly. Know when to drop down to direct API calls.
+
+2. **Default chunk size without measuring.** LangChain's default `chunk_size=4000` is very large. For most retrieval use cases, 512-1000 characters produces better precision. Always measure retrieval quality at a few chunk sizes before settling on one.
+
+3. **Ignoring metadata during splitting.** When you split a `Document`, LangChain preserves the parent document's metadata in each chunk. But if you need chunk-level metadata (chunk index, character offset), add it manually after splitting — LangChain does not add it by default.
+
+4. **EnsembleRetriever with untuned weights.** The 70/30 split is a reasonable default, but optimal weights depend on your query distribution. If your users mostly ask exact-match questions (product codes, names, IDs), increase the BM25 weight. For conceptual questions, increase the vector weight. Evaluate both before shipping.
+
+5. **PyPDFLoader on scanned PDFs.** PyPDFLoader uses pypdf for text extraction, which fails on scanned images. Scanned PDFs need OCR (Tesseract, AWS Textract, Google Document AI) before loading. Check your document source carefully.
+
+## Try it yourself
+
+Pick any PDF you have access to (a paper, a technical document, a report). Build the full LangChain RAG pipeline from this lesson using FAISS and `RecursiveCharacterTextSplitter`. Write 10 test questions of varying difficulty: some that require a single chunk, some that require synthesizing information from different sections. Measure whether the ensemble retriever (FAISS + BM25) returns better top-5 results than FAISS alone for your question set. Document your findings — which question types benefit most from hybrid search?
+""",
+            },
+            {
+                "title": "RAG in production: scaling and monitoring",
+                "summary": "Operate a RAG system at scale with index lifecycle management, multi-layer caching, retrieval quality monitoring, and cost optimization strategies.",
+                "estimated_minutes": 45,
+                "content_md": """\
+## Why this matters
+
+Shipping a RAG prototype is the easy part. Keeping it accurate, fast, and affordable as your document corpus grows from hundreds to hundreds of thousands of documents — and as query volume grows from tens to tens of thousands per day — is the hard part. Most teams discover these problems after launch, when they are already under pressure. This lesson covers the operational patterns that production RAG systems require: index lifecycle management, multi-layer caching, retrieval quality monitoring, and cost control.
+
+If you are building RAG for real users at work, these are the engineering decisions that determine whether the system is maintainable in six months.
+
+## Core concepts
+
+### Index management: incremental updates and versioning
+
+**The naive approach** is to rebuild the entire vector index whenever documents change. This works at 1,000 documents. At 100,000 documents with daily updates, a full rebuild takes hours, requires your index to be offline during reindexing, and wastes embedding API budget re-embedding unchanged documents.
+
+**Incremental indexing** only re-embeds changed documents. The pattern: hash each document's content, compare to stored hashes, re-embed only documents where the hash changed, delete old vectors by document ID, insert new vectors. This requires maintaining a document registry alongside the vector store.
+
+**Index versioning** runs in shadow mode: build the new index version while the current version serves traffic, validate quality metrics on the new version, then switch traffic atomically. This eliminates indexing-related downtime. Chroma, Pinecone, and Weaviate all support multiple named collections for exactly this pattern.
+
+**Soft deletes.** When a document is removed, immediately mark it deleted in the document registry and filter it out of retrieval results. Batch the actual vector deletion to avoid blocking the write path. Stale content left in the index will surface in answers for weeks if you skip this step.
+
+### Caching strategies
+
+A production RAG system has three distinct caching opportunities:
+
+**Query cache** — cache the full retrieval + generation result, keyed by a hash of the query and any filter parameters. Redis with a TTL of 1-24 hours is the standard implementation. Even a 20% hit rate meaningfully reduces latency and cost.
+
+**Embedding cache** — cache the query embedding keyed by query text. A simple in-memory LRU cache with 10,000 entries covers most repeated queries in a session and eliminates redundant embedding API calls.
+
+**Result cache with semantic deduplication** — for near-duplicate queries ("what is the refund policy" vs "what's the refund policy"), exact hash matching misses the cache. Semantic deduplication stores query embeddings alongside cached results and returns a cache hit if a new query is within a similarity threshold of a cached query. More complex, but dramatically improves effective hit rate for paraphrased queries.
+
+### Monitoring retrieval quality in production
+
+Unlike traditional software where bugs throw exceptions, RAG quality degrades silently. Retrieval can get worse as your document corpus changes and nobody notices until users stop trusting the system. Monitoring is how you catch this before it becomes a crisis.
+
+**Metrics to track per query:**
+- Retrieval latency (P50, P95, P99)
+- Average cosine similarity of top-k results (low similarity = off-topic retrieval)
+- Cache hit rate
+- Answer generation latency
+
+**Metrics to track on a sampled basis:**
+- Automated faithfulness score via LLM judge (sampled 5-10% of queries)
+- Citation accuracy (does the answer cite the right sources?)
+- User feedback signals (thumbs down, correction submissions)
+
+**Drift detection.** Compare rolling average similarity scores week-over-week. A sustained drop usually means new documents were added that differ significantly from the query distribution, or the query distribution shifted.
+
+### Cost optimization
+
+**Embedding cache.** For a system with 30% query repetition, an in-process LRU cache gives a free 30% reduction in embedding API calls.
+
+**Smaller models for routing.** If your RAG system serves multiple document collections, use a small fast model (or keyword matching) to route the query to the right collection before embedding and retrieval. This avoids querying large indexes for queries that only match a small subset.
+
+**Retrieve more, rerank down.** Retrieve top-20 candidates cheaply with vector search, then rerank to top-5 with a cross-encoder. Often cheaper than using an expensive similarity metric throughout, and produces better results.
+
+**Context window sizing.** Do not pass all top-k chunks into the context window. Use similarity thresholds to filter chunks below a minimum score before including them in the prompt. Shorter prompts mean lower generation costs.
+
+## Working example
+
+```python
+from __future__ import annotations
+import hashlib
+import json
+import logging
+import time
+from dataclasses import dataclass, field
+from functools import lru_cache
+from typing import Optional
+
+import redis
+from openai import OpenAI
+
+logger = logging.getLogger(__name__)
+client = OpenAI()
+
+
+# In-process embedding cache
+
+@lru_cache(maxsize=10_000)
+def get_embedding_cached(text: str, model: str = "text-embedding-3-small") -> tuple[float, ...]:
+    \"\"\"LRU cache for query embeddings. Returns tuple (hashable) not list.\"\"\"
+    resp = client.embeddings.create(model=model, input=text)
+    return tuple(resp.data[0].embedding)
+
+
+# Redis query cache
+
+class QueryCache:
+    \"\"\"Cache full RAG results in Redis with TTL-based expiry.\"\"\"
+
+    def __init__(self, redis_client: redis.Redis, ttl_seconds: int = 3600, prefix: str = "rag:v1"):
+        self.redis = redis_client
+        self.ttl = ttl_seconds
+        self.prefix = prefix
+
+    def _key(self, query: str, filters: Optional[dict] = None) -> str:
+        payload = json.dumps({"q": query, "f": filters or {}}, sort_keys=True)
+        return f"{self.prefix}:{hashlib.sha256(payload.encode()).hexdigest()[:16]}"
+
+    def get(self, query: str, filters: Optional[dict] = None) -> Optional[dict]:
+        raw = self.redis.get(self._key(query, filters))
+        if raw:
+            logger.info("cache_hit", extra={"query": query[:80]})
+            return json.loads(raw)
+        return None
+
+    def set(self, query: str, result: dict, filters: Optional[dict] = None) -> None:
+        self.redis.setex(self._key(query, filters), self.ttl, json.dumps(result))
+
+    def invalidate_prefix(self, prefix_override: str) -> int:
+        \"\"\"Bulk invalidate all keys for a version prefix. Use after index updates.\"\"\"
+        keys = self.redis.keys(f"{prefix_override}:*")
+        return self.redis.delete(*keys) if keys else 0
+
+
+# Retrieval quality logger
+
+@dataclass
+class RetrievalMetrics:
+    query: str
+    top_k_scores: list[float]
+    retrieval_latency_ms: float
+    generation_latency_ms: float
+    from_cache: bool
+    filters: dict = field(default_factory=dict)
+
+    @property
+    def avg_score(self) -> float:
+        return sum(self.top_k_scores) / len(self.top_k_scores) if self.top_k_scores else 0.0
+
+    def to_log_dict(self) -> dict:
+        return {
+            "event": "rag_query",
+            "avg_retrieval_score": round(self.avg_score, 4),
+            "min_retrieval_score": round(min(self.top_k_scores, default=0.0), 4),
+            "retrieval_latency_ms": round(self.retrieval_latency_ms, 1),
+            "generation_latency_ms": round(self.generation_latency_ms, 1),
+            "from_cache": self.from_cache,
+            "result_count": len(self.top_k_scores),
+        }
+
+
+def log_retrieval_metrics(metrics: RetrievalMetrics) -> None:
+    log_data = metrics.to_log_dict()
+    if metrics.avg_score < 0.35:
+        logger.warning("low_retrieval_quality", extra=log_data)
+    else:
+        logger.info("rag_query_complete", extra=log_data)
+
+
+# Production RAG service with caching and quality logging
+
+class ProductionRAGService:
+    \"\"\"
+    RAG service with in-process embedding cache, Redis query cache,
+    per-query retrieval quality logging, and score-threshold filtering.
+    \"\"\"
+
+    def __init__(
+        self,
+        index,
+        redis_client: redis.Redis,
+        cache_ttl: int = 3600,
+        top_k: int = 10,
+        score_threshold: float = 0.3,
+        max_context_chunks: int = 5,
+    ):
+        self.index = index
+        self.cache = QueryCache(redis_client, ttl_seconds=cache_ttl)
+        self.top_k = top_k
+        self.score_threshold = score_threshold
+        self.max_context_chunks = max_context_chunks
+
+    def query(self, question: str, filters: Optional[dict] = None) -> dict:
+        # 1. Check cache
+        cached = self.cache.get(question, filters)
+        if cached:
+            log_retrieval_metrics(RetrievalMetrics(
+                query=question, top_k_scores=[], retrieval_latency_ms=0,
+                generation_latency_ms=0, from_cache=True, filters=filters or {},
+            ))
+            return {**cached, "from_cache": True}
+
+        # 2. Embed (in-process LRU cache)
+        embedding = list(get_embedding_cached(question))
+
+        # 3. Retrieve
+        t0 = time.monotonic()
+        raw_results = self.index.query(embedding, top_k=self.top_k, where=filters)
+        retrieval_ms = (time.monotonic() - t0) * 1000
+
+        # 4. Filter low-quality chunks to reduce prompt size and cost
+        filtered = [r for r in raw_results if r["score"] >= self.score_threshold]
+        context_chunks = filtered[: self.max_context_chunks]
+        scores = [r["score"] for r in raw_results]
+
+        if not context_chunks:
+            log_retrieval_metrics(RetrievalMetrics(
+                query=question, top_k_scores=scores, retrieval_latency_ms=retrieval_ms,
+                generation_latency_ms=0, from_cache=False, filters=filters or {},
+            ))
+            return {
+                "answer": "I don't have enough information in the knowledge base to answer this question.",
+                "chunks": [],
+                "from_cache": False,
+                "retrieval_quality": "low",
+            }
+
+        # 5. Generate
+        context = "\\n\\n---\\n\\n".join(
+            f"[Source: {r['metadata'].get('source', 'unknown')}]\\n{r['text']}"
+            for r in context_chunks
+        )
+        t0 = time.monotonic()
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Answer using only the provided context."},
+                {"role": "user", "content": f"Context:\\n{context}\\n\\nQuestion: {question}"},
+            ],
+            temperature=0.1,
+            max_tokens=512,
+        )
+        generation_ms = (time.monotonic() - t0) * 1000
+        answer = resp.choices[0].message.content
+
+        # 6. Log and cache
+        metrics = RetrievalMetrics(
+            query=question, top_k_scores=scores, retrieval_latency_ms=retrieval_ms,
+            generation_latency_ms=generation_ms, from_cache=False, filters=filters or {},
+        )
+        log_retrieval_metrics(metrics)
+
+        result = {
+            "answer": answer,
+            "chunks": [{"text": r["text"], "score": r["score"], "metadata": r["metadata"]} for r in context_chunks],
+            "from_cache": False,
+            "retrieval_quality": "high" if metrics.avg_score >= 0.5 else "medium",
+        }
+        self.cache.set(question, result, filters)
+        return result
+```
+
+## Common mistakes
+
+1. **No score threshold.** Passing all top-k chunks regardless of score bloats the prompt with irrelevant content and increases generation costs. A simple `score >= 0.3` filter on cosine similarity removes the worst chunks for free.
+
+2. **Single-layer cache only.** Teams often add Redis caching for full query results but skip embedding caching. The LRU embedding cache is 5 lines of code and eliminates redundant embedding API calls for repeated queries in the same process.
+
+3. **Logging without alerting.** Logging low retrieval quality scores is only useful if someone looks at the logs. Set up an alert on `avg_retrieval_score < 0.3` sustained for more than 100 queries — that is the signal that something has changed in your corpus or query distribution.
+
+4. **Rebuilding the cache on every deploy.** Query cache invalidation should be scoped to what actually changed. If you update the prompt but not the index, do not invalidate retrieval caches. Use a version prefix in cache keys (`rag:v1:`, `rag:v2:`) to do bulk invalidation cheaply when the index changes.
+
+5. **No shadow index for updates.** If you take the index offline to rebuild it, you have a production outage. Always build new index versions in parallel and switch traffic atomically. Most vector databases support multiple named collections for exactly this reason.
+
+## Try it yourself
+
+Instrument your RAG pipeline with the `RetrievalMetrics` logger from this lesson. Run 100 varied queries through it (or simulate them from a question dataset). Plot the distribution of `avg_retrieval_score` across all queries. What percentage of queries fall below 0.35? For those queries, what do they have in common — are they longer, more specific, more ambiguous? Now add the score threshold filter and measure how often it triggers. Does excluding low-score chunks improve or hurt answer quality for borderline queries?
+""",
+            },
         ],
     },
     {
