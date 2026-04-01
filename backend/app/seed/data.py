@@ -5484,6 +5484,327 @@ Implement the same research + writing workflow in two frameworks: CrewAI and Lan
                 "estimated_minutes": 40,
                 "content_md": "## Human-in-the-loop evaluation\n\n### Why this matters\n\nAutomated metrics can tell you whether a response is grounded in context or matches a reference string. They cannot tell you whether a response was actually helpful to the person who asked. Human judgment remains the ground truth for AI quality, and the best production teams build systematic workflows to capture that judgment and feed it back into the system.\n\nHuman-in-the-loop (HITL) evaluation is not a fallback for when automated metrics fail -- it is the calibration source that makes automated metrics trustworthy. Without it, you are optimizing a proxy that may be drifting away from what users actually want.\n\n### Core concepts\n\n**Annotation workflows.** An annotation workflow is the structured process by which human reviewers evaluate AI outputs. Key components:\n- *Task definition*: what exactly is the reviewer being asked to judge?\n- *Rubric*: the scoring guide that defines what each score value means\n- *Interface*: the tool used to present cases and collect ratings\n- *Sampling strategy*: which outputs get reviewed?\n- *Reviewer pool*: internal team, domain experts, or crowdsourced annotators\n\nA typical annotation task for a Q&A feature:\n\n```\nQuestion: [shown to reviewer]\nAnswer: [shown to reviewer]\nContext used: [shown to reviewer]\n\nRate this answer on:\n1. Helpfulness (1-5): Does it address what the user asked?\n2. Faithfulness (1-5): Are all claims supported by the context shown?\n3. Safety (pass/fail): Is any content harmful or inappropriate?\n```\n\n**Inter-rater reliability (IRR).** When multiple reviewers score the same output, they will not always agree. IRR measures the degree of agreement. Common measures:\n- *Cohen's Kappa* (two raters, categorical labels): values above 0.6 are acceptable; above 0.8 is good\n- *Percent agreement*: simple but inflates for imbalanced classes\n\nLow IRR signals one of three problems: the rubric is ambiguous, the task is genuinely subjective, or reviewers are not applying the rubric correctly.\n\n**Calibration.** Before rating independently, reviewers should score a shared set of anchor cases together. Discuss disagreements. This step dramatically improves IRR and surfaces rubric ambiguities before they contaminate your data.\n\n**Using human feedback to improve prompts.** Human ratings are valuable inputs for three improvement loops:\n1. *Rubric refinement*: low-rated cases reveal failure modes. Cluster them to find systematic prompt weaknesses.\n2. *Prompt iteration*: when 30%+ of reviewed cases fail a specific dimension, revisit the prompt instructions.\n3. *Golden dataset growth*: reviewed cases where human rating disagrees with automated metrics are high-value additions.\n\n**Feedback signals from product.** Beyond explicit annotation, implicit user signals are cheap and continuous:\n- Thumbs up/down ratings\n- Copy button clicks on responses (strong positive signal)\n- Follow-up questions that suggest the first answer was inadequate\n- Session abandonment after a response\n\n**The feedback loop:**\n\n```\nUser request -> LLM response -> User feedback (explicit or implicit)\n                                       |\n                             Quality metric update\n                                       |\n                    Flag for human review (if quality drops)\n                                       |\n                    Human annotates the failure case\n                                       |\n                    Add to golden dataset / update rubric / iterate prompt\n                                       |\n                              Rerun eval suite\n```\n\n### Working example\n\nA human feedback collection and aggregation pipeline:\n\n```python\nfrom dataclasses import dataclass\nfrom collections import defaultdict\nimport statistics\n\n\n@dataclass\nclass ThumbsFeedback:\n    trace_id: str\n    feature_name: str\n    rating: str  # 'up', 'down', 'neutral'\n    timestamp_ms: int\n\n\n@dataclass\nclass Annotation:\n    trace_id: str\n    feature_name: str\n    rater_id: str\n    helpfulness: int   # 1-5\n    faithfulness: int  # 1-5\n    notes: str = ''\n\n\nclass FeedbackAggregator:\n    def __init__(self):\n        self._thumbs: list[ThumbsFeedback] = []\n        self._annotations: list[Annotation] = []\n\n    def record_thumbs(self, feedback: ThumbsFeedback) -> None:\n        self._thumbs.append(feedback)\n\n    def record_annotation(self, annotation: Annotation) -> None:\n        self._annotations.append(annotation)\n\n    def satisfaction_rate(self, feature_name: str) -> float | None:\n        rated = [t for t in self._thumbs\n                 if t.feature_name == feature_name and t.rating in ('up', 'down')]\n        if not rated:\n            return None\n        return sum(1 for t in rated if t.rating == 'up') / len(rated)\n\n    def compute_irr(self, feature_name: str) -> dict:\n        by_trace: dict[str, list[Annotation]] = defaultdict(list)\n        for a in self._annotations:\n            if a.feature_name == feature_name:\n                by_trace[a.trace_id].append(a)\n        multi_rated = {tid: annots for tid, annots in by_trace.items() if len(annots) > 1}\n        if not multi_rated:\n            return {'error': 'No multiply-rated traces found'}\n        agreements = total_pairs = 0\n        for annots in multi_rated.values():\n            ratings = [a.helpfulness >= 3 for a in annots]\n            for i in range(len(ratings)):\n                for j in range(i + 1, len(ratings)):\n                    total_pairs += 1\n                    if ratings[i] == ratings[j]:\n                        agreements += 1\n        return {\n            'traces_with_multiple_raters': len(multi_rated),\n            'percent_agreement_helpfulness': agreements / total_pairs if total_pairs else 0.0,\n        }\n\n    def low_quality_traces(\n        self, feature_name: str, threshold: float = 2.5, min_raters: int = 1\n    ) -> list[str]:\n        by_trace: dict[str, list[Annotation]] = defaultdict(list)\n        for a in self._annotations:\n            if a.feature_name == feature_name:\n                by_trace[a.trace_id].append(a)\n        result = []\n        for trace_id, annots in by_trace.items():\n            if len(annots) < min_raters:\n                continue\n            avg = statistics.mean((a.helpfulness + a.faithfulness) / 2 for a in annots)\n            if avg < threshold:\n                result.append(trace_id)\n        return result\n```\n\n### Common mistakes\n\n1. **Asking reviewers to rate 'overall quality' without a rubric.** Reviewers will apply inconsistent mental models and IRR will be low. Always decompose into specific dimensions.\n\n2. **Not measuring IRR before trusting annotations.** Low-IRR data is worse than no data because it gives false confidence.\n\n3. **No connection between annotation outcomes and prompt changes.** If human reviewers identify 40 cases where the model hallucinated but that feedback never influences the prompt, the annotation effort was wasted.\n\n4. **Using only thumbs ratings as quality signal.** Thumbs ratings are high-volume but noisy. Triangulate with more specific annotation.\n\n5. **Annotation fatigue.** Keep sessions under 45 minutes and rotate reviewers. Quality declines significantly after the first hundred or so reviews in a session.\n\n### Try it yourself\n\nDesign a minimal annotation interface specification for a coding assistant feature. Define: the fields shown to the reviewer, the scoring rubric for three dimensions specific to code generation (correctness, readability, explanation quality), and a short calibration set of five cases with pre-agreed ratings. Then implement a `compute_kappa` function that takes two lists of integer ratings and returns Cohen's Kappa for two raters on a 5-point scale.",
             },
+            {
+                "title": "Building eval harnesses from scratch",
+                "summary": "Architect a minimal, production-grade eval harness with pluggable scorers, structured reporting, and clear separation between test cases, runners, and judges.",
+                "estimated_minutes": 50,
+                "content_md": """## Why this matters
+
+Eval frameworks like promptfoo and RAGAS are useful, but every serious AI team eventually hits something the framework cannot do: a custom scoring rubric, a domain-specific assertion, a reporter format their dashboards expect, or a latency constraint the framework ignores. Knowing how to build a harness from scratch means you are never blocked by your tooling. It also means you deeply understand what frameworks are doing under the hood, so you use them better when you do reach for one.
+
+## Core concepts
+
+### When to use a framework vs. a custom harness
+
+Use a framework when: you are prototyping, the built-in scorers cover your use case, and your team does not need to own the eval infrastructure.
+
+Use a custom harness when: you have scoring logic that no framework supports, you need the harness to run inside your existing CI pipeline without additional dependencies, or you want full control over how results are stored and surfaced.
+
+The pragmatic answer: start with a framework, extract what you need into your own code when the framework becomes friction.
+
+### Harness architecture
+
+A minimal harness has four components:
+
+- **Test cases** — inputs plus expected outputs or acceptance criteria
+- **Runner** — calls the system under test for each case
+- **Scorers** — evaluate the output against the criteria
+- **Reporter** — formats and persists results
+
+```python
+from dataclasses import dataclass, field
+from typing import Any, Callable
+import json
+import time
+
+
+@dataclass
+class TestCase:
+    id: str
+    input: dict[str, Any]
+    expected: Any = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EvalResult:
+    case_id: str
+    output: Any
+    scores: dict[str, float]
+    latency_ms: float
+    passed: bool
+    error: str | None = None
+
+
+Scorer = Callable[[TestCase, Any], float]
+
+
+class EvalHarness:
+    def __init__(self, system_fn: Callable, scorers: dict[str, Scorer]):
+        self.system_fn = system_fn
+        self.scorers = scorers
+
+    def run(self, cases: list[TestCase]) -> list[EvalResult]:
+        results = []
+        for case in cases:
+            start = time.perf_counter()
+            try:
+                output = self.system_fn(**case.input)
+                latency_ms = (time.perf_counter() - start) * 1000
+                scores = {
+                    name: scorer(case, output)
+                    for name, scorer in self.scorers.items()
+                }
+                passed = all(s >= 0.5 for s in scores.values())
+                results.append(EvalResult(case.id, output, scores, latency_ms, passed))
+            except Exception as exc:
+                latency_ms = (time.perf_counter() - start) * 1000
+                results.append(EvalResult(case.id, None, {}, latency_ms, False, str(exc)))
+        return results
+
+    def report_json(self, results: list[EvalResult], path: str) -> dict:
+        summary = {
+            "total": len(results),
+            "passed": sum(1 for r in results if r.passed),
+            "failed": sum(1 for r in results if not r.passed),
+            "avg_latency_ms": sum(r.latency_ms for r in results) / len(results),
+            "results": [vars(r) for r in results],
+        }
+        with open(path, "w") as f:
+            json.dump(summary, f, indent=2)
+        return summary
+```
+
+### Deterministic vs LLM-as-judge vs human scorers
+
+**Deterministic** — exact match, substring, regex, JSON schema validation. Fast, free, fully repeatable. Use whenever the answer space is constrained.
+
+```python
+def exact_match_scorer(case: TestCase, output: Any) -> float:
+    return 1.0 if output == case.expected else 0.0
+
+def json_valid_scorer(case: TestCase, output: Any) -> float:
+    try:
+        json.loads(output) if isinstance(output, str) else output
+        return 1.0
+    except Exception:
+        return 0.0
+```
+
+**LLM-as-judge** — use a separate LLM call to score freeform outputs. Flexible but adds cost and non-determinism. Use for tone, helpfulness, coherence, safety.
+
+```python
+import anthropic
+
+def llm_judge_scorer(rubric: str) -> Scorer:
+    client = anthropic.Anthropic()
+
+    def scorer(case: TestCase, output: Any) -> float:
+        prompt = f"{rubric}\n\nInput: {case.input}\nOutput: {output}\n\nScore 0.0 to 1.0 only, no explanation."
+        response = client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=10,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        try:
+            return float(response.content[0].text.strip())
+        except ValueError:
+            return 0.0
+
+    return scorer
+```
+
+**Human scorers** — write results to a CSV or annotation UI for human review. Required for high-stakes decisions where LLM judges are not trustworthy enough.
+
+### Putting it together
+
+```python
+test_cases = [
+    TestCase("q1", {"question": "What is 2+2?"}, expected="4"),
+    TestCase("q2", {"question": "Summarize this: ..."}, expected=None),
+]
+
+harness = EvalHarness(
+    system_fn=my_qa_function,
+    scorers={
+        "exact": exact_match_scorer,
+        "json_valid": json_valid_scorer,
+    },
+)
+
+results = harness.run(test_cases)
+summary = harness.report_json(results, "eval_results.json")
+print(f"Passed {summary['passed']}/{summary['total']} — avg latency {summary['avg_latency_ms']:.0f}ms")
+```
+
+## Common mistakes
+
+**Coupling scorer logic to the runner** — scorers should be pure functions that take a case and an output. If a scorer reads from a database or calls an external API as a side effect, it becomes impossible to test in isolation.
+
+**No error isolation** — if one case crashes the runner, you lose results for all subsequent cases. Always catch exceptions per case and record them as failures.
+
+**Averaging scores naively** — a single low score on a critical safety case should not be averaged away by dozens of high scores on easy cases. Design your pass/fail thresholds case-by-case or category-by-category.
+
+**LLM judge prompt drift** — the rubric given to an LLM judge is itself a prompt that can be changed. Version control your judge prompts just like production prompts.
+
+## Try it yourself
+
+Build a working eval harness for a summarization function of your choice. Requirements: at least three test cases, at least two different scorer types (one deterministic, one LLM-as-judge), JSON output written to disk, and a printed summary showing pass rate and average latency. Then add a fourth scorer that checks whether the summary is shorter than the input — implement it as a deterministic scorer that returns 1.0 if the output word count is less than the input word count, 0.0 otherwise.""",
+            },
+            {
+                "title": "Prompt regression testing",
+                "summary": "Prevent prompt changes from silently breaking existing behavior using golden datasets, automated comparison, and CI integration.",
+                "estimated_minutes": 40,
+                "content_md": """## Why this matters
+
+Prompt changes are the most frequent and least-tested change in AI systems. A developer tweaks the system prompt to improve one behavior, ships it, and three other behaviors quietly regress. Without a regression test suite, you find out from users. With one, you find out in CI before the change reaches production.
+
+Prompt regression testing is the eval discipline that closes this loop.
+
+## Core concepts
+
+### What prompt regression means
+
+A prompt regression is any change to a prompt — system prompt, user message template, few-shot examples, tool descriptions — that causes previously-correct behavior to become incorrect. The behavior being measured is always relative to a baseline: the golden set.
+
+A golden set is a collection of (input, expected output) pairs that represent correct behavior at a known-good point in time. When the prompt changes, you re-run the inputs and compare new outputs to the golden expected outputs.
+
+### Golden dataset design
+
+A good golden set:
+
+- Covers the behavioral surface you care about (not just happy paths)
+- Has explicit acceptance criteria for each case, not just free-form notes
+- Is version controlled alongside the prompt
+- Is small enough to run in CI (under 5 minutes) but large enough to catch regressions (30-100 cases is typical)
+
+```python
+# golden_set.jsonl — one JSON object per line
+# {"id": "...", "input": {...}, "expected": "...", "min_score": 0.8, "tags": [...]}
+
+import json
+from pathlib import Path
+
+
+def load_golden_set(path: str) -> list[dict]:
+    return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+```
+
+### Building the regression runner
+
+```python
+import difflib
+from dataclasses import dataclass
+
+
+@dataclass
+class RegressionResult:
+    case_id: str
+    input: dict
+    expected: str
+    actual: str
+    score: float
+    passed: bool
+    diff: str
+
+
+def similarity_score(expected: str, actual: str) -> float:
+    """Token overlap similarity, range 0.0-1.0."""
+    ratio = difflib.SequenceMatcher(None, expected.lower(), actual.lower()).ratio()
+    return round(ratio, 4)
+
+
+def run_regression(
+    system_fn,
+    golden_set: list[dict],
+    threshold: float = 0.8,
+) -> tuple[list[RegressionResult], bool]:
+    results = []
+    all_passed = True
+
+    for case in golden_set:
+        actual = system_fn(**case["input"])
+        expected = case["expected"]
+        score = similarity_score(expected, actual)
+        passed = score >= case.get("min_score", threshold)
+        if not passed:
+            all_passed = False
+        diff = "\n".join(difflib.unified_diff(
+            expected.splitlines(), actual.splitlines(),
+            fromfile="expected", tofile="actual", lineterm=""
+        ))
+        results.append(RegressionResult(case["id"], case["input"], expected, actual, score, passed, diff))
+
+    return results, all_passed
+```
+
+### Automated regression detection in CI
+
+```python
+# run_regression_ci.py — called by CI, exits non-zero on regression
+import sys
+import json
+
+
+def main():
+    golden = load_golden_set("evals/golden_set.jsonl")
+    results, all_passed = run_regression(my_system_function, golden)
+
+    # Write report
+    report = {
+        "total": len(results),
+        "passed": sum(1 for r in results if r.passed),
+        "failed": sum(1 for r in results if not r.passed),
+        "cases": [vars(r) for r in results],
+    }
+    Path("eval_report.json").write_text(json.dumps(report, indent=2))
+
+    # Print failures to stderr so CI surfaces them
+    for r in results:
+        if not r.passed:
+            print(f"REGRESSION: {r.case_id} score={r.score}\n{r.diff}", file=sys.stderr)
+
+    sys.exit(0 if all_passed else 1)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+In GitHub Actions:
+
+```yaml
+- name: Run regression tests
+  run: python run_regression_ci.py
+  # Job fails automatically if exit code is non-zero
+```
+
+### When to update the golden set
+
+Update the golden set when you intentionally change behavior. The process:
+
+1. Make the prompt change
+2. Run regression — note which cases fail
+3. Review each failing case: is the new output actually better?
+4. If yes, update the golden expected value and add a comment explaining why
+5. Commit the updated golden set alongside the prompt change
+
+This makes regressions visible and deliberate rather than silent.
+
+## Common mistakes
+
+**Using exact-match only** — LLM outputs are rarely byte-for-byte identical across runs. Use semantic similarity or a rubric-based scorer, not exact string equality, unless the output space is truly constrained.
+
+**Golden set rot** — not updating the golden set when behavior legitimately improves. After six months the set becomes a source of false alarms that developers learn to ignore. Review and prune it quarterly.
+
+**Too few cases** — 5 golden cases catch nothing. 30-50 cases across behavioral dimensions (happy path, edge cases, adversarial inputs, format requirements) provide meaningful signal.
+
+**Running regressions only on main** — regression tests are most valuable before merging. Run them on pull requests so regressions are caught before review, not after.
+
+## Try it yourself
+
+Create a golden set of 10 cases for a summarization or classification function you have built or can build quickly. Each case should have an id, input, expected output, and minimum score. Build the regression runner above, run it against the current implementation to establish a baseline (all should pass), then deliberately modify the system prompt in a way that breaks at least two cases. Verify the runner exits non-zero and surfaces the diffs. Finally, update the golden set for one of the broken cases to reflect the new (intentionally different) behavior and confirm the runner passes again.""",
+            },
         ],
     },
     {
@@ -6724,6 +7045,347 @@ def assess_quality(content: str) -> float:
 2. Build a `FallbackChain` with two mock providers where the first always raises an exception. Verify that the second provider's response is returned.
 3. Define SLOs for an AI feature you are building or have built. Write down the metric, target value, measurement window, and the response procedure when the SLO is breached.
 """,
+            },
+            {
+                "title": "CI/CD pipelines with eval gates",
+                "summary": "Add eval gates to your GitHub Actions pipeline so that prompt or model changes that degrade quality are caught before deployment.",
+                "estimated_minutes": 45,
+                "content_md": """## Why this matters
+
+Unit tests tell you your code runs. Eval gates tell you your AI system still behaves correctly. These are different things. A prompt change that passes all unit tests can silently halve your system's quality score. CI/CD with eval gates is the engineering practice that makes AI systems deployable with confidence rather than with hope.
+
+## Core concepts
+
+### Why unit tests are not enough for AI systems
+
+Unit tests verify deterministic behavior: given input X, function returns Y. AI systems are not deterministic in that way. The behavior under test is quality: does the output satisfy the rubric? Does the classification accuracy stay above 85%? Does the retrieved context remain relevant?
+
+Eval gates are a threshold-based quality check wired into the deployment gate. If quality drops below the threshold, the deployment is blocked.
+
+### The AI CI/CD pipeline shape
+
+```
+push / PR
+  |
+  v
+lint (ruff, mypy)
+  |
+  v
+unit tests (pytest)
+  |
+  v
+eval gate (regression + quality thresholds)
+  |
+  v
+deploy (only if eval passes)
+```
+
+The eval step sits between tests and deploy. It should be fast enough to run on every PR (under 5 minutes) and deterministic enough to not produce flaky failures.
+
+### GitHub Actions workflow with eval gate
+
+```yaml
+# .github/workflows/ai_ci.yml
+name: AI CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff mypy
+      - run: ruff check .
+      - run: mypy src/
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest tests/ -v
+
+  eval:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run eval gate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python evals/run_ci_eval.py --threshold 0.80 --warn-threshold 0.85
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: eval_report.json
+
+  deploy:
+    needs: eval
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        run: echo "Deploying..."  # replace with real deploy step
+```
+
+### The eval gate script
+
+```python
+# evals/run_ci_eval.py
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+BLOCKING_THRESHOLD = 0.80   # fail the job below this
+WARNING_THRESHOLD = 0.85    # warn but pass between this and blocking
+
+
+def run_eval_gate(threshold: float, warn_threshold: float) -> None:
+    golden = load_golden_set("evals/golden_set.jsonl")
+    results, _ = run_regression(my_system_function, golden)
+
+    total = len(results)
+    passed = sum(1 for r in results if r.passed)
+    pass_rate = passed / total if total else 0.0
+
+    report = {"pass_rate": pass_rate, "passed": passed, "total": total}
+    Path("eval_report.json").write_text(json.dumps(report, indent=2))
+
+    if pass_rate < threshold:
+        print(f"EVAL GATE FAILED: pass_rate={pass_rate:.2%} < threshold={threshold:.2%}", file=sys.stderr)
+        sys.exit(1)
+    elif pass_rate < warn_threshold:
+        print(f"EVAL GATE WARNING: pass_rate={pass_rate:.2%} is below warn threshold={warn_threshold:.2%}")
+    else:
+        print(f"EVAL GATE PASSED: pass_rate={pass_rate:.2%}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--threshold", type=float, default=0.80)
+    parser.add_argument("--warn-threshold", type=float, default=0.85)
+    args = parser.parse_args()
+    run_eval_gate(args.threshold, args.warn_threshold)
+```
+
+### Blocking vs warning thresholds
+
+Use two thresholds:
+
+- **Blocking threshold** (e.g. 0.80) — below this, the deployment is blocked. The change broke something important.
+- **Warning threshold** (e.g. 0.85) — above blocking but below this, the job passes but logs a warning. Worth reviewing before merging but not an emergency.
+
+This prevents alert fatigue (every minor fluctuation blocks deploys) while still catching serious regressions.
+
+### Secrets management
+
+API keys for evals go in GitHub repository secrets (`ANTHROPIC_API_KEY`), never in the repo. Access them via `${{ secrets.KEY_NAME }}` in the workflow YAML. Consider using a dedicated low-quota key for CI evals to limit blast radius if the key is ever exposed.
+
+## Common mistakes
+
+**Running evals in the same job as tests** — if an API call fails, you cannot tell whether the unit tests or the eval caused the job to fail. Keep them in separate jobs with clear names.
+
+**No artifact upload** — the eval report tells you exactly which cases failed and why. If you do not upload it as a CI artifact, debugging a failed gate requires re-running locally.
+
+**Threshold too tight** — setting the blocking threshold at 1.0 (100% pass rate) means any flaky LLM response blocks the deploy. Start at 0.80, tighten as the eval suite matures.
+
+**Hardcoding the threshold** — pass thresholds as CLI arguments or environment variables so you can tighten them incrementally without modifying the script.
+
+## Try it yourself
+
+Write a `.github/workflows/ai_ci.yml` that runs lint, tests, and an eval gate for a small AI function you own. The eval step should: load a golden set from `evals/golden_set.jsonl`, run the function against each case, compute pass rate, exit non-zero if pass rate is below 0.80, and upload `eval_report.json` as a CI artifact. Test it locally by running `python evals/run_ci_eval.py --threshold 0.80` and verify the exit code matches the pass/fail result.""",
+            },
+            {
+                "title": "Model gateway and routing",
+                "summary": "Build a model gateway that provides a single interface to multiple providers, with cost-based, latency-based, and capability-based routing plus automatic fallback chains.",
+                "estimated_minutes": 40,
+                "content_md": """## Why this matters
+
+AI applications that call a single provider directly have three problems: vendor lock-in, no fallback when the provider has an outage, and no mechanism to route cheap requests to cheap models. A model gateway solves all three. It gives your application one interface while routing calls intelligently across providers and models based on cost, latency, and capability requirements.
+
+## Core concepts
+
+### What a model gateway does
+
+A model gateway is an abstraction layer between your application code and the raw provider SDKs. Your application calls `gateway.complete(request)`. The gateway decides which provider and model to use, handles authentication, applies retry logic, and falls back to alternates when a provider fails.
+
+Benefits:
+- **Portability** — switch providers by changing gateway config, not application code
+- **Resilience** — fallback chains survive provider outages automatically
+- **Cost control** — route cheap requests (short, simple) to cheap models
+- **Observability** — centralize logging, latency tracking, and cost accounting
+
+### Routing strategies
+
+**Cost-based routing** — for each request, check whether a cheaper model can satisfy the capability requirements. Route to the cheapest that qualifies.
+
+**Latency-based routing** — track rolling p95 latency per model. Route to the fastest that meets quality requirements.
+
+**Capability-based routing** — some models support tools, vision, or long context. Route to the cheapest model that supports the required capabilities.
+
+### Model gateway implementation
+
+```python
+from dataclasses import dataclass, field
+from typing import Any
+import time
+import anthropic
+import openai
+
+
+@dataclass
+class ModelConfig:
+    provider: str          # "anthropic" | "openai"
+    model_id: str
+    cost_per_1k_tokens: float
+    supports_tools: bool = False
+    supports_vision: bool = False
+    max_context_tokens: int = 8192
+
+
+@dataclass
+class GatewayRequest:
+    messages: list[dict]
+    system: str = ""
+    max_tokens: int = 1024
+    require_tools: bool = False
+    require_vision: bool = False
+    min_context_tokens: int = 0
+    strategy: str = "cost"   # "cost" | "latency" | "capability"
+
+
+@dataclass
+class GatewayResponse:
+    content: str
+    model_used: str
+    provider: str
+    latency_ms: float
+    attempt: int
+
+
+class ModelGateway:
+    def __init__(self, models: list[ModelConfig]):
+        self.models = models
+        self._latency_history: dict[str, list[float]] = {m.model_id: [] for m in models}
+        self._anthropic = anthropic.Anthropic()
+        self._openai = openai.OpenAI()
+
+    def _eligible_models(self, req: GatewayRequest) -> list[ModelConfig]:
+        return [
+            m for m in self.models
+            if (not req.require_tools or m.supports_tools)
+            and (not req.require_vision or m.supports_vision)
+            and m.max_context_tokens >= req.min_context_tokens
+        ]
+
+    def _rank_models(self, eligible: list[ModelConfig], strategy: str) -> list[ModelConfig]:
+        if strategy == "cost":
+            return sorted(eligible, key=lambda m: m.cost_per_1k_tokens)
+        elif strategy == "latency":
+            def avg_latency(m):
+                hist = self._latency_history[m.model_id]
+                return sum(hist[-10:]) / len(hist[-10:]) if hist else float("inf")
+            return sorted(eligible, key=avg_latency)
+        return eligible
+
+    def _call_provider(self, model: ModelConfig, req: GatewayRequest) -> str:
+        if model.provider == "anthropic":
+            resp = self._anthropic.messages.create(
+                model=model.model_id,
+                max_tokens=req.max_tokens,
+                system=req.system,
+                messages=req.messages,
+            )
+            return resp.content[0].text
+        elif model.provider == "openai":
+            messages = ([{"role": "system", "content": req.system}] if req.system else []) + req.messages
+            resp = self._openai.chat.completions.create(
+                model=model.model_id,
+                max_tokens=req.max_tokens,
+                messages=messages,
+            )
+            return resp.choices[0].message.content
+        raise ValueError(f"Unknown provider: {model.provider}")
+
+    def complete(self, req: GatewayRequest) -> GatewayResponse:
+        eligible = self._eligible_models(req)
+        if not eligible:
+            raise RuntimeError("No models satisfy the request requirements")
+        ranked = self._rank_models(eligible, req.strategy)
+
+        for attempt, model in enumerate(ranked, start=1):
+            start = time.perf_counter()
+            try:
+                content = self._call_provider(model, req)
+                latency_ms = (time.perf_counter() - start) * 1000
+                self._latency_history[model.model_id].append(latency_ms)
+                return GatewayResponse(content, model.model_id, model.provider, latency_ms, attempt)
+            except Exception as exc:
+                latency_ms = (time.perf_counter() - start) * 1000
+                print(f"[gateway] {model.model_id} failed (attempt {attempt}): {exc}")
+                continue
+
+        raise RuntimeError(f"All {len(ranked)} models failed for request")
+```
+
+### Using the gateway
+
+```python
+gateway = ModelGateway([
+    ModelConfig("anthropic", "claude-3-5-haiku-20241022", cost_per_1k_tokens=0.001, supports_tools=True),
+    ModelConfig("anthropic", "claude-opus-4-5", cost_per_1k_tokens=0.015, supports_tools=True),
+    ModelConfig("openai", "gpt-4o-mini", cost_per_1k_tokens=0.00015, supports_vision=True),
+])
+
+# Simple request — routes to cheapest eligible model
+resp = gateway.complete(GatewayRequest(
+    messages=[{"role": "user", "content": "Summarize this in one sentence: ..."}],
+    strategy="cost",
+))
+print(f"Used {resp.model_used} in {resp.latency_ms:.0f}ms (attempt {resp.attempt})")
+
+# Tool-requiring request — haiku or opus only, never gpt-4o-mini
+resp = gateway.complete(GatewayRequest(
+    messages=[{"role": "user", "content": "Search for recent papers on RAG."}],
+    require_tools=True,
+    strategy="cost",
+))
+```
+
+## Common mistakes
+
+**No fallback chain** — calling one provider with no fallback means an outage takes your feature down. Always configure at least two providers.
+
+**Tracking latency but not weighting recency** — the last 10 calls matter more than calls from 6 hours ago. Use a rolling window or exponential moving average, not a full history mean.
+
+**Routing all requests to the cheapest model** — some tasks genuinely require a stronger model. Capability-based routing prevents the gateway from sending complex reasoning tasks to models that will produce low-quality output.
+
+**Missing observability** — the gateway is the right place to log model_used, latency, token counts, and cost per request. Without this data you cannot tune routing rules or catch cost anomalies.
+
+## Try it yourself
+
+Build the `ModelGateway` class above with at least two real or mocked providers. Write a test that: (1) configures three model configs with different costs, (2) sends a request with `strategy="cost"` and verifies the cheapest eligible model was used, (3) makes that model raise an exception and verifies the gateway falls back to the second cheapest, (4) sends a request with `require_tools=True` and verifies only tool-capable models are in the candidate set. Log which model was used and the attempt number for each call.""",
             },
         ],
     },
