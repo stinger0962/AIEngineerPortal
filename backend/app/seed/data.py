@@ -10379,6 +10379,1176 @@ class GovernanceLayer:
             },
         ],
     },
+    {
+        "title": "Context Engineering",
+        "slug": "context-engineering",
+        "description": "The meta-skill of 2026: designing the entire information environment an LLM operates in. Goes beyond prompting to manage memory, retrieval, tool results, and context window budgets.",
+        "level": "intermediate",
+        "estimated_hours": 14,
+        "lessons": [
+            {
+                "title": "From prompt engineering to context engineering",
+                "summary": "Why crafting a single prompt is no longer enough, and how context engineering unifies prompting, RAG, memory, and tool use into one design discipline.",
+                "estimated_minutes": 35,
+                "content_md": """## Why this matters
+
+For years, "prompt engineering" was the headline skill for working with LLMs. Write a clearer instruction, add a few examples, and watch the output improve. That framing made sense when the entire interaction was a single user message plus a system prompt.
+
+Modern LLM applications are different. A production system assembles context from five or six distinct sources before the model ever sees the request. The system prompt carries behavioral instructions. Conversation history carries session memory. A retrieval step fetches relevant documents. Tool results from previous turns provide live data. A user profile injects personalization. Each of these contributes tokens, and the model's response quality depends on how well all of those pieces fit together.
+
+Context engineering is the discipline of designing, assembling, and managing the entire information environment an LLM operates in. Prompt engineering is one input to that discipline. RAG, memory management, and tool result formatting are the others.
+
+## Core concepts
+
+### The context stack
+
+Think of what the model receives as a stack of layers, assembled before every call:
+
+1. **System prompt** — static behavioral instructions, persona, constraints, output format requirements
+2. **User message** — the current turn's input
+3. **Conversation history** — prior turns, summarized or verbatim
+4. **Retrieved documents** — chunks from a vector store or search result
+5. **Tool results** — outputs from previous function calls in the current agent loop
+6. **Dynamic injections** — user profile, current date/time, feature flags, environment context
+
+Each layer competes for tokens. Decisions made at each layer affect the quality of the model's response at every other layer.
+
+### Why "write a better prompt" is no longer enough
+
+The failure modes of modern LLM systems are rarely about instruction clarity. They are about context composition:
+
+- The relevant document was retrieved but the history already consumed so many tokens that it was truncated
+- The tool result was injected verbatim but it was 8,000 tokens of raw JSON the model could not efficiently attend to
+- The system prompt was excellent but a conversation that ran 30 turns diluted its effect with irrelevant history
+- The retrieval was semantically correct but the formatting made it look like noise to the model
+
+These are context engineering failures, not prompt engineering failures.
+
+### Connecting the disciplines
+
+Context engineering is the unifying frame for prompting, RAG, memory management, and tool use. Each of these is a sub-discipline. Context engineering is the meta-discipline that governs how they interact.
+
+## Code: ContextBuilder
+
+```python
+from dataclasses import dataclass, field
+from enum import IntEnum
+
+
+class Priority(IntEnum):
+    SYSTEM = 0       # highest priority, never truncated
+    USER_INPUT = 1
+    TOOL_RESULTS = 2
+    RETRIEVAL = 3
+    HISTORY = 4      # lowest priority, first to be dropped
+
+
+@dataclass
+class ContextLayer:
+    role: str
+    content: str
+    priority: Priority
+    source: str = ""
+
+
+@dataclass
+class ContextBuilder:
+    max_tokens: int = 8000
+    layers: list[ContextLayer] = field(default_factory=list)
+
+    def add(self, role: str, content: str, priority: Priority, source: str = "") -> "ContextBuilder":
+        self.layers.append(ContextLayer(role, content, priority, source))
+        return self
+
+    def _estimate_tokens(self, text: str) -> int:
+        return max(1, len(text) // 4)
+
+    def build(self) -> list[dict]:
+        sorted_layers = sorted(self.layers, key=lambda l: l.priority)
+        budget = self.max_tokens
+        selected: list[ContextLayer] = []
+
+        for layer in sorted_layers:
+            cost = self._estimate_tokens(layer.content)
+            if cost <= budget:
+                selected.append(layer)
+                budget -= cost
+            elif layer.priority <= Priority.USER_INPUT:
+                selected.append(layer)
+                budget -= cost
+
+        order = [Priority.SYSTEM, Priority.RETRIEVAL, Priority.HISTORY,
+                 Priority.TOOL_RESULTS, Priority.USER_INPUT]
+        selected.sort(key=lambda l: order.index(l.priority))
+        return [{"role": l.role, "content": l.content} for l in selected]
+
+
+# Usage
+builder = ContextBuilder(max_tokens=6000)
+builder.add("system", system_prompt, Priority.SYSTEM)
+builder.add("user", user_profile_summary, Priority.RETRIEVAL)
+for doc in retrieved_docs:
+    builder.add("user", f"Reference: {doc}", Priority.RETRIEVAL)
+for turn in conversation_history:
+    builder.add(turn["role"], turn["content"], Priority.HISTORY)
+builder.add("user", current_user_message, Priority.USER_INPUT)
+messages = builder.build()
+```
+
+The key insight: each layer declares its priority when added. When the budget is tight, lower-priority layers are dropped automatically.
+
+## Common mistakes
+
+**Treating context as append-only.** Most starter implementations just append to a messages list. When the list grows beyond the context window, the call fails.
+
+**All layers have equal priority.** Without a priority system, you have no principled way to decide what to drop.
+
+**Not logging what was dropped.** When context is truncated, the model behaves differently and you will not know why.
+
+**Ignoring formatting overhead.** Markdown headers, bullet points, and code fences all consume tokens.
+
+## Try it yourself
+
+1. Extend `ContextBuilder` with a `build_with_report()` method that returns both the message list and a summary of tokens consumed per source.
+2. Add a `CRITICAL` priority level above `SYSTEM` for content that must always appear.
+3. Take a real multi-turn conversation and map each message to one of the five context stack layers. Which layers were the largest?
+""",
+            },
+            {
+                "title": "Context window budgeting",
+                "summary": "Token counting, priority-based context assembly, and truncation strategies for managing limited context windows in production.",
+                "estimated_minutes": 45,
+                "content_md": """## Why this matters
+
+Context windows have grown dramatically — 128K, 200K, even 1M tokens are available. It is tempting to assume the budget problem is solved. It is not.
+
+Large context windows have costs: latency increases with input length, pricing scales with tokens, and model attention quality degrades with excessive noise. The skill of context budgeting — allocating a finite token budget across competing sources — remains one of the highest-leverage practices in context engineering.
+
+## Core concepts
+
+### Token counting
+
+```python
+import tiktoken
+
+
+def count_tokens(text: str, model: str = "cl100k_base") -> int:
+    enc = tiktoken.get_encoding(model)
+    return len(enc.encode(text))
+
+
+def count_messages_tokens(messages: list[dict], model: str = "cl100k_base") -> int:
+    enc = tiktoken.get_encoding(model)
+    total = 0
+    for message in messages:
+        total += 4  # overhead per message
+        total += len(enc.encode(message.get("content", "")))
+    total += 2  # assistant turn priming
+    return total
+
+
+def estimate_tokens(text: str) -> int:
+    # ~4 chars per token, accurate to within 15% for English prose
+    return max(4, int(len(text) / 4))
+```
+
+### Priority-based allocation
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class BudgetAllocation:
+    system_prompt: int
+    conversation_history: int
+    retrieved_context: int
+    tool_results: int
+    user_input: int
+
+    @property
+    def total(self) -> int:
+        return (
+            self.system_prompt + self.conversation_history
+            + self.retrieved_context + self.tool_results + self.user_input
+        )
+
+
+# For a 16K context window, leaving 2K for the response:
+allocation = BudgetAllocation(
+    system_prompt=1500,
+    conversation_history=4000,
+    retrieved_context=6000,
+    tool_results=2000,
+    user_input=500,
+)
+```
+
+### Truncation strategies
+
+**Sliding window** — keep the most recent N tokens:
+
+```python
+def sliding_window(messages: list[dict], max_tokens: int, count_fn=estimate_tokens) -> list[dict]:
+    result, total = [], 0
+    for msg in reversed(messages):
+        cost = count_fn(msg["content"])
+        if total + cost > max_tokens:
+            break
+        result.append(msg)
+        total += cost
+    return list(reversed(result))
+```
+
+**Importance scoring** — keep the highest-scoring chunks:
+
+```python
+@dataclass
+class ScoredChunk:
+    content: str
+    score: float
+
+
+def importance_truncate(
+    chunks: list[ScoredChunk], max_tokens: int, count_fn=estimate_tokens
+) -> list[ScoredChunk]:
+    sorted_chunks = sorted(chunks, key=lambda c: c.score, reverse=True)
+    selected, total = [], 0
+    for chunk in sorted_chunks:
+        cost = count_fn(chunk.content)
+        if total + cost <= max_tokens:
+            selected.append(chunk)
+            total += cost
+    return sorted(selected, key=lambda c: chunks.index(c))
+```
+
+**Summarization** — compress rather than drop:
+
+```python
+async def summarize_history(messages: list[dict], client) -> str:
+    transcript = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in messages)
+    response = await client.messages.create(
+        model="claude-3-haiku-20240307",
+        max_tokens=300,
+        messages=[{"role": "user", "content": (
+            "Summarize the following conversation in 3-5 sentences. "
+            "Focus on decisions made and the current state of tasks.\n\n" + transcript
+        )}],
+    )
+    return response.content[0].text
+```
+
+## Code: ContextBudgetManager
+
+```python
+from dataclasses import dataclass
+from typing import Callable
+
+
+@dataclass
+class ContextBudgetManager:
+    total_context_window: int
+    response_reserve: int = 2048
+    count_fn: Callable[[str], int] = estimate_tokens
+
+    @property
+    def available_tokens(self) -> int:
+        return self.total_context_window - self.response_reserve
+
+    def allocate(
+        self,
+        system_prompt: str,
+        history: list[dict],
+        retrieved_docs: list[str],
+        tool_results: list[str],
+        user_input: str,
+    ) -> list[dict]:
+        budget = self.available_tokens
+        budget -= self.count_fn(system_prompt)
+        budget -= self.count_fn(user_input)
+
+        tool_budget = int(budget * 0.25)
+        tool_content = self._fit_items(tool_results, tool_budget)
+
+        retrieval_budget = int(budget * 0.50)
+        doc_content = self._fit_items(retrieved_docs, retrieval_budget)
+
+        history_budget = budget - tool_budget - retrieval_budget
+        trimmed_history = sliding_window(history, history_budget, self.count_fn)
+
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        if doc_content:
+            messages.append({"role": "user", "content": "Relevant context:\n" + doc_content})
+            messages.append({"role": "assistant", "content": "I have reviewed the context."})
+        messages.extend(trimmed_history)
+        if tool_content:
+            messages.append({"role": "user", "content": "Tool results:\n" + tool_content})
+            messages.append({"role": "assistant", "content": "I have reviewed the tool results."})
+        messages.append({"role": "user", "content": user_input})
+        return messages
+
+    def _fit_items(self, items: list[str], budget: int) -> str:
+        selected, total = [], 0
+        for item in items:
+            cost = self.count_fn(item)
+            if total + cost <= budget:
+                selected.append(item)
+                total += cost
+        return "\n\n---\n\n".join(selected)
+```
+
+## Common mistakes
+
+**Forgetting the response reserve.** If your context window is 8K and you fill 8K with input, the model has zero tokens to respond.
+
+**Token counting the wrong model.** Add a 10-15% safety margin when approximating across different tokenizers.
+
+**Static allocations that never adapt.** Dynamic allocation makes better use of available budget.
+
+**Counting tokens on every call.** Cache token counts for content that rarely changes.
+
+## Try it yourself
+
+1. Measure the actual token counts for the system prompt, conversation history, and retrieved documents in one of your LLM applications.
+2. Implement a `sliding_window` that preserves the first message in history even when it would normally be dropped.
+3. Compare `estimate_tokens` against `tiktoken` for five different text samples.
+""",
+            },
+            {
+                "title": "Memory architecture for AI applications",
+                "summary": "Three-tier memory design, conversation summarization for long sessions, and user preference persistence.",
+                "estimated_minutes": 50,
+                "content_md": """## Why this matters
+
+Memory is what transforms a stateless LLM call into a coherent AI application. Without memory, every conversation starts from scratch. The challenge is that LLMs have no built-in persistent state — memory is entirely an application-layer concern.
+
+## Core concepts
+
+### Three-tier memory architecture
+
+**Working memory** — the current context window. Capacity: ~8-128K tokens. Duration: one API call.
+
+**Short-term memory** — the current session. Stored in Redis or DynamoDB with TTL. Duration: hours to days.
+
+**Long-term memory** — persistent facts about the user or domain. Stored in a database or vector store. Duration: indefinite.
+
+### Conversation summarization
+
+When session history exceeds 60-70% of the history budget, summarize the oldest 50% of turns.
+
+```python
+async def maybe_summarize(
+    history: list[dict],
+    history_budget_tokens: int,
+    summarize_fn,
+    count_fn=estimate_tokens,
+) -> list[dict]:
+    total = sum(count_fn(m["content"]) for m in history)
+    if total < history_budget_tokens * 0.7:
+        return history
+
+    midpoint = len(history) // 2
+    summary_text = await summarize_fn(history[:midpoint])
+    return [
+        {"role": "user", "content": f"[Summary of earlier conversation]\n{summary_text}"},
+        {"role": "assistant", "content": "Understood. I have the context from our earlier discussion."},
+    ] + history[midpoint:]
+```
+
+### User preference storage
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class UserMemory:
+    user_id: str
+    preferences: dict
+    facts: list[str]
+    past_project_summaries: list[str]
+
+    def to_context_string(self) -> str:
+        lines = ["## User context"]
+        if self.preferences:
+            prefs = ", ".join(f"{k}: {v}" for k, v in self.preferences.items())
+            lines.append(f"Preferences: {prefs}")
+        if self.facts:
+            lines.append("Known facts:")
+            lines.extend(f"- {fact}" for fact in self.facts[:10])
+        return "\n".join(lines)
+```
+
+## Code: MemoryManager
+
+```python
+import json
+from dataclasses import dataclass, field
+from typing import Optional, Protocol
+
+
+class StorageBackend(Protocol):
+    async def get(self, key: str) -> Optional[str]: ...
+    async def set(self, key: str, value: str) -> None: ...
+
+
+@dataclass
+class MemoryManager:
+    user_id: str
+    storage: StorageBackend
+    summarize_fn: object
+    history_budget_tokens: int = 4000
+    _working_history: list[dict] = field(default_factory=list)
+
+    async def load_session(self, session_id: str) -> None:
+        raw = await self.storage.get(f"session:{session_id}:history")
+        if raw:
+            self._working_history = json.loads(raw)
+
+    async def save_session(self, session_id: str) -> None:
+        await self.storage.set(
+            f"session:{session_id}:history", json.dumps(self._working_history)
+        )
+
+    async def get_user_memory(self) -> Optional[UserMemory]:
+        raw = await self.storage.get(f"user:{self.user_id}:memory")
+        if not raw:
+            return None
+        return UserMemory(**json.loads(raw))
+
+    def add_turn(self, role: str, content: str) -> None:
+        self._working_history.append({"role": role, "content": content})
+
+    async def assemble_context(
+        self,
+        system_prompt: str,
+        user_input: str,
+        retrieved_docs: list[str] | None = None,
+    ) -> list[dict]:
+        messages = [{"role": "system", "content": system_prompt}]
+
+        user_memory = await self.get_user_memory()
+        if user_memory:
+            messages.append({"role": "user", "content": user_memory.to_context_string()})
+            messages.append({"role": "assistant", "content": "Got it."})
+
+        if retrieved_docs:
+            doc_block = "\n\n---\n\n".join(retrieved_docs[:5])
+            messages.append({"role": "user", "content": f"Relevant docs:\n{doc_block}"})
+            messages.append({"role": "assistant", "content": "I have reviewed these documents."})
+
+        history = await maybe_summarize(
+            self._working_history, self.history_budget_tokens, self.summarize_fn
+        )
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_input})
+        return messages
+```
+
+## Common mistakes
+
+**Storing everything in the session cache only.** Preferences learned in one session are lost when it expires.
+
+**Summarizing too aggressively.** Summarize at 60-70% capacity, not 20%.
+
+**No retrieval from long-term memory.** Use semantic search to retrieve only what is relevant to the current request.
+
+**Not persisting summaries.** Session-end summaries should become long-term memory entries.
+
+## Try it yourself
+
+1. Implement `StorageBackend` with an in-memory dict. Verify `save_session` and `load_session` round-trip correctly.
+2. Extend `UserMemory` with an `update_from_turn` method that detects preference statements.
+3. Design a schema for storing past project summaries for effective retrieval.
+""",
+            },
+            {
+                "title": "Dynamic context assembly",
+                "summary": "Task-aware context routing, intent classification to drive context composition, and A/B testing context strategies.",
+                "estimated_minutes": 45,
+                "content_md": """## Why this matters
+
+A coding assistant, a support bot, and a document Q&A tool all use LLMs but need radically different context. Dynamic context assembly routes requests through different assembly pipelines based on intent classification.
+
+## Core concepts
+
+### Intent classification as a routing signal
+
+```python
+from enum import Enum
+
+
+class RequestIntent(str, Enum):
+    CODE_GENERATION = "code_generation"
+    CODE_DEBUGGING = "code_debugging"
+    DOCUMENT_QA = "document_qa"
+    GENERAL_CHAT = "general_chat"
+    DATA_ANALYSIS = "data_analysis"
+    SYSTEM_DESIGN = "system_design"
+
+
+async def classify_intent(user_message: str, client) -> RequestIntent:
+    prompt = (
+        "Classify this request into one of these categories:\n"
+        "- code_generation, code_debugging, document_qa, "
+        "general_chat, data_analysis, system_design\n\n"
+        f"Request: {user_message}\n\n"
+        "Reply with only the category name, nothing else."
+    )
+    response = await client.messages.create(
+        model="claude-3-haiku-20240307",
+        max_tokens=20,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = response.content[0].text.strip().lower()
+    try:
+        return RequestIntent(raw)
+    except ValueError:
+        return RequestIntent.GENERAL_CHAT
+```
+
+### Context recipes by intent
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class ContextRecipe:
+    fetch_retrieval: bool
+    fetch_code_context: bool
+    history_turns: int
+    retrieval_doc_limit: int
+
+
+INTENT_RECIPES: dict[RequestIntent, ContextRecipe] = {
+    RequestIntent.CODE_GENERATION: ContextRecipe(
+        fetch_retrieval=False, fetch_code_context=True, history_turns=10, retrieval_doc_limit=0,
+    ),
+    RequestIntent.CODE_DEBUGGING: ContextRecipe(
+        fetch_retrieval=True, fetch_code_context=True, history_turns=15, retrieval_doc_limit=3,
+    ),
+    RequestIntent.DOCUMENT_QA: ContextRecipe(
+        fetch_retrieval=True, fetch_code_context=False, history_turns=5, retrieval_doc_limit=8,
+    ),
+    RequestIntent.GENERAL_CHAT: ContextRecipe(
+        fetch_retrieval=False, fetch_code_context=False, history_turns=20, retrieval_doc_limit=0,
+    ),
+}
+```
+
+### Feature flags for A/B testing
+
+```python
+import hashlib
+from dataclasses import dataclass
+
+
+@dataclass
+class ContextFlags:
+    enable_retrieval: bool = True
+    enable_history_summarization: bool = True
+    retrieval_chunk_limit: int = 5
+
+
+def load_context_flags(user_id: str, feature_store: dict) -> ContextFlags:
+    user_hash = int(hashlib.md5(user_id.encode()).hexdigest(), 16) % 100
+    return ContextFlags(
+        enable_history_summarization=user_hash < 50,
+        **feature_store.get("global_overrides", {}),
+    )
+```
+
+## Code: ContextRouter
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class ContextRouter:
+    client: object
+    memory_manager: MemoryManager
+    vector_store: object
+    feature_store: dict
+
+    async def route(self, user_message: str, session_id: str, system_prompt: str) -> list[dict]:
+        await self.memory_manager.load_session(session_id)
+        intent = await classify_intent(user_message, self.client)
+        recipe = INTENT_RECIPES.get(intent, INTENT_RECIPES[RequestIntent.GENERAL_CHAT])
+        flags = load_context_flags(self.memory_manager.user_id, self.feature_store)
+
+        retrieved_docs = None
+        if recipe.fetch_retrieval and flags.enable_retrieval:
+            try:
+                hits = await self.vector_store.search(
+                    user_message, limit=min(recipe.retrieval_doc_limit, flags.retrieval_chunk_limit)
+                )
+                retrieved_docs = [hit["content"] for hit in hits]
+            except Exception:
+                retrieved_docs = None
+
+        return await self.memory_manager.assemble_context(
+            system_prompt=system_prompt,
+            user_input=user_message,
+            retrieved_docs=retrieved_docs,
+        )
+```
+
+## Common mistakes
+
+**Classifying intent with an expensive model.** Use a fast, cheap model. Target under 200ms latency.
+
+**One giant assembly function.** Separate recipes make each intent's requirements explicit and testable.
+
+**No fallback when classification fails.** Always have a safe default recipe.
+
+**Not logging the classified intent.** Log intent and recipe for every request.
+
+## Try it yourself
+
+1. Add a `SYSTEM_DESIGN` recipe. What context components would be most useful?
+2. Implement keyword-matching intent classification. Compare its accuracy to the LLM version.
+3. Design an A/B test for retrieval chunk count. What metric would you track?
+""",
+            },
+            {
+                "title": "Tool results in context",
+                "summary": "Formatting tool outputs for LLM comprehension, compressing large tool results, and structuring multi-tool context injection.",
+                "estimated_minutes": 40,
+                "content_md": """## Why this matters
+
+Most implementations paste raw tool output into context and move on. This leaves significant quality on the table. Raw tool results are often poorly formatted for LLM comprehension — a database query returns raw JSON, a web search returns HTML. When these outputs land verbatim, the model works harder to extract signal, and large noisy results crowd out more important context.
+
+## Core concepts
+
+### How tool results enter the context
+
+```
+user:      "What's the weather in London?"
+assistant: [tool_call: get_weather(location="London")]
+tool:      {"temperature": 14, "condition": "cloudy", "humidity": 78}
+assistant: "It's 14 degrees Celsius and cloudy in London right now."
+```
+
+### Formatting principles
+
+**Be explicit.** `{"temp": 14}` is less useful than `Current temperature: 14 degrees Celsius`.
+
+**Match format to query type.** Tabular data belongs in a table, not a JSON blob.
+
+**Strip noise.** HTTP headers, pagination metadata, and stack traces are rarely useful.
+
+### Handling large tool outputs
+
+Three approaches when a tool returns more than the budget allows:
+
+1. **Extraction** — pull only fields relevant to the query
+2. **Truncation** — keep the first N tokens with a "[truncated]" marker
+3. **Summarization** — use a fast model to compress
+
+```python
+async def summarize_tool_result(result_text: str, query: str, client) -> str:
+    response = await client.messages.create(
+        model="claude-3-haiku-20240307",
+        max_tokens=200,
+        messages=[{"role": "user", "content": (
+            f"Tool result for query \"{query}\":\n{result_text[:4000]}\n\n"
+            "Summarize in 50 words or fewer, focusing on information relevant to the query."
+        )}],
+    )
+    return response.content[0].text
+```
+
+## Code: ToolResultFormatter
+
+```python
+import json
+from dataclasses import dataclass
+from typing import Any, Callable
+
+
+@dataclass
+class FormattedToolResult:
+    tool_name: str
+    formatted_content: str
+    original_token_estimate: int
+    formatted_token_estimate: int
+
+    @property
+    def compression_ratio(self) -> float:
+        if self.original_token_estimate == 0:
+            return 1.0
+        return self.formatted_token_estimate / self.original_token_estimate
+
+
+class ToolResultFormatter:
+    def __init__(
+        self,
+        max_tokens_per_result: int = 1000,
+        count_fn: Callable[[str], int] = estimate_tokens,
+        summarize_fn=None,
+    ):
+        self.max_tokens = max_tokens_per_result
+        self.count_fn = count_fn
+        self.summarize_fn = summarize_fn
+
+    def format_json_result(self, data: Any, tool_name: str) -> str:
+        if isinstance(data, dict):
+            lines = [f"**{tool_name} result:**"]
+            for key, value in data.items():
+                if key.startswith("_") or key in ("metadata", "headers", "debug"):
+                    continue
+                lines.append(f"- {key}: {value}")
+            return "\n".join(lines)
+        elif isinstance(data, list):
+            preview = data[:20]
+            suffix = f"\n[... {len(data) - 20} more items omitted]" if len(data) > 20 else ""
+            lines = [f"**{tool_name} result ({len(data)} items):**"]
+            lines.extend(f"- {json.dumps(item)}" for item in preview)
+            return "\n".join(lines) + suffix
+        return f"**{tool_name} result:** {data}"
+
+    async def process(self, tool_name: str, raw_result: Any, query: str = "") -> FormattedToolResult:
+        if isinstance(raw_result, (dict, list)):
+            original_text = json.dumps(raw_result, indent=2)
+            formatted = self.format_json_result(raw_result, tool_name)
+        else:
+            original_text = str(raw_result)
+            formatted = f"**{tool_name} result:**\n{original_text}"
+
+        original_tokens = self.count_fn(original_text)
+        formatted_tokens = self.count_fn(formatted)
+
+        if formatted_tokens > self.max_tokens and self.summarize_fn and query:
+            summary = await self.summarize_fn(formatted, query)
+            formatted = f"**{tool_name} result (summarized):**\n{summary}"
+            formatted_tokens = self.count_fn(formatted)
+        elif formatted_tokens > self.max_tokens:
+            formatted = formatted[: self.max_tokens * 4] + "\n[truncated]"
+            formatted_tokens = self.max_tokens
+
+        return FormattedToolResult(
+            tool_name=tool_name,
+            formatted_content=formatted,
+            original_token_estimate=original_tokens,
+            formatted_token_estimate=formatted_tokens,
+        )
+
+    async def process_multiple(
+        self, tool_results: list[tuple[str, Any]], query: str = ""
+    ) -> list[FormattedToolResult]:
+        import asyncio
+        return await asyncio.gather(
+            *[self.process(name, result, query) for name, result in tool_results]
+        )
+```
+
+## Common mistakes
+
+**Injecting raw API responses.** Always extract the payload before injecting.
+
+**No token awareness.** Every tool result should go through a formatter that knows the budget.
+
+**Losing information silently.** Log the compression ratio and what was dropped.
+
+**Treating all JSON the same.** Write format logic specific to each tool's output shape.
+
+## Try it yourself
+
+1. Implement a `format_table_result` method that formats database rows as a compact markdown table.
+2. Write a test that calls `process()` with a JSON result 3x over budget and verifies the output is within budget.
+3. Call a real API and format its response verbatim vs. with `ToolResultFormatter`. Compare token counts.
+""",
+            },
+            {
+                "title": "Context quality and debugging",
+                "summary": "Diagnosing when models ignore context, relevance scoring, attention analysis, and common context failure modes.",
+                "estimated_minutes": 40,
+                "content_md": """## Why this matters
+
+"The model is ignoring the instructions." These are context engineering failures — frustrating to debug because the problem is in the assembled context you are sending to the model, not in the code itself.
+
+Context debugging is a systematic practice with known failure modes, measurable quality signals, and concrete diagnostic steps.
+
+## Core concepts
+
+### How context failures manifest
+
+- **Instruction dilution**: the model follows instructions inconsistently as conversation length grows
+- **Context pollution**: irrelevant content misdirects the model — a retrieved document that was semantically adjacent but factually wrong for the query
+- **Recency bias**: the model disproportionately attends to content near the end of the context
+- **Lost-in-the-middle**: content in the middle of a long context receives less attention than content at the beginning and end
+
+### Context relevance scoring
+
+Score each retrieved chunk against the query before including it.
+
+```python
+import math
+from typing import Callable
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x ** 2 for x in a))
+    norm_b = math.sqrt(sum(x ** 2 for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+async def score_context_relevance(
+    query: str,
+    context_chunks: list[str],
+    embed_fn: Callable[[str], list[float]],
+    threshold: float = 0.6,
+) -> list[tuple[str, float]]:
+    query_embedding = await embed_fn(query)
+    results = []
+    for chunk in context_chunks:
+        chunk_embedding = await embed_fn(chunk)
+        results.append((chunk, cosine_similarity(query_embedding, chunk_embedding)))
+    return sorted(
+        [(c, s) for c, s in results if s >= threshold], key=lambda x: x[1], reverse=True
+    )
+```
+
+### Instruction dilution diagnosis
+
+Run your system prompt plus a test query at different history lengths (0, 5, 10, 20 turns). Measure whether a specific constraint is followed at each length. If compliance drops, you have instruction dilution.
+
+Mitigations: re-inject critical instructions before the final user message; summarize history more aggressively; use shorter system prompts.
+
+## Code: ContextDebugger
+
+```python
+from dataclasses import dataclass, field
+from typing import Callable
+
+
+@dataclass
+class ContextReport:
+    total_tokens: int
+    layer_breakdown: dict[str, int]
+    dropped_layers: list[str]
+    relevance_scores: dict[str, float]
+    warnings: list[str]
+
+
+@dataclass
+class ContextDebugger:
+    count_fn: Callable[[str], int] = estimate_tokens
+    relevance_threshold: float = 0.6
+
+    def analyze_messages(self, messages: list[dict]) -> ContextReport:
+        total, breakdown, warnings = 0, {}, []
+
+        for i, msg in enumerate(messages):
+            content = msg.get("content", "")
+            tokens = self.count_fn(content)
+            breakdown[f"{msg['role']}[{i}]"] = tokens
+            total += tokens
+
+        if len(messages) > 6:
+            middle_start = len(messages) // 4
+            middle_end = 3 * len(messages) // 4
+            middle_tokens = sum(
+                self.count_fn(messages[i].get("content", ""))
+                for i in range(middle_start, middle_end)
+            )
+            if middle_tokens > total * 0.5:
+                warnings.append(
+                    f"Lost-in-the-middle risk: {middle_tokens}/{total} tokens "
+                    f"({100 * middle_tokens // total}%) are in the middle of context."
+                )
+
+        sys_msgs = [m for m in messages if m.get("role") == "system"]
+        if sys_msgs and self.count_fn(sys_msgs[0]["content"]) > 2000:
+            warnings.append(
+                f"System prompt is {self.count_fn(sys_msgs[0]['content'])} tokens "
+                "— consider trimming to reduce instruction dilution risk."
+            )
+
+        return ContextReport(
+            total_tokens=total, layer_breakdown=breakdown,
+            dropped_layers=[], relevance_scores={}, warnings=warnings,
+        )
+
+    def check_instruction_coverage(
+        self, messages: list[dict], required_instructions: list[str]
+    ) -> list[str]:
+        full_context = " ".join(m.get("content", "") for m in messages)
+        return [i for i in required_instructions if i.lower() not in full_context.lower()]
+
+    async def full_debug_report(
+        self,
+        messages: list[dict],
+        query: str,
+        retrieved_chunks: list[str],
+        embed_fn,
+        required_instructions: list[str] | None = None,
+    ) -> ContextReport:
+        report = self.analyze_messages(messages)
+
+        if retrieved_chunks:
+            scored = await score_context_relevance(
+                query, retrieved_chunks, embed_fn, self.relevance_threshold
+            )
+            report.relevance_scores = {f"chunk_{i}": s for i, (_, s) in enumerate(scored)}
+            low = [i for i, (_, s) in enumerate(scored) if s < self.relevance_threshold]
+            if low:
+                report.warnings.append(
+                    f"Context pollution: {len(low)} chunks below threshold {self.relevance_threshold}."
+                )
+
+        if required_instructions:
+            missing = self.check_instruction_coverage(messages, required_instructions)
+            if missing:
+                report.warnings.append(f"Missing instructions in assembled context: {missing}")
+
+        return report
+```
+
+## Common mistakes
+
+**Only checking the final response.** Add context quality checks before the LLM call, not just after.
+
+**Not logging context.** Log the full assembled context for anomalous responses.
+
+**Treating all warnings as errors.** Quality signals are indicators, not hard failures.
+
+**Not testing at scale.** Run your debugger over 50 real conversations, not just one.
+
+## Try it yourself
+
+1. Run `ContextDebugger.analyze_messages()` on a real conversation from your LLM application.
+2. Implement a `recency_bias_score` method that measures the ratio of tokens in the last quarter vs. the first quarter.
+3. Write a test that verifies a required instruction is present in every assembled context.
+""",
+            },
+            {
+                "title": "Production context pipelines",
+                "summary": "End-to-end context assembly in production: caching, parallel fetching, latency optimization, and quality metrics.",
+                "estimated_minutes": 45,
+                "content_md": """## Why this matters
+
+A context pipeline in development runs in under 100ms. The same pipeline in production needs to serve thousands of concurrent users, each requiring fresh embeddings, database lookups, and possibly LLM-based summarization before the main model call starts.
+
+Production context engineering is about making that pipeline fast, reliable, and observable.
+
+## Core concepts
+
+### Component caching
+
+| Component | Cache duration | Cache key |
+|---|---|---|
+| User profile | 1 hour | `user:{id}:profile` |
+| System prompt tokens | Indefinitely | `system_prompt:{hash}` |
+| Session summary | Until next summarization | `session:{id}:summary` |
+| Query embeddings | 15 minutes | `embed:{hash(query)}` |
+| Retrieved chunks | 5 minutes | `retrieval:{hash(query)}:{k}` |
+
+```python
+import hashlib
+import json
+from typing import Any, Callable
+
+
+class ContextCache:
+    def __init__(self, backend):
+        self.backend = backend
+
+    def _key(self, prefix: str, content: str) -> str:
+        return f"{prefix}:{hashlib.sha256(content.encode()).hexdigest()[:16]}"
+
+    async def get_or_compute(
+        self, prefix: str, content: str, compute_fn: Callable[[], Any], ttl_seconds: int = 300
+    ) -> Any:
+        key = self._key(prefix, content)
+        cached = await self.backend.get(key)
+        if cached is not None:
+            return json.loads(cached)
+        result = await compute_fn()
+        await self.backend.set(key, json.dumps(result), ex=ttl_seconds)
+        return result
+```
+
+### Parallel context fetching
+
+```python
+import asyncio
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass
+class ContextComponents:
+    user_profile: Optional[str]
+    retrieved_docs: list[str]
+    session_history: list[dict]
+    tool_results: list[str]
+
+
+async def fetch_context_parallel(
+    user_id: str, query: str, session_id: str,
+    vector_store, user_store, session_store, retrieval_k: int = 5,
+) -> ContextComponents:
+    profile, retrieval, history = await asyncio.gather(
+        user_store.get_profile(user_id),
+        vector_store.search(query, k=retrieval_k),
+        session_store.get_history(session_id),
+        return_exceptions=True,
+    )
+    return ContextComponents(
+        user_profile=profile if not isinstance(profile, Exception) else None,
+        retrieved_docs=[hit["content"] for hit in retrieval] if not isinstance(retrieval, Exception) else [],
+        session_history=history if not isinstance(history, Exception) else [],
+        tool_results=[],
+    )
+```
+
+`return_exceptions=True` ensures a single slow fetch does not block the others.
+
+### Latency budgets
+
+```python
+CONTEXT_FETCH_TIMEOUT_SEC = 1.5
+
+
+async def with_timeout(coro, timeout: float, fallback=None):
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        return fallback
+```
+
+A response without retrieved documents is better than no response at all.
+
+## Code: ProductionContextPipeline
+
+```python
+import asyncio
+import time
+import logging
+from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PipelineMetrics:
+    total_latency_ms: float = 0
+    fetch_latency_ms: float = 0
+    assemble_latency_ms: float = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
+    context_tokens: int = 0
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ProductionContextPipeline:
+    vector_store: object
+    user_store: object
+    session_store: object
+    cache: ContextCache
+    memory_manager: MemoryManager
+    formatter: ToolResultFormatter
+    debugger: ContextDebugger
+
+    async def assemble(
+        self,
+        user_id: str,
+        session_id: str,
+        query: str,
+        system_prompt: str,
+        tool_results: list[tuple[str, object]] | None = None,
+    ) -> tuple[list[dict], PipelineMetrics]:
+        metrics = PipelineMetrics()
+        t0 = time.monotonic()
+
+        t1 = time.monotonic()
+        cache_key = f"{user_id}:{session_id}:{hash(query) % 100000}"
+        components = await self.cache.get_or_compute(
+            "ctx", cache_key,
+            lambda: fetch_context_parallel(
+                user_id, query, session_id,
+                self.vector_store, self.user_store, self.session_store,
+            ),
+            ttl_seconds=60,
+        )
+        metrics.fetch_latency_ms = (time.monotonic() - t1) * 1000
+
+        if tool_results:
+            await self.formatter.process_multiple(tool_results, query=query)
+
+        t2 = time.monotonic()
+        await self.memory_manager.load_session(session_id)
+        for turn in components.session_history:
+            self.memory_manager.add_turn(turn["role"], turn["content"])
+
+        messages = await self.memory_manager.assemble_context(
+            system_prompt=system_prompt,
+            user_input=query,
+            retrieved_docs=components.retrieved_docs,
+        )
+        metrics.assemble_latency_ms = (time.monotonic() - t2) * 1000
+
+        report = self.debugger.analyze_messages(messages)
+        metrics.context_tokens = report.total_tokens
+        metrics.warnings = report.warnings
+        metrics.total_latency_ms = (time.monotonic() - t0) * 1000
+
+        logger.info(
+            "context_pipeline_complete",
+            extra={
+                "user_id": user_id,
+                "total_latency_ms": metrics.total_latency_ms,
+                "context_tokens": metrics.context_tokens,
+            },
+        )
+        return messages, metrics
+```
+
+### Production monitoring
+
+Track these metrics in your observability platform:
+
+- **p50/p95/p99 context assembly latency** — catch slowdowns before they affect users
+- **Context tokens per request** — monitor for gradual bloat
+- **Cache hit rate** — a low hit rate suggests incorrect TTL or cache keys
+- **Context warning rate** — fraction of requests triggering quality warnings
+
+```python
+def emit_context_metrics(metrics: PipelineMetrics, statsd_client) -> None:
+    statsd_client.timing("context.latency_ms", metrics.total_latency_ms)
+    statsd_client.gauge("context.tokens", metrics.context_tokens)
+    statsd_client.increment("context.cache_hits", metrics.cache_hits)
+    statsd_client.increment("context.cache_misses", metrics.cache_misses)
+    if metrics.warnings:
+        statsd_client.increment("context.quality_warnings", len(metrics.warnings))
+```
+
+## Common mistakes
+
+**Sequential fetching in the hot path.** Confirm that independent fetches run concurrently.
+
+**No timeout on context assembly.** Always set a hard timeout with a graceful degradation path.
+
+**Caching assembled messages rather than components.** Cache components and re-assemble each turn.
+
+**Not alarming on quality warnings.** Wire warning counts to an alert threshold.
+
+## Try it yourself
+
+1. Implement a benchmark that runs `assemble()` 100 times and reports p50, p95, and p99 latency.
+2. Add a circuit breaker to the vector store fetch: skip retrieval after 5 failures in 30 seconds.
+3. Design a canary deployment strategy for context pipeline changes. What metrics would you monitor during a 5% rollout?
+""",
+            },
+        ],
+    },
 ]
 
 COURSES = [

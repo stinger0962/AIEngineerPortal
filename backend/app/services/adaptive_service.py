@@ -53,6 +53,11 @@ PATH_MASTERY_CONFIG = {
         "interview_categories": ["evaluation", "deployment"],
         "project_categories": ["eval-tooling", "agent-system"],
     },
+    "context-engineering": {
+        "exercise_categories": ["prompt-formatting", "api-async"],
+        "interview_categories": ["llm-systems", "system-design"],
+        "project_categories": ["rag-app", "agent-system"],
+    },
 }
 
 NEWS_TO_PATH = {
