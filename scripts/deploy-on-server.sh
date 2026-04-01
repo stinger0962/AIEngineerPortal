@@ -43,4 +43,18 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml up -d --build --force-recreate --remove-orphans
+# Ensure swap exists to prevent OOM during Docker builds (2GB droplet)
+if [ ! -f /swapfile ]; then
+  echo "Creating 2GB swap..."
+  fallocate -l 2G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+swapon /swapfile 2>/dev/null || true
+
+# Build services one at a time to reduce peak memory usage
+docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml build backend
+docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml build frontend
+docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml up -d --force-recreate --remove-orphans
