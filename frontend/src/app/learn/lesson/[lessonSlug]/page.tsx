@@ -17,7 +17,7 @@ export default async function LessonPage({ params }: { params: Promise<{ lessonS
   }
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
+    <div className="space-y-6">
       {/* Back link */}
       <Link
         href="/learn"
