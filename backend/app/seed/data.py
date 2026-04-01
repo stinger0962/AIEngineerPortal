@@ -2873,6 +2873,367 @@ async def classify_with_fallback(
 3. Write a fuzz test that passes 20 malformed model responses (wrong types, missing fields, markdown fences, JSON with prose) to `parse_structured_output`. Verify all cases return the fallback rather than raising.
 """,
             },
+            {
+                "title": "LangChain fundamentals: chains, prompts, and parsers",
+                "summary": "Learn when LangChain adds value, how LCEL composes pipelines, and how to produce structured output with Pydantic parsers.",
+                "estimated_minutes": 45,
+                "content_md": """## Why this matters
+
+LangChain is everywhere in AI engineering job descriptions, but it is also one of the most misunderstood tools in the ecosystem. Engineers either avoid it entirely ("too much magic") or reach for it by default and then fight its abstractions. The productive middle ground is knowing exactly what problem it solves, when it is worth its weight, and how to use its best ideas without letting it own your architecture.
+
+For a senior engineer moving into AI roles, demonstrating clear-headed framework judgment — rather than cargo-culting or reflexive rejection — is a strong signal.
+
+## Core concepts
+
+### What LangChain solves (and when NOT to use it)
+
+LangChain solves three real problems:
+
+1. **Provider portability** — swap OpenAI for Anthropic for a local model with one line change.
+2. **Pipeline composition** — chain prompt → LLM → parser into a readable, testable unit.
+3. **Output parsing** — structured extraction from LLM responses without boilerplate.
+
+When NOT to use it:
+
+- Single-provider apps with no plans to switch. Direct SDK calls are simpler and more debuggable.
+- Streaming-heavy applications. LCEL adds latency overhead on the first token.
+- Teams unfamiliar with LangChain internals. Debugging a `RunnableSequence` stack trace is painful without context.
+- Tiny scripts. The import cost alone is not worth it for a 30-line utility.
+
+### Chain composition: PromptTemplate → LLM → OutputParser
+
+The fundamental LangChain pattern is a three-step chain:
+
+```python
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_anthropic import ChatAnthropic
+from langchain_core.output_parsers import StrOutputParser
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant."),
+    ("human", "{question}"),
+])
+
+llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+parser = StrOutputParser()
+
+chain = prompt | llm | parser
+
+result = chain.invoke({"question": "What is LCEL?"})
+print(result)
+```
+
+The `|` operator is LCEL. Each component is a `Runnable` with a consistent `.invoke()` / `.stream()` / `.batch()` interface.
+
+### LCEL (LangChain Expression Language) for readable pipelines
+
+LCEL makes complex pipelines readable by expressing them as data flow:
+
+```python
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain_anthropic import ChatAnthropic
+from langchain_core.output_parsers import StrOutputParser
+
+def retrieve_context(query: str) -> str:
+    # Placeholder for a real retrieval step
+    return f"Relevant context for: {query}"
+
+llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+
+rag_chain = (
+    {"context": RunnableLambda(retrieve_context), "question": RunnablePassthrough()}
+    | ChatPromptTemplate.from_messages([
+        ("system", "Answer using only this context:\\n{context}"),
+        ("human", "{question}"),
+    ])
+    | llm
+    | StrOutputParser()
+)
+
+answer = rag_chain.invoke("How does retrieval work?")
+```
+
+This reads like a pipeline diagram. Each `|` is a step; each dict is a data transformation. Compare this to equivalent imperative code with four separate function calls and you will see why LCEL exists.
+
+### Structured output parsing with Pydantic
+
+For structured extraction, LangChain's `.with_structured_output()` method wires a Pydantic model to the LLM call automatically:
+
+```python
+from pydantic import BaseModel, Field
+from langchain_anthropic import ChatAnthropic
+
+class SupportTicketClassification(BaseModel):
+    category: str = Field(description="One of: billing, technical, account, feature_request")
+    priority: str = Field(description="One of: low, medium, high, urgent")
+    summary: str = Field(description="One-sentence summary of the issue")
+    requires_human: bool = Field(description="True if this needs a human agent")
+
+llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+structured_llm = llm.with_structured_output(SupportTicketClassification)
+
+ticket = "My payment failed three times and I can't access my account. This is urgent."
+result = structured_llm.invoke(ticket)
+
+print(result.category)        # "billing"
+print(result.priority)        # "urgent"
+print(result.requires_human)  # True
+```
+
+`.with_structured_output()` handles tool-calling under the hood and returns a validated Pydantic object. No regex, no JSON parsing, no `try/except` around `json.loads`.
+
+### Full working example: support ticket classifier chain
+
+```python
+from pydantic import BaseModel, Field
+from langchain_anthropic import ChatAnthropic
+from langchain_core.prompts import ChatPromptTemplate
+
+class TicketClassification(BaseModel):
+    category: str = Field(description="One of: billing, technical, account, feature_request")
+    priority: str = Field(description="One of: low, medium, high, urgent")
+    summary: str = Field(description="One-sentence summary")
+    requires_human: bool = Field(description="True if escalation is needed")
+
+def build_classifier():
+    llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+    structured_llm = llm.with_structured_output(TicketClassification)
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", (
+            "You classify customer support tickets. "
+            "Respond with accurate category, priority, and escalation need."
+        )),
+        ("human", "Ticket: {ticket_text}"),
+    ])
+
+    return prompt | structured_llm
+
+classifier = build_classifier()
+
+tickets = [
+    "Can't log in after resetting password",
+    "Your AI feature is wrong and I want a refund NOW",
+    "Would love dark mode in the dashboard",
+]
+
+for ticket in tickets:
+    result = classifier.invoke({"ticket_text": ticket})
+    print(f"[{result.priority.upper()}] {result.category}: {result.summary}")
+    if result.requires_human:
+        print("  -> Escalate to human agent")
+```
+
+## Common mistakes
+
+**Wrapping a single LLM call in a chain.** If you are calling one model with one prompt and not sharing the chain anywhere, LCEL adds indirection without benefit. Use the SDK directly.
+
+**Using LangChain's memory classes.** LangChain's built-in memory abstractions (`ConversationBufferMemory`, etc.) are confusing and often leaky. Manage conversation history yourself as a list of messages — it takes 10 lines and is fully transparent.
+
+**Ignoring fallback configuration.** A chain that raises an exception on provider errors is not production-ready. Use `.with_fallbacks([backup_llm])` or handle errors at the application layer.
+
+**Parsing errors silently discarded.** `.with_structured_output()` can raise `OutputParserException`. Always wrap classifier chains in try/except and handle parse failures explicitly.
+
+## Try it yourself
+
+Build a `DocumentTagger` chain that takes a document string and returns a Pydantic model with: `topics: list[str]`, `sentiment: Literal["positive", "neutral", "negative"]`, `word_count_estimate: int`, and `is_technical: bool`. Test it on five documents from different domains. Then swap the LLM from Anthropic to OpenAI and verify the same chain works without changing the prompt or parser.
+""",
+            },
+            {
+                "title": "Provider abstraction patterns",
+                "summary": "Compare LangChain's model interface against direct SDK calls, understand the callback system, and decide when abstraction pays off.",
+                "estimated_minutes": 40,
+                "content_md": """## Why this matters
+
+Every AI team eventually faces the same question: do we wrap the provider SDK, or use it directly? The answer changes the codebase's testability, portability, and operational complexity. LangChain's model interface is one answer. Rolling your own thin wrapper is another. Knowing the tradeoffs — and the concrete costs of each — is the kind of architectural judgment that distinguishes senior AI engineers.
+
+## Core concepts
+
+### LangChain's model interface vs rolling your own
+
+LangChain's chat model interface normalizes the provider API to a single method signature:
+
+```python
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import HumanMessage, AIMessage
+
+# Works identically for Anthropic, OpenAI, Google, local models
+def generate_response(llm: BaseChatModel, question: str) -> str:
+    messages = [HumanMessage(content=question)]
+    response = llm.invoke(messages)
+    return response.content
+```
+
+Your own thin wrapper looks like:
+
+```python
+from typing import Protocol
+
+class LLMClient(Protocol):
+    def generate(self, prompt: str, system: str = "") -> str: ...
+
+class AnthropicClient:
+    def __init__(self, model: str = "claude-3-5-sonnet-20241022"):
+        import anthropic
+        self._client = anthropic.Anthropic()
+        self._model = model
+
+    def generate(self, prompt: str, system: str = "") -> str:
+        response = self._client.messages.create(
+            model=self._model,
+            max_tokens=1024,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.content[0].text
+```
+
+The Protocol approach is simpler, has zero external dependencies, and is easier to mock in tests. LangChain's interface is richer but requires understanding its message types, `invoke()` vs `stream()` vs `batch()`, and how it handles tool calls.
+
+### When to use LangChain vs direct SDK calls
+
+| Situation | Recommendation |
+|---|---|
+| Single provider, simple prompts | Direct SDK calls |
+| Multiple providers, same prompt logic | LangChain model abstraction |
+| Complex chains with branching | LCEL |
+| Need streaming to the UI | Direct SDK (simpler control) |
+| Structured output with Pydantic | LangChain `.with_structured_output()` |
+| Rapid prototyping | Either; LangChain has more batteries |
+| Production service, team unfamiliar with LC | Direct SDK + thin wrapper |
+
+### Callback system for logging and tracing
+
+LangChain's callback system is one of its most underrated features. Callbacks fire at every step of a chain execution: on start, on token, on end, on error.
+
+```python
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.outputs import LLMResult
+import time
+import logging
+
+logger = logging.getLogger(__name__)
+
+class LatencyAndCostCallback(BaseCallbackHandler):
+    def __init__(self):
+        self._start_times: dict[str, float] = {}
+
+    def on_llm_start(self, serialized: dict, prompts: list[str], **kwargs) -> None:
+        run_id = str(kwargs.get("run_id", "unknown"))
+        self._start_times[run_id] = time.monotonic()
+        logger.info("llm_start", extra={"model": serialized.get("name"), "run_id": run_id})
+
+    def on_llm_end(self, response: LLMResult, **kwargs) -> None:
+        run_id = str(kwargs.get("run_id", "unknown"))
+        start = self._start_times.pop(run_id, time.monotonic())
+        latency_ms = int((time.monotonic() - start) * 1000)
+        usage = response.llm_output.get("usage", {}) if response.llm_output else {}
+        logger.info(
+            "llm_end",
+            extra={
+                "run_id": run_id,
+                "latency_ms": latency_ms,
+                "input_tokens": usage.get("input_tokens", 0),
+                "output_tokens": usage.get("output_tokens", 0),
+            },
+        )
+
+    def on_llm_error(self, error: Exception, **kwargs) -> None:
+        logger.error("llm_error", extra={"error": str(error)})
+
+# Attach to any chain
+from langchain_anthropic import ChatAnthropic
+callback = LatencyAndCostCallback()
+llm = ChatAnthropic(model="claude-3-5-sonnet-20241022", callbacks=[callback])
+```
+
+This is the LangChain equivalent of middleware. You get observability without polluting your business logic.
+
+### Same task: LangChain vs bare Anthropic SDK
+
+Here is a support ticket classifier implemented both ways, so you can see the real tradeoffs.
+
+**With LangChain:**
+
+```python
+from pydantic import BaseModel, Field
+from langchain_anthropic import ChatAnthropic
+from langchain_core.prompts import ChatPromptTemplate
+
+class TicketResult(BaseModel):
+    category: str = Field(description="billing, technical, account, or feature_request")
+    priority: str = Field(description="low, medium, high, or urgent")
+
+def classify_with_langchain(ticket: str) -> TicketResult:
+    llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+    structured = llm.with_structured_output(TicketResult)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "Classify this support ticket."),
+        ("human", "{ticket}"),
+    ])
+    chain = prompt | structured
+    return chain.invoke({"ticket": ticket})
+```
+
+**With bare Anthropic SDK:**
+
+```python
+import anthropic
+import json
+from pydantic import BaseModel, Field
+
+class TicketResult(BaseModel):
+    category: str = Field(description="billing, technical, account, or feature_request")
+    priority: str = Field(description="low, medium, high, or urgent")
+
+def classify_with_sdk(ticket: str) -> TicketResult:
+    client = anthropic.Anthropic()
+    tool_schema = {
+        "name": "classify_ticket",
+        "description": "Classify a support ticket",
+        "input_schema": TicketResult.model_json_schema(),
+    }
+    response = client.messages.create(
+        model="claude-3-5-sonnet-20241022",
+        max_tokens=256,
+        system="Classify this support ticket.",
+        messages=[{"role": "user", "content": ticket}],
+        tools=[tool_schema],
+        tool_choice={"type": "tool", "name": "classify_ticket"},
+    )
+    tool_use = next(b for b in response.content if b.type == "tool_use")
+    return TicketResult.model_validate(tool_use.input)
+```
+
+**Tradeoffs:**
+
+| | LangChain | Bare SDK |
+|---|---|---|
+| Lines of code | ~10 | ~18 |
+| Dependencies | langchain + langchain-anthropic | anthropic |
+| Stack trace clarity | Poor (many wrappers) | Excellent |
+| Provider swap | One line | Rewrite tool schema |
+| Callback/tracing | Built-in | Manual |
+| Debuggability | Harder | Easier |
+
+For a single-provider internal tool: bare SDK. For a multi-provider product feature: LangChain.
+
+## Common mistakes
+
+**Mixing LangChain message types with raw dicts.** LangChain uses `HumanMessage`, `AIMessage`, `SystemMessage` objects. The raw Anthropic SDK uses dicts with `role` and `content` keys. They are not interchangeable. Pick one layer and stay there.
+
+**Using LangChain callbacks for business logic.** Callbacks are for observability (logging, tracing, metrics). Putting business logic in an `on_llm_end` callback creates hidden side effects that are extremely hard to test.
+
+**Not setting `verbose=False` in production.** LangChain defaults to printing chain execution to stdout. In production services, this floods logs. Always initialize with `verbose=False` or configure logging properly.
+
+**Assuming LangChain handles retries.** It does not retry on provider rate limits by default. Add retry logic at the HTTP client level or use a library like `tenacity` regardless of which abstraction you use.
+
+## Try it yourself
+
+Implement the same task — extracting a `MeetingNotes` Pydantic model with `attendees: list[str]`, `action_items: list[str]`, and `decisions: list[str]` from a raw meeting transcript — using both LangChain and the bare Anthropic SDK. Time both implementations on 10 transcripts. Measure lines of code, import time, and total latency. Write down which you would choose for a production feature and why.
+""",
+            },
         ],
     },
     {
@@ -4740,6 +5101,348 @@ This harness separates concerns cleanly: test cases define expectations, guardra
 ### Try it yourself
 
 Create a test suite of 5 cases for an agent you are building (or plan to build). Include at least one edge case and one adversarial input. Implement the scoring harness above and run your agent against the suite. Then change something — the model, a prompt, a tool — and re-run. Did the scores change? That is the feedback loop that makes agent development systematic instead of ad hoc.
+""",
+            },
+            {
+                "title": "LangGraph for agent orchestration",
+                "summary": "Model agents as graphs with StateGraph, route between nodes conditionally, and add checkpointing for human-in-the-loop workflows.",
+                "estimated_minutes": 50,
+                "content_md": """## Why this matters
+
+Simple agent loops — call LLM, check if done, call tool, repeat — break down as soon as you add real requirements: parallel branches, human approval steps, recovery from tool failures, or long-running workflows that need to survive process restarts. LangGraph turns the implicit loop into an explicit graph, making complex agent behavior debuggable, testable, and extensible.
+
+For engineers building production agents, graph-based orchestration is the pattern that scales past the demo stage. LangGraph is the most mature implementation of this idea in the Python ecosystem as of 2025.
+
+## Core concepts
+
+### Graph-based agent architecture vs simple loops
+
+A simple agent loop:
+
+```python
+def run_agent(query: str) -> str:
+    messages = [{"role": "user", "content": query}]
+    while True:
+        response = llm.invoke(messages)
+        if response.stop_reason == "end_turn":
+            return response.content
+        # execute tool, append result, continue
+        tool_result = execute_tool(response.tool_use)
+        messages.append(tool_result)
+```
+
+This works until you need: routing to different behaviors based on state, parallel tool execution, human approval before a destructive action, or checkpointing so the agent can resume after a crash. At that point the loop becomes a tangle of `if/elif` chains. LangGraph makes the control flow explicit.
+
+### StateGraph: nodes, edges, conditional routing
+
+A LangGraph graph has three components:
+
+1. **State** — a typed dict passed between nodes
+2. **Nodes** — functions that take state and return updated state
+3. **Edges** — fixed or conditional transitions between nodes
+
+```python
+from typing import TypedDict, Annotated
+from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import BaseMessage, HumanMessage
+
+class AgentState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+    next_step: str
+
+llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+
+def research_node(state: AgentState) -> AgentState:
+    \"\"\"Search for information and append findings.\"\"\"
+    last_message = state["messages"][-1]
+    response = llm.invoke([
+        HumanMessage(content=f"Research this topic and summarize key facts: {last_message.content}")
+    ])
+    return {"messages": [response], "next_step": "write"}
+
+def write_node(state: AgentState) -> AgentState:
+    \"\"\"Take research findings and produce a final draft.\"\"\"
+    research = "\\n".join(m.content for m in state["messages"] if hasattr(m, "content"))
+    response = llm.invoke([
+        HumanMessage(content=f"Write a clear summary based on this research:\\n{research}")
+    ])
+    return {"messages": [response], "next_step": "done"}
+
+def route(state: AgentState) -> str:
+    \"\"\"Conditional routing function — determines the next node.\"\"\"
+    return state.get("next_step", "research")
+
+# Build the graph
+builder = StateGraph(AgentState)
+builder.add_node("research", research_node)
+builder.add_node("write", write_node)
+
+builder.set_entry_point("research")
+builder.add_conditional_edges("research", route, {"write": "write", "done": END})
+builder.add_conditional_edges("write", route, {"done": END})
+
+graph = builder.compile()
+
+result = graph.invoke({
+    "messages": [HumanMessage(content="Explain vector databases")],
+    "next_step": "research",
+})
+print(result["messages"][-1].content)
+```
+
+The routing function makes the control flow readable. You can trace any execution by following the edges.
+
+### Checkpointing and human-in-the-loop patterns
+
+Checkpointing saves graph state at each node, enabling two things: resumption after failure, and human approval gates.
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import StateGraph, END, interrupt
+
+class ReviewState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+    draft: str
+    approved: bool
+
+def draft_node(state: ReviewState) -> ReviewState:
+    response = llm.invoke(state["messages"])
+    return {"draft": response.content, "approved": False}
+
+def human_review_node(state: ReviewState) -> ReviewState:
+    # interrupt() pauses execution and surfaces state to the caller
+    # The human can inspect state["draft"] and decide
+    human_decision = interrupt({"draft": state["draft"], "action": "approve_or_revise"})
+    return {"approved": human_decision.get("approved", False)}
+
+def publish_node(state: ReviewState) -> ReviewState:
+    print(f"Publishing: {state['draft']}")
+    return state
+
+def route_after_review(state: ReviewState) -> str:
+    return "publish" if state["approved"] else "draft"
+
+builder = StateGraph(ReviewState)
+builder.add_node("draft", draft_node)
+builder.add_node("human_review", human_review_node)
+builder.add_node("publish", publish_node)
+
+builder.set_entry_point("draft")
+builder.add_edge("draft", "human_review")
+builder.add_conditional_edges("human_review", route_after_review, {
+    "publish": "publish",
+    "draft": "draft",
+})
+builder.add_edge("publish", END)
+
+# MemorySaver persists state in memory; use SqliteSaver or PostgresSaver in production
+checkpointer = MemorySaver()
+graph = builder.compile(checkpointer=checkpointer, interrupt_before=["human_review"])
+
+thread_config = {"configurable": {"thread_id": "session-001"}}
+
+# Start execution — pauses at human_review
+result = graph.invoke(
+    {"messages": [HumanMessage(content="Write a blog post about LangGraph")]},
+    config=thread_config,
+)
+print("Draft ready for review:", result["draft"][:100])
+
+# Resume with human decision
+final = graph.invoke(
+    {"approved": True},
+    config=thread_config,
+)
+```
+
+This pattern is the foundation for any agent workflow that requires auditability or human oversight before irreversible actions.
+
+## Common mistakes
+
+**Putting business logic in edge conditions.** Routing functions should be thin — read a field from state and return a string. Complex logic in routing is hard to test. Put the logic in the node and have the node set a `next_step` field.
+
+**Mutable state without the `add_messages` annotation.** LangGraph uses reducers to merge state updates. Without `Annotated[list, add_messages]`, appending to a messages list will overwrite it instead of extending it.
+
+**Not using checkpointing in multi-step workflows.** A 10-step agent that fails on step 8 without a checkpointer loses all progress. Add `MemorySaver` during development and swap to a persistent backend before production.
+
+**Deeply nested subgraphs for simple branching.** LangGraph supports subgraphs (a graph as a node), but two-branch routing does not need one. Use conditional edges for simple cases; reserve subgraphs for genuinely modular, reusable agent components.
+
+## Try it yourself
+
+Build a LangGraph agent with three nodes: `planner` (decomposes a user request into steps), `executor` (runs one step using a tool of your choice), and `reviewer` (checks if all steps are done or flags which steps failed). Add a conditional edge from `reviewer` back to `executor` if there are incomplete steps, and to `END` when all steps succeed. Test it with a multi-step research request.
+""",
+            },
+            {
+                "title": "Agent framework comparison",
+                "summary": "Evaluate LangGraph, CrewAI, Anthropic tool_use, and AutoGen across real criteria and build a decision matrix for choosing a framework.",
+                "estimated_minutes": 35,
+                "content_md": """## Why this matters
+
+The agent framework landscape is noisy. Every few months a new library claims to solve multi-agent orchestration forever. As an AI engineer, your job is to cut through the hype and make framework choices that will hold up six months into production — not just in a demo. This lesson gives you a structured way to compare frameworks on criteria that actually matter, so you can make and defend the right call for your team and use case.
+
+## Core concepts
+
+### The frameworks
+
+**Anthropic tool_use (bare SDK)**
+
+The foundation. You define tools as JSON schemas, call the API, execute tool calls your code, return results. Full control, zero abstraction, maximum debuggability. Every other framework builds on this pattern.
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+
+tools = [{
+    "name": "web_search",
+    "description": "Search the web for current information",
+    "input_schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    },
+}]
+
+def run_agent(user_message: str, max_steps: int = 5) -> str:
+    messages = [{"role": "user", "content": user_message}]
+
+    for _ in range(max_steps):
+        response = client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=1024,
+            tools=tools,
+            messages=messages,
+        )
+
+        if response.stop_reason == "end_turn":
+            return next(b.text for b in response.content if hasattr(b, "text"))
+
+        # Handle tool calls
+        messages.append({"role": "assistant", "content": response.content})
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                result = execute_tool(block.name, block.input)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                })
+        messages.append({"role": "user", "content": tool_results})
+
+    return "Max steps reached"
+```
+
+**LangGraph**
+
+Graph-based orchestration. Best when you need: conditional routing, parallel branches, checkpointing, human-in-the-loop, or multiple distinct agent roles. The graph makes control flow explicit and testable. Overhead: learning curve, added dependency, more boilerplate for simple cases.
+
+**CrewAI**
+
+Role-based multi-agent framework. You define agents with roles, goals, and backstories, then assign tasks. Good for demos and quick prototypes where the "agent team" metaphor maps well to the problem. Weakness: less control over execution flow, harder to debug when something goes wrong, role metaphor breaks down for technical tasks.
+
+```python
+from crewai import Agent, Task, Crew
+
+researcher = Agent(
+    role="Research Analyst",
+    goal="Find accurate information on any topic",
+    backstory="Expert at synthesizing information from multiple sources",
+    verbose=False,
+)
+
+writer = Agent(
+    role="Technical Writer",
+    goal="Produce clear, accurate summaries",
+    backstory="Turns complex research into readable prose",
+    verbose=False,
+)
+
+research_task = Task(
+    description="Research the current state of vector databases",
+    expected_output="A bullet-point summary of key developments",
+    agent=researcher,
+)
+
+write_task = Task(
+    description="Write a 3-paragraph summary of the research",
+    expected_output="A polished 3-paragraph summary",
+    agent=writer,
+    context=[research_task],
+)
+
+crew = Crew(agents=[researcher, writer], tasks=[research_task, write_task])
+result = crew.kickoff()
+```
+
+**AutoGen**
+
+Microsoft's multi-agent conversation framework. Agents converse with each other via message passing. Strong for code generation workflows (has a built-in `CodeExecutorAgent`). Weakness: conversation-as-orchestration can be unpredictable for complex tasks; harder to add deterministic routing.
+
+### When each framework shines
+
+| Use case | Best fit |
+|---|---|
+| Single-provider, simple tool use | Bare Anthropic SDK |
+| Complex routing, human approval gates | LangGraph |
+| Multi-step research + writing pipeline | LangGraph or CrewAI |
+| Code generation with execution | AutoGen |
+| Rapid prototyping, demo | CrewAI |
+| Production service with observability | LangGraph + callbacks |
+| Switching between providers | LangChain + LangGraph |
+
+### Migration patterns between frameworks
+
+**From bare SDK to LangGraph:**
+
+1. Identify the implicit states in your loop (e.g., "waiting for tool result", "writing final answer")
+2. Make each state a node
+3. Replace `if/elif` branching with conditional edges
+4. Wrap your existing tool execution logic in a node function
+
+**From CrewAI to LangGraph:**
+
+1. Map each CrewAI agent to a LangGraph node
+2. Map task dependencies to edges
+3. Replace CrewAI's implicit orchestration with explicit routing functions
+4. Add checkpointing for long-running workflows
+
+**From LangGraph to bare SDK:**
+
+Usually not worth it unless you need to eliminate the dependency. LangGraph adds ~30% more code in the graph definition but saves that and more in debugging overhead for complex workflows.
+
+### Decision matrix
+
+Score each criterion 1-3 (1 = poor, 3 = excellent) for your situation:
+
+| Criterion | Bare SDK | LangGraph | CrewAI | AutoGen |
+|---|---|---|---|---|
+| Debuggability | 3 | 2 | 1 | 1 |
+| Control over flow | 3 | 3 | 1 | 2 |
+| Speed to first demo | 2 | 2 | 3 | 2 |
+| Multi-agent support | 1 | 3 | 3 | 3 |
+| Human-in-the-loop | 1 | 3 | 1 | 2 |
+| Checkpointing | 1 | 3 | 1 | 1 |
+| Production observability | 2 | 3 | 1 | 1 |
+| Dependency footprint | 3 | 2 | 1 | 1 |
+
+**Rule of thumb:** Start with the bare SDK. Add LangGraph when your loop needs explicit state, routing, or checkpointing. Reach for CrewAI only if the "team of specialists" metaphor genuinely fits your use case and you do not need production reliability.
+
+## Common mistakes
+
+**Choosing a framework for its ecosystem, not its fit.** LangGraph has more GitHub stars than your current loop needs. That is not a reason to add it. Add it when you are fighting the loop.
+
+**Mixing framework abstractions.** Using CrewAI's `Agent` class inside a LangGraph node creates two layers of agent abstraction that are nearly impossible to debug. Pick one framework per workflow.
+
+**Assuming the framework handles retries and rate limits.** None of these frameworks implement exponential backoff by default. Add retry logic at the HTTP client layer, not the orchestration layer.
+
+**Not writing tests before adding orchestration complexity.** If you cannot write a unit test for a bare-SDK agent, you will not be able to test it inside LangGraph either. Get the tool execution logic working and tested first, then add the orchestration layer.
+
+## Try it yourself
+
+Implement the same research + writing workflow in two frameworks: CrewAI and LangGraph. Both should: take a user query, search for information (mock the search tool), and return a written summary. Compare the two implementations on: lines of code, time to implement, ease of adding a human review step, and how you would add a retry if the writing step produces fewer than 100 words. Write a paragraph on which you would choose for a production feature and why.
 """,
             },
         ],
