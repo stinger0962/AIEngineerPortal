@@ -4267,6 +4267,616 @@ For a single-provider internal tool: bare SDK. For a multi-provider product feat
 Implement the same task — extracting a `MeetingNotes` Pydantic model with `attendees: list[str]`, `action_items: list[str]`, and `decisions: list[str]` from a raw meeting transcript — using both LangChain and the bare Anthropic SDK. Time both implementations on 10 transcripts. Measure lines of code, import time, and total latency. Write down which you would choose for a production feature and why.
 """,
             },
+            {
+                "title": "Fine-tuning vs RAG: decision framework",
+                "summary": "A systematic decision framework for choosing between fine-tuning and RAG, covering dataset curation, LoRA/QLoRA, hybrid approaches, and the specific criteria that make each technique the right tool for the job.",
+                "estimated_minutes": 40,
+                "content_md": """## Why this matters
+
+The most common architectural question on AI teams is some version of: "should we fine-tune the model or use RAG?" Both techniques can improve output quality, but they solve different problems. Teams that conflate them either spend weeks fine-tuning for a knowledge problem (should have used RAG) or build a retrieval system for a formatting problem (should have fine-tuned).
+
+As an AI engineer, being able to diagnose which technique fits a given use case — and articulate the tradeoffs clearly — is a high-signal competency. This lesson gives you a decision framework you can apply to real product requirements, not just academic comparisons.
+
+## Core concepts
+
+### What each technique actually does
+
+**RAG (Retrieval-Augmented Generation)** solves the knowledge problem. The base model does not know your product's documentation, your company's proprietary data, or events after its training cutoff. RAG injects relevant knowledge at inference time by retrieving context from an index and stuffing it into the prompt. The model itself does not change — you are changing what it sees.
+
+**Fine-tuning** solves the behavior problem. The model knows how to write prose, but it does not write in your brand's voice. It can answer questions, but it formats answers inconsistently. It handles code, but not in your internal framework. Fine-tuning adjusts the model's weights so it produces the right style, format, or domain behavior without needing a lengthy prompt to explain it.
+
+The cleaner framing: RAG gives the model knowledge it does not have. Fine-tuning changes how the model behaves with the knowledge it already has.
+
+### When to fine-tune
+
+Fine-tuning pays off when:
+
+- **Consistent format or style at scale.** If every response must follow a strict structure (JSON output with specific keys, a particular writing style, a domain-specific tone), fine-tuning teaches this once instead of repeating instructions in every prompt. Prompt instructions drift; fine-tuning generalizes.
+
+- **Specialized domain with stable knowledge.** Medical coding, legal contract review, proprietary API syntax — domains where the terminology and patterns are fixed and the model consistently makes predictable errors on base inference.
+
+- **Latency and cost optimization.** A fine-tuned smaller model (7B–13B) can match a larger base model on a narrow task at a fraction of the cost and latency. If your use case is well-defined and high-volume, this tradeoff is often worth the fine-tuning investment.
+
+- **Reducing prompt length.** If you need 500 tokens of instruction in every system prompt to get consistent behavior, fine-tuning can internalize those instructions and shrink the prompt. At scale, this is significant.
+
+### When RAG is better
+
+RAG is the right choice when:
+
+- **Knowledge changes frequently.** Product documentation, pricing, policies, recent events — anything that updates faster than you want to retrain a model. RAG lets you update the index without touching the model.
+
+- **Transparency and citations matter.** RAG outputs can cite specific source chunks. Users and auditors can verify claims. Fine-tuned models produce confident outputs with no traceable provenance.
+
+- **You need to iterate quickly.** Fine-tuning requires dataset curation, training runs, evaluation, and deployment — a cycle measured in days to weeks. Updating a RAG index takes minutes. If requirements are still evolving, RAG keeps you unblocked.
+
+- **The base model already knows how to behave.** If the only gap is missing knowledge, not behavioral drift, RAG is simpler and more maintainable.
+
+### The hybrid approach
+
+The most effective production systems often combine both. Fine-tune for format and style consistency; use RAG for dynamic knowledge injection.
+
+Example: a customer support assistant that must always structure responses as `{"issue_summary": str, "resolution_steps": list[str], "escalate": bool}`. Fine-tune for this output format. Then use RAG to inject the relevant knowledge base articles about the specific product issue. The fine-tuned model knows how to format; RAG gives it the knowledge to format accurately.
+
+### Dataset curation for fine-tuning (the hard part)
+
+The fine-tuning process is simple. Dataset curation is where most projects fail.
+
+A good fine-tuning dataset for an instruction-following use case:
+- 500–2000 examples for most narrow tasks (more for broader behavior)
+- Each example: a prompt and the ideal completion
+- Balanced coverage of the full input distribution, not just easy cases
+- No examples where the base model already performs well — these waste training data
+
+```python
+from pydantic import BaseModel, Field
+from typing import Literal
+import json
+from pathlib import Path
+
+
+class FineTuningExample(BaseModel):
+    prompt: str = Field(min_length=10)
+    completion: str = Field(min_length=5)
+    category: str
+    difficulty: Literal["easy", "medium", "hard"]
+
+    def to_openai_format(self) -> dict:
+        return {
+            "messages": [
+                {"role": "user", "content": self.prompt},
+                {"role": "assistant", "content": self.completion},
+            ]
+        }
+
+
+def validate_dataset(path: Path) -> dict:
+    examples = []
+    errors = []
+
+    for i, line in enumerate(path.read_text().splitlines()):
+        try:
+            raw = json.loads(line)
+            ex = FineTuningExample.model_validate(raw)
+            examples.append(ex)
+        except Exception as e:
+            errors.append({"line": i, "error": str(e)})
+
+    categories = {}
+    for ex in examples:
+        categories[ex.category] = categories.get(ex.category, 0) + 1
+
+    return {
+        "total": len(examples),
+        "errors": len(errors),
+        "by_category": categories,
+        "avg_prompt_length": sum(len(e.prompt) for e in examples) / len(examples) if examples else 0,
+    }
+```
+
+Curation anti-patterns: filtering to only high-quality outputs (the model cannot learn from edge cases), including examples where the base model is already correct (wastes compute), and treating curation as a one-time step (you need a second curation pass after the first training run to find failure modes).
+
+### LoRA/QLoRA for parameter-efficient fine-tuning
+
+Training all parameters of a 7B model requires 80GB+ of GPU memory. LoRA (Low-Rank Adaptation) makes fine-tuning accessible by freezing the base model weights and training only small adapter matrices inserted into each attention layer. These adapters represent the delta from base behavior to target behavior.
+
+QLoRA adds 4-bit quantization to the frozen base model, reducing memory requirements to a single consumer GPU (24GB VRAM for a 7B model). The quality loss from quantization on the frozen weights is minimal for most tasks.
+
+Application-level understanding: you do not need to implement LoRA yourself. Libraries like `peft` handle this. What you need to know:
+
+- LoRA adapters are small (tens of MB) and can be switched at runtime — useful if you need different behaviors for different customers
+- The `r` (rank) hyperparameter controls capacity: higher rank learns more complex behavior but needs more data and compute
+- LoRA fine-tunes do not replace the base model; they sit on top. If the base model lacks a capability entirely, LoRA cannot add it
+
+```python
+# Conceptual: what LoRA looks like with the peft library
+# (requires: pip install peft transformers)
+from peft import get_peft_model, LoraConfig, TaskType
+from transformers import AutoModelForCausalLM
+
+def create_lora_model(base_model_name: str, r: int = 8) -> object:
+    \"\"\"Wrap a base model with LoRA adapters for fine-tuning.\"\"\"
+    model = AutoModelForCausalLM.from_pretrained(base_model_name)
+
+    config = LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        r=r,                       # Rank: higher = more capacity
+        lora_alpha=32,             # Scaling factor
+        target_modules=["q_proj", "v_proj"],  # Which layers to adapt
+        lora_dropout=0.05,
+        bias="none",
+    )
+
+    return get_peft_model(model, config)
+```
+
+### Decision tree: fine-tune or RAG?
+
+```python
+from dataclasses import dataclass
+from typing import Literal
+
+Recommendation = Literal["rag", "fine_tune", "hybrid", "prompt_engineering_first"]
+
+
+@dataclass
+class UseCaseCriteria:
+    knowledge_changes_frequently: bool
+    need_citations_or_traceability: bool
+    problem_is_formatting_or_style: bool
+    domain_has_stable_specialized_vocabulary: bool
+    response_volume_is_high: bool  # >100k calls/day
+    iteration_speed_matters: bool
+    base_model_format_already_correct: bool
+
+
+def recommend_approach(criteria: UseCaseCriteria) -> tuple[Recommendation, str]:
+    # RAG signals
+    if criteria.knowledge_changes_frequently and not criteria.problem_is_formatting_or_style:
+        return "rag", "Knowledge changes frequently — RAG lets you update without retraining."
+
+    if criteria.need_citations_or_traceability:
+        return "rag", "Citations required — RAG provides traceable source chunks."
+
+    if criteria.iteration_speed_matters and not criteria.response_volume_is_high:
+        return "rag", "Fast iteration required — RAG index updates are immediate."
+
+    # Fine-tuning signals
+    if criteria.problem_is_formatting_or_style and criteria.response_volume_is_high:
+        return "fine_tune", "Consistent format at high volume — fine-tuning internalizes the pattern cheaply."
+
+    if criteria.domain_has_stable_specialized_vocabulary and not criteria.knowledge_changes_frequently:
+        return "fine_tune", "Stable specialized domain — fine-tuning improves domain accuracy."
+
+    # Hybrid
+    if criteria.problem_is_formatting_or_style and criteria.knowledge_changes_frequently:
+        return "hybrid", "Fine-tune for format consistency; use RAG for dynamic knowledge injection."
+
+    # Default: try prompt engineering first
+    return "prompt_engineering_first", (
+        "Neither signal is strong. Start with a well-engineered prompt; "
+        "invest in fine-tuning or RAG only after measuring baseline performance."
+    )
+
+
+# Example usage
+criteria = UseCaseCriteria(
+    knowledge_changes_frequently=False,
+    need_citations_or_traceability=False,
+    problem_is_formatting_or_style=True,
+    domain_has_stable_specialized_vocabulary=True,
+    response_volume_is_high=True,
+    iteration_speed_matters=False,
+    base_model_format_already_correct=False,
+)
+rec, reason = recommend_approach(criteria)
+print(f"Recommendation: {rec}")
+print(f"Reasoning: {reason}")
+# Recommendation: fine_tune
+# Reasoning: Consistent format at high volume — fine-tuning internalizes the pattern cheaply.
+```
+
+## Common mistakes
+
+**Fine-tuning for a knowledge gap.** If the model does not know your company's products because that information postdates training, fine-tuning on that knowledge teaches it during training but the knowledge becomes stale immediately. Use RAG.
+
+**Using RAG for a style problem.** If every output needs to follow a strict JSON schema, adding retrieval does not help. The retrieval step brings in content; the model still formats it inconsistently without instructions or fine-tuning.
+
+**Underinvesting in dataset curation.** 500 carefully curated examples outperform 5,000 scraped examples in fine-tuning. The single highest-leverage investment before starting a fine-tuning project is 2–3 days of dataset review and cleaning.
+
+**Forgetting the eval loop.** Fine-tuning without a golden dataset to measure before and after is guesswork. Define your quality metric and run it on both the base model and fine-tuned model before declaring success.
+
+**Skipping the prompt engineering baseline.** Before spending time on RAG infrastructure or fine-tuning, always measure what a well-engineered prompt achieves on the base model. Many teams discover the gap is smaller than expected, or that the problem is different from what they assumed.
+
+## Try it yourself
+
+Implement the `recommend_approach` function from above and extend it with two more decision branches: one for cases where latency is critical (under 200ms response time) and one for cases where the use case involves multiple languages. For the latency case, consider whether a fine-tuned smaller model or a RAG-augmented larger model would be faster end-to-end. Write out the reasoning as a docstring for each branch, not just the return value.
+""",
+            },
+            {
+                "title": "Multi-modal AI for application engineers",
+                "summary": "Practical patterns for vision, audio, and document processing in production AI applications: sending images to vision models, speech-to-text and TTS integration, PDF and OCR pipelines, and building multi-modal chains.",
+                "estimated_minutes": 40,
+                "content_md": """## Why this matters
+
+Most LLM application tutorials assume text-in, text-out. Production AI applications are rarely that clean. Users upload PDFs. Support flows include screenshots. Voice interfaces need speech. Documents contain tables that break if you treat them as prose. Multi-modal inputs are the norm, not the exception, and engineers who can build robust pipelines for them have a significant advantage.
+
+This lesson covers the patterns you need for the most common multi-modal scenarios: vision APIs, audio transcription and synthesis, document understanding, and chaining these together into a coherent pipeline.
+
+## Core concepts
+
+### Vision APIs: sending images to models
+
+Claude and GPT-4V accept images as part of the messages array. Images are either passed as base64-encoded data or as publicly accessible URLs. Base64 is more reliable in production (no latency from fetching remote URLs, no dependency on image availability).
+
+```python
+import anthropic
+import base64
+from pathlib import Path
+
+
+def describe_image(image_path: str, question: str = "What is in this image?") -> str:
+    \"\"\"Send an image to Claude and get a description.\"\"\"
+    client = anthropic.Anthropic()
+
+    # Load and encode the image
+    image_data = Path(image_path).read_bytes()
+    b64_image = base64.standard_b64encode(image_data).decode("utf-8")
+
+    # Detect media type
+    suffix = Path(image_path).suffix.lower()
+    media_type_map = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }
+    media_type = media_type_map.get(suffix, "image/png")
+
+    response = client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=1024,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": b64_image,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": question,
+                    },
+                ],
+            }
+        ],
+    )
+    return response.content[0].text
+
+
+# Document understanding: extract structured data from an image
+def extract_invoice_data(image_path: str) -> dict:
+    \"\"\"Extract structured invoice fields from an image using vision + structured output.\"\"\"
+    client = anthropic.Anthropic()
+    image_data = Path(image_path).read_bytes()
+    b64_image = base64.standard_b64encode(image_data).decode("utf-8")
+
+    response = client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=1024,
+        tools=[
+            {
+                "name": "extract_invoice",
+                "description": "Extract structured data from an invoice image",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "vendor_name": {"type": "string"},
+                        "invoice_number": {"type": "string"},
+                        "invoice_date": {"type": "string", "description": "ISO 8601 date"},
+                        "total_amount": {"type": "number"},
+                        "currency": {"type": "string"},
+                        "line_items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "description": {"type": "string"},
+                                    "quantity": {"type": "number"},
+                                    "unit_price": {"type": "number"},
+                                    "total": {"type": "number"},
+                                }
+                            }
+                        }
+                    },
+                    "required": ["vendor_name", "invoice_number", "total_amount"]
+                }
+            }
+        ],
+        tool_choice={"type": "tool", "name": "extract_invoice"},
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/png", "data": b64_image},
+                    },
+                    {
+                        "type": "text",
+                        "text": "Extract all invoice data from this image."
+                    }
+                ]
+            }
+        ]
+    )
+
+    tool_use = next(b for b in response.content if b.type == "tool_use")
+    return tool_use.input
+```
+
+### Audio: speech-to-text and TTS integration
+
+The OpenAI Whisper API handles transcription with high accuracy across languages. The TTS API converts text back to audio. In production, you typically use transcription at the ingestion boundary (convert audio to text, then feed the text pipeline) and TTS at the delivery boundary (convert the final text response to audio for playback).
+
+```python
+import openai
+from pathlib import Path
+
+
+def transcribe_audio(audio_path: str, language: str = "en") -> dict:
+    \"\"\"Transcribe audio to text using Whisper.
+
+    Returns both the full transcript and segment-level timestamps,
+    which are useful for syncing audio with transcript display.
+    \"\"\"
+    client = openai.OpenAI()
+
+    with open(audio_path, "rb") as audio_file:
+        response = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            language=language,
+            response_format="verbose_json",  # includes segments + timestamps
+            timestamp_granularities=["segment"]
+        )
+
+    return {
+        "text": response.text,
+        "language": response.language,
+        "duration_seconds": response.duration,
+        "segments": [
+            {
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text.strip(),
+            }
+            for seg in (response.segments or [])
+        ],
+    }
+
+
+def text_to_speech(text: str, output_path: str, voice: str = "alloy") -> None:
+    \"\"\"Convert text to speech and save to file.
+
+    Voices: alloy, echo, fable, onyx, nova, shimmer
+    \"\"\"
+    client = openai.OpenAI()
+    response = client.audio.speech.create(
+        model="tts-1",
+        voice=voice,
+        input=text,
+    )
+    Path(output_path).write_bytes(response.content)
+```
+
+Key integration patterns:
+- For real-time voice interfaces, stream the TTS response to avoid buffering the full audio before playback begins
+- Whisper handles background noise well but struggles with overlapping speakers — use diarization (speaker separation) as a pre-processing step for meeting recordings
+- Cache TTS outputs for static content (FAQ answers, onboarding narration) to avoid repeated API calls
+
+### Document processing: PDF extraction and OCR
+
+PDFs are visual layout files, not text files. A PDF extractor must reconstruct reading order, handle multi-column layouts, and preserve table structure — none of which is guaranteed. For AI pipelines, the goal is clean text with metadata (page number, section heading, table data preserved).
+
+```python
+import pdfplumber
+from pathlib import Path
+from dataclasses import dataclass, field
+
+
+@dataclass
+class DocumentPage:
+    page_number: int
+    text: str
+    tables: list[list[list[str]]] = field(default_factory=list)
+    image_count: int = 0
+
+
+def extract_pdf(pdf_path: str) -> list[DocumentPage]:
+    \"\"\"Extract text and tables from a PDF, preserving structure.\"\"\"
+    pages = []
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for i, page in enumerate(pdf.pages):
+            # Extract text with layout preservation
+            text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+
+            # Extract tables as structured data
+            tables = []
+            for table in page.extract_tables():
+                # Filter empty rows, clean cell whitespace
+                clean_table = [
+                    [cell.strip() if cell else "" for cell in row]
+                    for row in table
+                    if any(cell for cell in row)
+                ]
+                if clean_table:
+                    tables.append(clean_table)
+
+            pages.append(DocumentPage(
+                page_number=i + 1,
+                text=text,
+                tables=tables,
+                image_count=len(page.images),
+            ))
+
+    return pages
+
+
+def table_to_markdown(table: list[list[str]]) -> str:
+    \"\"\"Convert a table (list of rows) to a markdown table string.\"\"\"
+    if not table:
+        return ""
+    header = table[0]
+    separator = ["---"] * len(header)
+    rows = table[1:]
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(separator) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(row) + " |")
+    return "\\n".join(lines)
+```
+
+For scanned documents (images of text, not machine-readable PDFs), you need OCR. `pytesseract` is the standard open-source option; for production accuracy, cloud OCR (Google Document AI, AWS Textract, Azure Form Recognizer) is significantly better.
+
+### Building a multi-modal pipeline
+
+The common pattern: image input → structured extraction → action or further processing.
+
+```python
+import anthropic
+import base64
+from pathlib import Path
+from pydantic import BaseModel
+from typing import Optional
+
+
+class ExtractedFormData(BaseModel):
+    form_type: str
+    fields: dict[str, str]
+    confidence: float  # 0.0 - 1.0
+    needs_human_review: bool
+    review_reason: Optional[str] = None
+
+
+def process_form_image(image_path: str) -> ExtractedFormData:
+    \"\"\"
+    Multi-modal pipeline: image → structured extraction → validation → routing.
+
+    This pipeline:
+    1. Sends the image to Claude with a structured extraction tool
+    2. Validates the extracted data
+    3. Flags low-confidence extractions for human review
+    \"\"\"
+    client = anthropic.Anthropic()
+
+    image_bytes = Path(image_path).read_bytes()
+    b64 = base64.standard_b64encode(image_bytes).decode()
+
+    response = client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=1024,
+        tools=[
+            {
+                "name": "extract_form",
+                "description": "Extract all fields from a form image",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "form_type": {
+                            "type": "string",
+                            "description": "Type of form: invoice, receipt, application, contract, other"
+                        },
+                        "fields": {
+                            "type": "object",
+                            "description": "Key-value pairs of all extractable fields",
+                            "additionalProperties": {"type": "string"}
+                        },
+                        "confidence": {
+                            "type": "number",
+                            "description": "Confidence 0.0-1.0 in extraction accuracy"
+                        },
+                        "needs_human_review": {
+                            "type": "boolean",
+                            "description": "True if handwriting, damage, or ambiguity reduces reliability"
+                        },
+                        "review_reason": {
+                            "type": "string",
+                            "description": "Explain why human review is needed, if applicable"
+                        }
+                    },
+                    "required": ["form_type", "fields", "confidence", "needs_human_review"]
+                }
+            }
+        ],
+        tool_choice={"type": "tool", "name": "extract_form"},
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/png", "data": b64},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Extract all fields from this form. "
+                            "Be conservative with confidence — flag anything unclear for review."
+                        ),
+                    },
+                ],
+            }
+        ],
+    )
+
+    tool_use = next(b for b in response.content if b.type == "tool_use")
+    return ExtractedFormData.model_validate(tool_use.input)
+
+
+def route_extracted_form(data: ExtractedFormData) -> str:
+    \"\"\"Route the extracted form based on type and confidence.\"\"\"
+    if data.needs_human_review or data.confidence < 0.85:
+        return f"human_review_queue: {data.review_reason or 'low confidence'}"
+    if data.form_type == "invoice":
+        return "accounts_payable_pipeline"
+    if data.form_type == "receipt":
+        return "expense_report_pipeline"
+    return "general_documents_queue"
+```
+
+## Common mistakes
+
+**Sending full-resolution images for simple tasks.** Vision API costs scale with image size (token count). For most document extraction tasks, a 1024x1024 image is sufficient. Resize before sending — most providers accept base64 images and will resize internally, but you pay for the full transfer.
+
+**Not handling image decoding failures gracefully.** Image bytes from user uploads are often corrupt, truncated, or in unsupported formats. Always catch exceptions when loading images and return a structured error rather than crashing the pipeline.
+
+**Treating audio transcription as infallible.** Whisper is excellent but makes errors on domain-specific terminology, proper nouns, and strong accents. For high-stakes transcription (legal, medical), build a post-processing step that flags low-confidence words (available in the `verbose_json` response format).
+
+**Mixing table data into prose chunks for RAG.** If you extract a PDF and feed the whole page as a single text chunk, table rows become meaningless strings like "Q1 Q2 Q3 Q4 1200 1450 1380 1620". Extract tables separately, convert to structured JSON or markdown, and index them with metadata indicating they are tabular data.
+
+**Skipping multi-modal eval.** Vision extraction pipelines are harder to eval than text pipelines because ground truth requires human annotation of the image. Build a small golden set of annotated images (20–50 examples) before deploying a vision extraction feature.
+
+## Try it yourself
+
+Build a document understanding pipeline that takes a PNG screenshot of a simple data table (you can create one in a spreadsheet and screenshot it) and extracts the data as a Python list of dicts. The pipeline should:
+
+1. Accept a file path to the image
+2. Send it to a vision model with a structured extraction tool
+3. Return a `list[dict]` where each dict is one row of the table, using the header row as keys
+4. Handle the case where the model is uncertain about a cell value by using `None` instead of guessing
+
+Test it on at least two different table screenshots and verify the extracted data matches the source.
+""",
+            },
         ],
     },
     {
@@ -7175,6 +7785,492 @@ Score each criterion 1-3 (1 = poor, 3 = excellent) for your situation:
 ## Try it yourself
 
 Implement the same research + writing workflow in two frameworks: CrewAI and LangGraph. Both should: take a user query, search for information (mock the search tool), and return a written summary. Compare the two implementations on: lines of code, time to implement, ease of adding a human review step, and how you would add a retry if the writing step produces fewer than 100 words. Write a paragraph on which you would choose for a production feature and why.
+""",
+            },
+            {
+                "title": "Model Context Protocol (MCP) for tool integration",
+                "summary": "The emerging standard for connecting AI models to external tools and data sources.",
+                "estimated_minutes": 45,
+                "content_md": """## Model Context Protocol (MCP) for tool integration
+
+## Why this matters
+
+Every time you wire up a tool to an LLM you are solving the same problem: how does the model know what capabilities exist, and how does your application execute them safely? Until 2024, every team solved this differently — OpenAI function calling, LangChain tools, Anthropic tool use, custom JSON schemas. The result was a Babel of integration patterns that did not compose.
+
+Model Context Protocol (MCP) is Anthropic's open standard that defines a single interface between LLMs and external systems. If a tool is written as an MCP server, any MCP-compatible client (Claude Desktop, Claude API, third-party agents) can use it without modification. Think of it as USB-C for AI tools: one standard connector, many devices.
+
+For application engineers this matters because you can build an MCP server once and reuse it across multiple AI products. It also means the growing ecosystem of pre-built MCP servers (databases, file systems, APIs) works out of the box with your agent.
+
+## Core concepts
+
+### MCP vs direct function calling vs LangChain tools
+
+Direct function calling is the lowest level: you define a JSON Schema, pass it to the API, and handle the response in your application. It is flexible but tightly coupled — the schema lives in your app code, and you must maintain it there.
+
+LangChain tools wrap functions in a class hierarchy with metadata. They compose well within LangChain but do not work outside it. If you switch providers or remove LangChain, you rewrite your tools.
+
+MCP is a network protocol. An MCP server runs as a separate process (or over HTTP) and exposes capabilities through a standardized API. The client (your application or Claude Desktop) discovers and calls those capabilities. The server knows nothing about the client; the client knows nothing about the server's implementation. This separation is the key architectural advantage.
+
+| | Direct function calling | LangChain tools | MCP |
+|---|---|---|---|
+| Portability | App-specific | LangChain-specific | Any MCP client |
+| Discovery | Static (hardcoded) | Static | Dynamic (at runtime) |
+| Deployment | In-process | In-process | Out-of-process |
+| Ecosystem | Provider SDKs | LangChain Hub | MCP registry |
+| Complexity | Low | Medium | Medium-high |
+
+### MCP server architecture
+
+An MCP server exposes three types of primitives:
+
+**Resources** are read-only data sources the model can access. Think of them as context injection: a resource could be a file, a database row, or a live API response. The model can request a resource and get its content back as text.
+
+**Tools** are callable functions. The model decides to call a tool, the server executes it, and the result comes back. Tools are the MCP equivalent of function calls.
+
+**Prompts** are reusable prompt templates the server exposes. A server could provide a "summarize document" prompt that the client populates with arguments. This is less commonly used but useful for standardizing prompt patterns across teams.
+
+### Transport layers
+
+MCP servers communicate over one of two transports:
+
+- **stdio**: The client spawns the server as a subprocess and communicates over stdin/stdout. Simple and secure for local tools.
+- **HTTP with SSE**: The server runs as a web service. Required for remote tools, shared servers, and multi-user deployments.
+
+### Building an MCP server in Python
+
+The `mcp` Python package provides a high-level server SDK. Install it:
+
+```bash
+pip install mcp
+```
+
+Here is a minimal MCP server that exposes a database query tool:
+
+```python
+# mcp_server.py
+import asyncio
+import sqlite3
+from typing import Any
+from mcp.server import Server
+from mcp.server.models import InitializationOptions
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent, CallToolResult
+
+# Create the server
+app = Server("database-query-server")
+
+# Register available tools
+@app.list_tools()
+async def list_tools() -> list[Tool]:
+    return [
+        Tool(
+            name="query_database",
+            description=(
+                "Run a read-only SQL query against the application database. "
+                "Use this when the user asks for data that requires filtering, "
+                "aggregation, or joining multiple tables. Always use parameterized "
+                "queries — never interpolate user input directly into SQL."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "sql": {
+                        "type": "string",
+                        "description": "A read-only SQL SELECT statement"
+                    },
+                    "params": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Positional parameters for the query (? placeholders)",
+                        "default": []
+                    }
+                },
+                "required": ["sql"]
+            }
+        )
+    ]
+
+# Implement tool execution
+@app.call_tool()
+async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    if name != "query_database":
+        raise ValueError(f"Unknown tool: {name}")
+
+    sql = arguments["sql"].strip()
+    params = arguments.get("params", [])
+
+    # Safety: reject non-SELECT statements
+    if not sql.upper().startswith("SELECT"):
+        return [TextContent(
+            type="text",
+            text="Error: only SELECT statements are allowed"
+        )]
+
+    try:
+        conn = sqlite3.connect("app.db")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        rows = cursor.fetchmany(100)  # Limit results to avoid context overflow
+        conn.close()
+
+        if not rows:
+            return [TextContent(type="text", text="No rows returned")]
+
+        # Format as a readable table
+        headers = list(rows[0].keys())
+        lines = [" | ".join(headers)]
+        lines.append("-" * len(lines[0]))
+        for row in rows:
+            lines.append(" | ".join(str(row[h]) for h in headers))
+
+        return [TextContent(type="text", text="\\n".join(lines))]
+
+    except sqlite3.Error as e:
+        return [TextContent(type="text", text=f"Database error: {e}")]
+
+# Run the server over stdio
+async def main():
+    async with stdio_server() as (read_stream, write_stream):
+        await app.run(
+            read_stream,
+            write_stream,
+            InitializationOptions(
+                server_name="database-query-server",
+                server_version="0.1.0",
+            ),
+        )
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### MCP client integration with Claude
+
+To use this server from your Python application, use the MCP client alongside the Anthropic SDK:
+
+```python
+import asyncio
+import anthropic
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+async def run_agent_with_mcp():
+    # Start the MCP server as a subprocess
+    server_params = StdioServerParameters(
+        command="python",
+        args=["mcp_server.py"]
+    )
+
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            # Discover available tools from the server
+            tools_result = await session.list_tools()
+            mcp_tools = tools_result.tools
+
+            # Convert MCP tool definitions to Anthropic format
+            anthropic_tools = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.inputSchema
+                }
+                for tool in mcp_tools
+            ]
+
+            client = anthropic.Anthropic()
+            messages = [
+                {"role": "user", "content": "How many users signed up in March 2025?"}
+            ]
+
+            # Agentic loop
+            while True:
+                response = client.messages.create(
+                    model="claude-opus-4-5",
+                    max_tokens=1024,
+                    tools=anthropic_tools,
+                    messages=messages
+                )
+
+                if response.stop_reason == "end_turn":
+                    # Extract final text response
+                    for block in response.content:
+                        if hasattr(block, "text"):
+                            print(block.text)
+                    break
+
+                # Process tool calls
+                messages.append({"role": "assistant", "content": response.content})
+                tool_results = []
+
+                for block in response.content:
+                    if block.type == "tool_use":
+                        # Call the MCP server to execute the tool
+                        result = await session.call_tool(
+                            block.name,
+                            arguments=block.input
+                        )
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result.content[0].text if result.content else ""
+                        })
+
+                messages.append({"role": "user", "content": tool_results})
+
+asyncio.run(run_agent_with_mcp())
+```
+
+## Common mistakes
+
+**Registering too many tools at once.** MCP servers can expose dozens of tools, but every tool definition consumes context window tokens. In a 200-tool server, the tool schemas alone can consume 15,000+ tokens before the user's message arrives. Scope your MCP server to the tools relevant to the task domain — or implement tool filtering based on context.
+
+**Skipping input validation in the server.** The MCP client passes tool arguments as-is from the model. The model can hallucinate parameter values. Always validate inputs server-side, even when your JSON schema is correct — schemas tell the model what to send but do not prevent the model from sending garbage.
+
+**Running MCP servers without authentication on HTTP transport.** Stdio transport is local and inherently sandboxed. HTTP transport is exposed to the network. Add authentication (API keys, OAuth) before deploying an HTTP MCP server, especially if it can access databases or filesystems.
+
+**Assuming MCP replaces your function calling code immediately.** MCP is newer and not yet universally supported. Direct API function calling still works everywhere. Adopt MCP when you need portability across clients or want to use the growing ecosystem of pre-built servers — not because it is the new thing.
+
+## Try it yourself
+
+Extend the database query server above to also expose a `list_tables` tool that returns all table names in the database and a `describe_table` tool that returns the column names and types for a given table. Then write a short agent that, given a question like "what is the average order value by country?", first calls `list_tables`, then `describe_table` for relevant tables, then constructs and executes a `query_database` call. The agent should not have any hardcoded knowledge of the database schema.
+""",
+            },
+            {
+                "title": "MCP (Model Context Protocol)",
+                "summary": "The emerging standard for connecting LLMs to external tools and data: architecture, building servers and clients, and when to use MCP versus rolling your own tool integration.",
+                "estimated_minutes": 45,
+                "content_md": """## Why this matters
+
+Every AI team that builds more than one agent faces the same problem: you write a tool integration for one project, then rewrite it for the next because there is no standard way to package and share tool implementations. Direct function calling is tightly coupled to the app codebase. LangChain tools only work inside LangChain. OpenAI function schemas differ slightly from Anthropic tool schemas.
+
+Model Context Protocol (MCP) solves this at the architectural level. It defines a single, open standard for how a client (your app, Claude Desktop, any agent) discovers and calls tools provided by a server (a separate process you control). Once you understand MCP, you can build a tool server once and reuse it across every AI product your team ships — and use the growing ecosystem of pre-built MCP servers without writing integration code.
+
+For application engineers, MCP is now a first-class interview topic. Teams building production agent infrastructure ask candidates to demonstrate they understand when MCP is the right choice versus simpler alternatives.
+
+## Core concepts
+
+### MCP vs direct function calling vs LangChain tools
+
+Direct function calling is the lowest abstraction: you define a JSON Schema for each function, pass the schema array to the provider API, and handle tool execution in your application code. It works for single-provider, single-app scenarios but is tightly coupled — the tool definition lives in your app, and every new consumer must copy it.
+
+LangChain tools wrap functions in a class hierarchy. They compose well within LangChain's chain system, support callbacks, and have a large ecosystem of pre-built tools. But they are LangChain-specific. If you switch providers, drop LangChain, or want to share tools with a non-LangChain consumer, you rewrite.
+
+MCP is a network protocol. An MCP server is a separate process (or remote service) that exposes capabilities through a standardized JSON-RPC interface. The client discovers available tools at runtime, converts them to the provider's native format, and calls the server to execute them. The server and client are fully decoupled — the server does not know which client is calling, and the client does not know how the server implements the tool.
+
+| | Direct function calling | LangChain tools | MCP |
+|---|---|---|---|
+| Portability | App-specific | LangChain-specific | Any MCP client |
+| Discovery | Static (hardcoded) | Static | Dynamic at runtime |
+| Deployment | In-process | In-process | Out-of-process |
+| Reusability | None | Within LangChain | Across all clients |
+| Setup complexity | Low | Medium | Medium-high |
+
+Use MCP when you are building tools that multiple agents or products will share, when you want to use pre-built servers from the ecosystem, or when you need out-of-process isolation (tools that access filesystems or databases should run with minimal privileges in their own process).
+
+### MCP architecture
+
+MCP defines four layers:
+
+**Primitives:** What the server exposes.
+- **Tools** — callable functions the model can invoke (equivalent to function calling)
+- **Resources** — read-only data the model can request (files, database rows, API responses)
+- **Prompts** — reusable prompt templates with arguments the client populates
+
+**Hosts:** The application that embeds the LLM (Claude Desktop, your custom app, an IDE plugin). The host manages the conversation and decides when to forward tool calls to an MCP server.
+
+**Clients:** The MCP protocol layer inside the host. Clients maintain a session with each MCP server, handle discovery, and translate between MCP wire format and provider-specific tool schemas.
+
+**Transports:** How client and server communicate.
+- **stdio** — the host spawns the server as a subprocess; client writes to stdin, reads from stdout. Simple and secure for local tools.
+- **HTTP + SSE** — the server runs as a web service; client sends JSON-RPC over HTTP, receives events over Server-Sent Events. Required for remote tools or multi-user deployments.
+
+### Building an MCP server in Python
+
+```python
+# server.py
+import asyncio
+import json
+from mcp.server import Server
+from mcp.server.models import InitializationOptions
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent, CallToolResult
+from typing import Any
+
+app = Server("file-search-server")
+
+@app.list_tools()
+async def list_tools() -> list[Tool]:
+    return [
+        Tool(
+            name="search_files",
+            description=(
+                "Search for files in a directory by name pattern. "
+                "Use when the user asks to find files, locate code, "
+                "or check if a file exists."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "directory": {
+                        "type": "string",
+                        "description": "Absolute path to search in"
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "Filename glob pattern, e.g. '*.py'"
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Maximum number of results to return"
+                    }
+                },
+                "required": ["directory", "pattern"]
+            }
+        )
+    ]
+
+@app.call_tool()
+async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    if name != "search_files":
+        return [TextContent(type="text", text=f"Unknown tool: {name}")]
+
+    import glob
+    import os
+
+    directory = arguments["directory"]
+    pattern = arguments["pattern"]
+    max_results = arguments.get("max_results", 20)
+
+    if not os.path.isdir(directory):
+        return [TextContent(type="text", text=f"Directory not found: {directory}")]
+
+    matches = glob.glob(os.path.join(directory, "**", pattern), recursive=True)
+    matches = matches[:max_results]
+
+    if not matches:
+        return [TextContent(type="text", text="No files matched the pattern.")]
+
+    result = f"Found {len(matches)} file(s):\\n" + "\\n".join(matches)
+    return [TextContent(type="text", text=result)]
+
+async def main():
+    async with stdio_server() as (read_stream, write_stream):
+        await app.run(
+            read_stream,
+            write_stream,
+            InitializationOptions(
+                server_name="file-search-server",
+                server_version="0.1.0",
+            ),
+        )
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Building an MCP client that discovers and calls tools
+
+```python
+# client.py
+import asyncio
+import anthropic
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+
+async def run_agent(user_message: str) -> str:
+    server_params = StdioServerParameters(
+        command="python",
+        args=["server.py"]
+    )
+
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            # Dynamic tool discovery — no hardcoded schemas
+            tools_result = await session.list_tools()
+
+            # Convert MCP tool schemas to Anthropic format
+            anthropic_tools = [
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.inputSchema
+                }
+                for tool in tools_result.tools
+            ]
+
+            client = anthropic.Anthropic()
+            messages = [{"role": "user", "content": user_message}]
+
+            while True:
+                response = client.messages.create(
+                    model="claude-opus-4-5",
+                    max_tokens=1024,
+                    tools=anthropic_tools,
+                    messages=messages,
+                )
+
+                if response.stop_reason == "end_turn":
+                    text_blocks = [b for b in response.content if hasattr(b, "text")]
+                    return text_blocks[-1].text if text_blocks else ""
+
+                # Append assistant turn
+                messages.append({"role": "assistant", "content": response.content})
+
+                # Execute tool calls via MCP server
+                tool_results = []
+                for block in response.content:
+                    if block.type == "tool_use":
+                        result = await session.call_tool(block.name, arguments=block.input)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result.content[0].text if result.content else "",
+                        })
+
+                messages.append({"role": "user", "content": tool_results})
+
+
+if __name__ == "__main__":
+    answer = asyncio.run(run_agent("Find all Python files in /home/user/project"))
+    print(answer)
+```
+
+### When to use MCP vs rolling your own tool integration
+
+Use MCP when:
+- Multiple agents or products need the same tool — build once, share everywhere
+- You want to use pre-built servers (databases, filesystems, APIs) from the ecosystem
+- Tools need out-of-process isolation (security boundary between agent and tool execution)
+- You are building a platform where teams will contribute their own tool servers
+
+Roll your own when:
+- You have a single-provider, single-app tool with no reuse requirement
+- The added process overhead and stdio/HTTP complexity is not worth it for the use case
+- Your team is not yet familiar with MCP and you need to ship fast
+- Tools are purely in-memory transformations with no external I/O
+
+The key signal: if you are writing the same tool integration code for the third time, it is time to build an MCP server.
+
+## Common mistakes
+
+**Registering too many tools on a single server.** Every tool schema consumes context window tokens. A server with 50 tools sends 5,000+ tokens of schema before the user's message. Scope servers to a single domain (one server for database tools, one for file tools) and use tool filtering if discovery is dynamic.
+
+**Skipping input validation in the server.** The MCP client passes tool arguments directly from the model's output. Models hallucinate parameter values. Always validate inputs server-side using Pydantic or explicit checks — JSON Schema in the tool definition tells the model what to send but cannot prevent it from sending garbage.
+
+**Using HTTP transport without authentication.** Stdio transport runs locally and is sandboxed by OS process isolation. HTTP transport is exposed to the network. Add API key authentication or mTLS before deploying any HTTP MCP server that accesses sensitive data.
+
+**Treating MCP as a replacement for all tool patterns.** MCP adds process and protocol overhead. For simple, single-use tools in a single application, direct function calling is faster to build and easier to debug. Adopt MCP for the reusability and isolation benefits, not because it is the newer pattern.
+
+## Try it yourself
+
+Build a minimal MCP server that exposes two tools: `read_file(path: str) -> str` and `write_file(path: str, content: str) -> str`. Add input validation that (1) rejects paths outside a designated sandbox directory, (2) rejects writes larger than 10KB. Then write a client that connects to this server and runs a small agent loop: given the instruction "summarize the contents of README.md and save the summary to summary.txt", the agent should read the file, generate a summary using the LLM, then write it back using the tool. Verify that both the read and write paths hit the server correctly by adding a log line to each tool handler.
 """,
             },
         ],
