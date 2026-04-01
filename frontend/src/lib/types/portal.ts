@@ -394,3 +394,30 @@ export interface StreakSummary {
   today_reviews: number;
   total_active_days: number;
 }
+
+export interface ResumeInput {
+  full_name: string;
+  target_role: string;
+  years_experience: number;
+  current_role: string;
+  summary_override?: string;
+  work_experience: Array<{company: string; role: string; dates: string; bullets: string[]}>;
+  education: Array<{school: string; degree: string; year: string}>;
+  projects_override: Array<{title: string; description: string}>;
+  skills_override: string[];
+  include_portal_data: boolean;
+}
+
+export interface ResumeOutput {
+  summary: string;
+  skills: string[];
+  work_experience: Array<{company: string; role: string; dates: string; bullets: string[]}>;
+  projects: Array<{title: string; description: string; tech_stack: string[]; impact: string}>;
+  education: Array<{school: string; degree: string; year: string}>;
+  certifications: string[];
+  ai_engineering_highlights: string[];
+  resume_md: string;
+  model?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+}

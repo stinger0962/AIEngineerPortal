@@ -41,6 +41,8 @@ import type {
   PortfolioReadiness,
   Project,
   Recommendation,
+  ResumeInput,
+  ResumeOutput,
   SkillGapInsight,
   StreakSummary,
   VariationType,
@@ -310,6 +312,19 @@ export const portalApi = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: "Copilot unavailable" }));
       throw new Error(err.detail || `Copilot failed (${res.status})`);
+    }
+    return res.json();
+  },
+
+  async generateResume(input: ResumeInput): Promise<ResumeOutput> {
+    const res = await fetch(`${API_BASE}/resume/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Resume generation failed" }));
+      throw new Error(err.detail || `Failed (${res.status})`);
     }
     return res.json();
   },
