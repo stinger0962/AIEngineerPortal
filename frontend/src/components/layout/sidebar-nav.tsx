@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Brain, Gauge, GraduationCap, MessageSquare, Settings, SquareTerminal, BookOpen } from "lucide-react";
+import { Brain, Briefcase, Gauge, GraduationCap, MessageSquare, Settings, SquareTerminal, BookOpen } from "lucide-react";
 
 const items = [
   { href: "/", label: "Dashboard", icon: Gauge },
@@ -10,6 +10,7 @@ const items = [
   { href: "/practice", label: "Practice", icon: SquareTerminal },
   { href: "/review", label: "Review", icon: Brain },
   { href: "/interview", label: "Interview", icon: BookOpen },
+  { href: "/projects", label: "Portfolio", icon: Briefcase },
   { href: "/copilot", label: "Copilot", icon: MessageSquare },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
