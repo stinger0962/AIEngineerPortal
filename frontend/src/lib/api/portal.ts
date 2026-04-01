@@ -33,6 +33,7 @@ import type {
   JobPosting,
   KnowledgeArticle,
   LearningPath,
+  LiveJob,
   MasteryArea,
   MemoryCard,
   MemoryCardReview,
@@ -327,5 +328,9 @@ export const portalApi = {
       throw new Error(err.detail || `Failed (${res.status})`);
     }
     return res.json();
+  },
+
+  async searchLiveJobs(query: string = "ai engineer", limit: number = 20): Promise<{jobs: LiveJob[], total: number}> {
+    return fetchJson(`/jobs/live?query=${encodeURIComponent(query)}&limit=${limit}`, undefined, { jobs: [], total: 0 });
   },
 };

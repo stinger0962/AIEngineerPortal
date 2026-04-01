@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Brain, Briefcase, FileText, Gauge, GraduationCap, Menu, MessageSquare, Settings, SquareTerminal, BookOpen, X } from "lucide-react";
+import { Brain, Briefcase, FileText, Gauge, GraduationCap, Menu, MessageSquare, Search, Settings, SquareTerminal, BookOpen, X } from "lucide-react";
 
 const items = [
   { href: "/", label: "Dashboard", icon: Gauge },
@@ -13,6 +13,7 @@ const items = [
   { href: "/interview", label: "Interview", icon: BookOpen },
   { href: "/projects", label: "Portfolio", icon: Briefcase },
   { href: "/resume", label: "Resume", icon: FileText },
+  { href: "/jobs/live", label: "Jobs", icon: Search },
   { href: "/copilot", label: "Copilot", icon: MessageSquare },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

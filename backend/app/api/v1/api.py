@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.routes import adaptive, ai_feedback, copilot, courses, dashboard, deep_dives, exercise_variations, exercises, interview, interview_coaching, jobs, knowledge, learning, memory, news, projects, recommendations, resume, streaks
+from app.api.v1.routes import adaptive, ai_feedback, copilot, courses, dashboard, deep_dives, exercise_variations, exercises, interview, interview_coaching, jobs, knowledge, learning, live_jobs, memory, news, projects, recommendations, resume, streaks
 
 api_router = APIRouter()
 api_router.include_router(dashboard.router)
@@ -24,3 +24,4 @@ api_router.include_router(copilot.router)
 api_router.include_router(memory.router)
 api_router.include_router(resume.router)
 api_router.include_router(streaks.router)
+api_router.include_router(live_jobs.router)

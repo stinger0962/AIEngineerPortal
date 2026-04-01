@@ -421,3 +421,17 @@ export interface ResumeOutput {
   input_tokens?: number;
   output_tokens?: number;
 }
+
+export interface LiveJob {
+  title: string;
+  company_name: string;
+  company_logo: string;
+  location: string;
+  url: string;
+  description_snippet: string;
+  salary_range: string;
+  posted_date: string;
+  tags: string[];
+  seniority: string;
+  source: string;
+}
