@@ -16,11 +16,7 @@ services:
       - backend
 
   frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_BASE_URL: https://${APP_DOMAIN}/api/v1
+    image: infra-frontend:latest
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -36,9 +32,7 @@ services:
       start_period: 30s
 
   backend:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
+    image: infra-backend:latest
     restart: unless-stopped
     environment:
       APP_ENV: production

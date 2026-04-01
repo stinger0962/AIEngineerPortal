@@ -1,4 +1,4 @@
-name: Deploy Portal
+name: Build & Deploy Portal
 
 on:
   push:
@@ -8,10 +8,49 @@ on:
 
 permissions:
   contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  REPO_LOWER: stinger0962/aiengineerportal
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [backend, frontend]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.REPO_LOWER }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.REPO_LOWER }}/${{ matrix.service }}:latest
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=https://${{ secrets.APP_DOMAIN }}/api/v1
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
     runs-on: ubuntu-latest
+    needs: build
     concurrency:
       group: production-deploy
       cancel-in-progress: true
@@ -28,31 +67,46 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             set -e
-            if [ ! -f /opt/ai-engineer-portal/infra/.env.production ]; then
-              echo "ERROR: /opt/ai-engineer-portal/infra/.env.production missing."
-              echo "Bootstrap the VPS first: create this file with APP_DOMAIN, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD."
+
+            APP_DIR=/opt/ai-engineer-portal
+            ENV_FILE=$APP_DIR/infra/.env.production
+
+            # Ensure .env.production exists
+            if [ ! -f "$ENV_FILE" ]; then
+              echo "ERROR: $ENV_FILE missing."
               exit 1
             fi
-            export REPO_URL="https://github.com/${{ github.repository }}.git"
-            export DEPLOY_REF="${{ github.sha }}"
-            if [ ! -d /opt/ai-engineer-portal/.git ] || [ ! -f /opt/ai-engineer-portal/scripts/deploy-on-server.sh ]; then
-              ENV_BACKUP=$(mktemp)
-              cp /opt/ai-engineer-portal/infra/.env.production "$ENV_BACKUP"
-              rm -rf /opt/ai-engineer-portal
-              git clone "${REPO_URL}" /opt/ai-engineer-portal
-              mkdir -p /opt/ai-engineer-portal/infra
-              cp "$ENV_BACKUP" /opt/ai-engineer-portal/infra/.env.production
-              rm -f "$ENV_BACKUP"
+
+            # Ensure ANTHROPIC_API_KEY is present
+            if ! grep -q "ANTHROPIC_API_KEY" "$ENV_FILE" 2>/dev/null; then
+              echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> "$ENV_FILE"
             fi
-            # Ensure ANTHROPIC_API_KEY is in .env.production
-            if ! grep -q "ANTHROPIC_API_KEY" /opt/ai-engineer-portal/infra/.env.production 2>/dev/null; then
-              echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> /opt/ai-engineer-portal/infra/.env.production
-            fi
-            chmod +x /opt/ai-engineer-portal/scripts/deploy-on-server.sh
-            bash /opt/ai-engineer-portal/scripts/deploy-on-server.sh
-            cd /opt/ai-engineer-portal
+
+            # Update repo for docker-compose file and scripts
+            cd $APP_DIR
+            git config --unset-all http.https://github.com/.extraheader 2>/dev/null || true
+            git checkout -- . 2>/dev/null || true
+            git clean -fd 2>/dev/null || true
+            git fetch --all --tags --prune
+            git checkout "${{ github.sha }}"
+            git reset --hard "${{ github.sha }}"
+
+            # Login to GHCR and pull pre-built images
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+            # Pull images (built in CI, no local build needed)
+            docker pull ghcr.io/${{ env.REPO_LOWER }}/backend:${{ github.sha }}
+            docker pull ghcr.io/${{ env.REPO_LOWER }}/frontend:${{ github.sha }}
+
+            # Tag as expected by docker-compose
+            docker tag ghcr.io/${{ env.REPO_LOWER }}/backend:${{ github.sha }} infra-backend:latest
+            docker tag ghcr.io/${{ env.REPO_LOWER }}/frontend:${{ github.sha }} infra-frontend:latest
+
+            # Restart with pre-built images (no --build flag = no local build)
+            docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml up -d --force-recreate --remove-orphans
+
             git rev-parse --short HEAD
-            docker compose --env-file infra/.env.production -f infra/docker-compose.prod.yml ps
+            docker compose --env-file "$ENV_FILE" -f infra/docker-compose.prod.yml ps
 
       - name: Verify health via SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -62,8 +116,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             set -e
-            sleep 10
-            # Check backend health from inside the network (bypasses Cloudflare)
+            sleep 15
             for i in 1 2 3 4 5; do
               if docker exec infra-backend-1 python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" 2>/dev/null; then
                 echo "Backend health check passed on attempt $i"
@@ -72,8 +125,6 @@ jobs:
               echo "Attempt $i failed, waiting 10s..."
               sleep 10
             done
-            # Check all containers are running (not restarting)
-            docker compose -f /opt/ai-engineer-portal/infra/docker-compose.prod.yml --env-file /opt/ai-engineer-portal/infra/.env.production ps --format 'table {{.Name}}\t{{.Status}}'
             RESTARTING=$(docker compose -f /opt/ai-engineer-portal/infra/docker-compose.prod.yml --env-file /opt/ai-engineer-portal/infra/.env.production ps --format '{{.Status}}' | grep -c "Restarting" || true)
             if [ "$RESTARTING" -gt 0 ]; then
               echo "ERROR: containers are restarting"
