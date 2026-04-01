@@ -32,7 +32,7 @@ export default async function LessonPage({ params }: { params: Promise<{ lessonS
       </Link>
 
       {/* Hero header */}
-      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-ink via-ink/95 to-pine p-8 text-cream">
+      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-ink via-ink/95 to-pine p-5 lg:p-8 text-cream">
         <div className="absolute top-0 right-0 w-64 h-64 bg-ember/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4" />
         <div className="relative space-y-4">
           <div className="flex items-center gap-3">

@@ -19,7 +19,7 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Hero — greeting + next action */}
-      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-ink via-ink/95 to-pine p-8 text-cream">
+      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-ink via-ink/95 to-pine p-5 lg:p-8 text-cream">
         <div className="absolute top-0 right-0 w-80 h-80 bg-ember/8 rounded-full blur-3xl -translate-y-1/3 translate-x-1/4" />
         <div className="relative grid gap-6 lg:grid-cols-[1.5fr_1fr]">
           <div className="space-y-4">
