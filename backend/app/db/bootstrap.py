@@ -61,6 +61,23 @@ CREATE TABLE IF NOT EXISTS memory_cards (
 """
 
 
+INDEX_PATCHES = [
+    "CREATE INDEX IF NOT EXISTS ix_exercises_category ON exercises (category)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_exercises_slug ON exercises (slug)",
+    "CREATE INDEX IF NOT EXISTS ix_exercises_is_generated ON exercises (is_generated)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_lessons_slug ON lessons (slug)",
+    "CREATE INDEX IF NOT EXISTS ix_lessons_path_id ON lessons (learning_path_id)",
+    "CREATE INDEX IF NOT EXISTS ix_attempts_user_exercise ON exercise_attempts (user_id, exercise_id)",
+    "CREATE INDEX IF NOT EXISTS ix_attempts_attempted_at ON exercise_attempts (attempted_at)",
+    "CREATE INDEX IF NOT EXISTS ix_ai_feedback_feature_ref ON ai_feedback (feature, reference_id)",
+    "CREATE INDEX IF NOT EXISTS ix_ai_feedback_user_created ON ai_feedback (user_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_interview_questions_category ON interview_questions (category)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_knowledge_articles_slug ON knowledge_articles (slug)",
+    "CREATE INDEX IF NOT EXISTS ix_memory_cards_category ON memory_cards (category)",
+    "CREATE INDEX IF NOT EXISTS ix_memory_cards_next_review ON memory_cards (next_review_at)",
+]
+
+
 def apply_runtime_schema_patches(engine: Engine) -> None:
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -88,3 +105,7 @@ def apply_runtime_schema_patches(engine: Engine) -> None:
                 connection.execute(
                     text(f"UPDATE {table_name} SET last_synced_at = CURRENT_TIMESTAMP WHERE last_synced_at IS NULL")
                 )
+
+        # Apply index patches idempotently on existing databases
+        for index_ddl in INDEX_PATCHES:
+            connection.execute(text(index_ddl))

@@ -4,7 +4,7 @@ import enum
 from datetime import date, datetime
 from typing import Dict, List, Optional
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -43,6 +43,10 @@ class LearningPath(Base):
 
 class Lesson(Base):
     __tablename__ = "lessons"
+    __table_args__ = (
+        Index("ix_lessons_slug", "slug", unique=True),
+        Index("ix_lessons_path_id", "learning_path_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     learning_path_id: Mapped[int] = mapped_column(ForeignKey("learning_paths.id"))
@@ -83,6 +87,11 @@ class Course(Base):
 
 class Exercise(Base):
     __tablename__ = "exercises"
+    __table_args__ = (
+        Index("ix_exercises_category", "category"),
+        Index("ix_exercises_slug", "slug", unique=True),
+        Index("ix_exercises_is_generated", "is_generated"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(200))
@@ -102,6 +111,10 @@ class Exercise(Base):
 
 class UserExerciseAttempt(Base):
     __tablename__ = "exercise_attempts"
+    __table_args__ = (
+        Index("ix_attempts_user_exercise", "user_id", "exercise_id"),
+        Index("ix_attempts_attempted_at", "attempted_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -126,6 +139,10 @@ class AIFeedbackFeature(str, enum.Enum):
 
 class AIFeedback(Base):
     __tablename__ = "ai_feedback"
+    __table_args__ = (
+        Index("ix_ai_feedback_feature_ref", "feature", "reference_id"),
+        Index("ix_ai_feedback_user_created", "user_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -145,6 +162,9 @@ class AIFeedback(Base):
 
 class KnowledgeArticle(Base):
     __tablename__ = "knowledge_articles"
+    __table_args__ = (
+        Index("ix_knowledge_articles_slug", "slug", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(200))
@@ -216,6 +236,9 @@ class JobPosting(Base):
 
 class InterviewQuestion(Base):
     __tablename__ = "interview_questions"
+    __table_args__ = (
+        Index("ix_interview_questions_category", "category"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     category: Mapped[str] = mapped_column(String(120))
@@ -252,6 +275,10 @@ class ProgressSnapshot(Base):
 
 class MemoryCard(Base):
     __tablename__ = "memory_cards"
+    __table_args__ = (
+        Index("ix_memory_cards_category", "category"),
+        Index("ix_memory_cards_next_review", "next_review_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     front_md: Mapped[str] = mapped_column(Text, nullable=False)
