@@ -48,6 +48,11 @@ PATH_MASTERY_CONFIG = {
         "interview_categories": ["deployment", "system-design"],
         "project_categories": ["agent-system", "eval-tooling"],
     },
+    "ai-safety-and-guardrails": {
+        "exercise_categories": ["evaluation", "api-async"],
+        "interview_categories": ["evaluation", "deployment"],
+        "project_categories": ["eval-tooling", "agent-system"],
+    },
 }
 
 NEWS_TO_PATH = {
