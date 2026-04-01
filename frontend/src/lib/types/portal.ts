@@ -384,3 +384,13 @@ export interface CopilotResponse {
   output_tokens?: number;
   latency_ms?: number;
 }
+
+export interface StreakSummary {
+  current_streak: number;
+  longest_streak: number;
+  is_active_today: boolean;
+  week_activity: boolean[];
+  today_exercises: number;
+  today_reviews: number;
+  total_active_days: number;
+}

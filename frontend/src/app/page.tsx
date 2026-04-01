@@ -6,10 +6,11 @@ import { Panel } from "@/components/ui/panel";
 import { portalApi } from "@/lib/api/portal";
 
 export default async function DashboardPage() {
-  const [summary, today, masteryProfile] = await Promise.all([
+  const [summary, today, masteryProfile, streak] = await Promise.all([
     portalApi.getDashboardSummary(),
     portalApi.getDashboardToday(),
     portalApi.getMasteryProfile(),
+    portalApi.getStreakSummary(),
   ]);
 
   const weakestAreas = masteryProfile.slice(0, 3);
@@ -58,6 +59,52 @@ export default async function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Streak bar */}
+      <Panel className="flex items-center justify-between gap-6 flex-wrap">
+        {/* Current streak */}
+        <div className="flex items-center gap-3">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${streak.is_active_today ? "bg-ember text-white" : "bg-ink/10 text-ink/40"}`}>
+            {streak.current_streak}
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-ink">Day streak</p>
+            <p className="text-xs text-ink/50">Best: {streak.longest_streak} days</p>
+          </div>
+        </div>
+
+        {/* Week dots */}
+        <div className="flex items-center gap-2">
+          {["M", "T", "W", "T", "F", "S", "S"].map((day, i) => (
+            <div key={i} className="text-center">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium ${
+                streak.week_activity[i] ? "bg-pine text-white" : "bg-ink/5 text-ink/30"
+              }`}>
+                {day}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Today's stats */}
+        <div className="flex gap-4">
+          <div className="text-center">
+            <p className="text-xl font-bold text-ink">{streak.today_exercises}</p>
+            <p className="text-[10px] uppercase tracking-wide text-ink/40">Exercises</p>
+          </div>
+          <div className="text-center">
+            <p className="text-xl font-bold text-ink">{streak.today_reviews}</p>
+            <p className="text-[10px] uppercase tracking-wide text-ink/40">Reviews</p>
+          </div>
+        </div>
+
+        {/* CTA if not active today */}
+        {!streak.is_active_today && (
+          <Link href="/practice/python" className="rounded-full bg-ember px-4 py-2 text-sm font-semibold text-white hover:bg-[#e06f00] transition-colors">
+            Start today&apos;s practice
+          </Link>
+        )}
+      </Panel>
 
       {/* Quick actions row */}
       <div className="grid gap-4 md:grid-cols-5">

@@ -42,6 +42,7 @@ import type {
   Project,
   Recommendation,
   SkillGapInsight,
+  StreakSummary,
   VariationType,
 } from "@/lib/types/portal";
 
@@ -180,6 +181,13 @@ export const portalApi = {
     ),
   getRecommendations: () => fetchJson<Recommendation[]>("/recommendations/next-actions", undefined, mockRecommendations),
 
+  getStreakSummary(): Promise<StreakSummary> {
+    return fetchJson<StreakSummary>("/streaks/summary", undefined, {
+      current_streak: 0, longest_streak: 0, is_active_today: false,
+      week_activity: [false, false, false, false, false, false, false],
+      today_exercises: 0, today_reviews: 0, total_active_days: 0,
+    });
+  },
   getMemoryCards: () => fetchJson<MemoryCard[]>("/memory/cards", undefined, mockMemoryCards),
   reviewMemoryCard: (cardId: number, confidence: number) =>
     fetchJson<MemoryCardReview>(
