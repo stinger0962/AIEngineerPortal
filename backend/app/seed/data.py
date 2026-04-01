@@ -7441,7 +7441,7 @@ class RegressionResult:
 
 
 def similarity_score(expected: str, actual: str) -> float:
-    """Token overlap similarity, range 0.0-1.0."""
+    \"\"\"Token overlap similarity, range 0.0-1.0.\"\"\"
     ratio = difflib.SequenceMatcher(None, expected.lower(), actual.lower()).ratio()
     return round(ratio, 4)
 
