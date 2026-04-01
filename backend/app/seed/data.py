@@ -1143,6 +1143,1039 @@ class InstrumentedPipeline:
 """,
                 "estimated_minutes": 70,
             },
+            {
+                "title": "Pydantic for AI applications",
+                "summary": "Structured output validation from LLMs, settings management with BaseSettings, schema generation for tool definitions, and response models for provider APIs.",
+                "content_md": """## Why this matters
+
+Pydantic is the connective tissue of modern Python AI systems. Every provider SDK, every FastAPI endpoint, every settings file you touch is already using it. But most engineers use Pydantic at 20% capacity. This lesson covers the patterns that unlock the rest: parsing LLM JSON reliably, managing configuration across environments, generating tool schemas automatically, and building response models that survive provider API changes.
+
+## Core concepts
+
+### Parsing LLM JSON output into Pydantic models
+
+LLMs asked to return JSON produce almost-JSON: markdown fences, trailing commas, mixed quotes, leading prose. A robust parser handles the common failure modes before reaching `model_validate`:
+
+```python
+import json
+import re
+from pydantic import BaseModel, ValidationError
+
+
+class ExtractionResult(BaseModel):
+    entities: list[str]
+    sentiment: str
+    confidence: float
+
+    model_config = {"str_strip_whitespace": True}
+
+
+def extract_json_block(text: str) -> str | None:
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\\s*", "", text)
+    text = re.sub(r"\\s*```$", "", text)
+    match = re.search(r"(\\{[\\s\\S]*\\}|\\[[\\s\\S]*\\])", text)
+    return match.group(1) if match else None
+
+
+def parse_llm_output(
+    raw_text: str,
+    model_class: type[BaseModel],
+    fallback: BaseModel | None = None,
+) -> BaseModel | None:
+    json_str = extract_json_block(raw_text)
+    if json_str is None:
+        return fallback
+    try:
+        data = json.loads(json_str)
+        return model_class.model_validate(data)
+    except (json.JSONDecodeError, ValidationError) as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "llm_parse_failed",
+            extra={"error": str(exc), "raw_length": len(raw_text)},
+        )
+        return fallback
+
+
+# Usage:
+fallback = ExtractionResult(entities=[], sentiment="unknown", confidence=0.0)
+result = parse_llm_output(llm_response_text, ExtractionResult, fallback=fallback)
+```
+
+The `fallback` parameter lets callers decide whether a parse failure is fatal or recoverable at the call site.
+
+### Settings management with BaseSettings
+
+`pydantic-settings` reads from environment variables, `.env` files, and secrets, with validation and type coercion built in:
+
+```python
+from pydantic import Field, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class AppSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
+
+    anthropic_api_key: SecretStr = Field(..., description="Anthropic API key")
+    openai_api_key: SecretStr | None = Field(None, description="OpenAI API key (optional)")
+    default_model: str = Field("claude-3-5-sonnet-20241022")
+    max_tokens: int = Field(1024, ge=1, le=8192)
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
+    redis_url: str = Field("redis://localhost:6379/0")
+    log_level: str = Field("INFO", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
+
+
+settings = AppSettings()
+api_key = settings.anthropic_api_key.get_secret_value()
+```
+
+`SecretStr` fields display as `**********` in logs and repr. Validation runs at startup — a missing required key crashes immediately rather than failing silently at first use.
+
+### Schema generation for tool definitions
+
+Pydantic models generate JSON Schema automatically. This eliminates manually maintaining tool definitions that drift from your actual parameter models:
+
+```python
+from pydantic import BaseModel, Field
+
+
+class SearchOrdersParams(BaseModel):
+    query: str = Field(..., description="Order ID or customer email address")
+    status: str | None = Field(
+        None,
+        description="Filter by order status",
+        pattern="^(pending|shipped|delivered|cancelled)$",
+    )
+    limit: int = Field(10, ge=1, le=100, description="Maximum results to return")
+
+
+def to_anthropic_tool(name: str, description: str, params_model: type[BaseModel]) -> dict:
+    schema = params_model.model_json_schema()
+    schema.pop("title", None)
+    return {"name": name, "description": description, "input_schema": schema}
+
+
+def to_openai_tool(name: str, description: str, params_model: type[BaseModel]) -> dict:
+    schema = params_model.model_json_schema()
+    schema.pop("title", None)
+    return {"type": "function", "function": {"name": name, "description": description, "parameters": schema}}
+```
+
+Add a field, add a `Field(description=...)`, and the tool schema updates automatically.
+
+### Response models for provider APIs
+
+Provider API responses change. A response model that normalizes across providers shields the rest of your code:
+
+```python
+from pydantic import BaseModel, Field, model_validator
+
+
+class TokenUsage(BaseModel):
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+
+    @property
+    def total(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+class NormalizedResponse(BaseModel):
+    id: str
+    content: str
+    model: str
+    stop_reason: str
+    usage: TokenUsage
+    latency_ms: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def content_must_not_be_empty(self) -> "NormalizedResponse":
+        if not self.content.strip():
+            raise ValueError("Response content is empty")
+        return self
+
+
+def from_anthropic(raw: dict, latency_ms: int) -> NormalizedResponse:
+    return NormalizedResponse(
+        id=raw["id"],
+        content=raw["content"][0]["text"],
+        model=raw["model"],
+        stop_reason=raw["stop_reason"],
+        usage=TokenUsage(
+            input_tokens=raw["usage"]["input_tokens"],
+            output_tokens=raw["usage"]["output_tokens"],
+        ),
+        latency_ms=latency_ms,
+    )
+
+
+def from_openai(raw: dict, latency_ms: int) -> NormalizedResponse:
+    return NormalizedResponse(
+        id=raw["id"],
+        content=raw["choices"][0]["message"]["content"],
+        model=raw["model"],
+        stop_reason=raw["choices"][0]["finish_reason"],
+        usage=TokenUsage(
+            input_tokens=raw["usage"]["prompt_tokens"],
+            output_tokens=raw["usage"]["completion_tokens"],
+        ),
+        latency_ms=latency_ms,
+    )
+```
+
+Provider-specific parsing is isolated to two adapter functions. Everything downstream only ever sees `NormalizedResponse`.
+
+## Common mistakes
+
+**Catching `ValidationError` and swallowing it.** Validation errors contain precise field-level messages. Log them with the original text; do not silently return `None` without recording why.
+
+**Storing secrets in regular `str` fields.** Use `SecretStr` for API keys and credentials. It prevents the key from appearing in logs, tracebacks, and `model_dump()` output by default.
+
+**Manually maintaining tool schemas.** Hand-written JSON schema drifts from your actual code. Generate schemas from Pydantic models and treat the schema as a derived artifact.
+
+**Using `model_dump()` to pass data between layers.** If you are converting a Pydantic model to a dict to pass it to another function, consider whether that function should accept the Pydantic model directly.
+
+## Try it yourself
+
+1. Write a `parse_llm_output` function for a model of your choice. Test it against: valid JSON, JSON wrapped in backtick fences, JSON embedded in prose, and completely invalid text. Verify the fallback behavior in each case.
+2. Create a `BaseSettings` subclass for an AI project. Include at least one `SecretStr` field and one field with a regex pattern constraint. Verify that it raises a clear error for an invalid value.
+3. Take a tool definition you have written by hand and replace it with auto-generated schema from a Pydantic model. Compare the output to verify they match.
+""",
+                "estimated_minutes": 40,
+            },
+            {
+                "title": "Async concurrency for AI workloads",
+                "summary": "asyncio.gather for parallel provider calls, semaphores for rate limiting concurrent requests, streaming response handling with async generators, and timeout patterns.",
+                "content_md": """## Why this matters
+
+AI workloads are almost entirely network I/O: LLM calls, embedding requests, vector database queries, reranker inference. A single provider call takes 300ms to 5 seconds. If you run 20 provider calls serially, you wait up to 100 seconds. Run them concurrently with proper rate limiting and you finish in 5-10 seconds.
+
+Async Python is the right tool — not threads, not multiprocessing. But async has specific failure modes in AI work: unconstrained concurrency triggers rate limit errors, missing timeouts turn degraded providers into hung services, and streaming responses require a different mental model than request-response.
+
+## Core concepts
+
+### asyncio.gather for parallel provider calls
+
+The fundamental pattern: fire multiple coroutines simultaneously, collect results when all complete.
+
+```python
+import asyncio
+
+
+async def call_three_providers(prompt: str, claude_client, openai_client, gemini_client) -> dict:
+    results = await asyncio.gather(
+        claude_client.generate(prompt, model="claude-3-5-sonnet-20241022"),
+        openai_client.generate(prompt, model="gpt-4o-mini"),
+        gemini_client.generate(prompt, model="gemini-1.5-flash"),
+        return_exceptions=True,
+    )
+
+    output = {}
+    providers = ["claude", "openai", "gemini"]
+    for provider, result in zip(providers, results):
+        if isinstance(result, Exception):
+            output[provider] = {"error": str(result), "success": False}
+        else:
+            output[provider] = {"content": result.content, "success": True}
+    return output
+```
+
+`return_exceptions=True` is non-negotiable for multi-provider calls. Without it, one provider failure cancels all pending coroutines.
+
+### Semaphores for rate limiting concurrent requests
+
+Calling 50 endpoints simultaneously saturates rate limits. A `Semaphore` constrains concurrency to a safe window:
+
+```python
+import asyncio
+
+
+async def batch_generate(
+    prompts: list[str],
+    client,
+    max_concurrent: int = 5,
+) -> list[dict | Exception]:
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def _one(prompt: str) -> dict:
+        async with semaphore:
+            return await client.generate(prompt)
+
+    return await asyncio.gather(*[_one(p) for p in prompts], return_exceptions=True)
+```
+
+The semaphore does not queue requests — it blocks coroutines until a slot opens. All 50 coroutines are created immediately; only 5 run at a time.
+
+### Timeouts at two levels
+
+Every provider call needs a timeout. Set timeouts at two levels:
+
+```python
+import asyncio
+
+
+async def generate_with_timeout(client, prompt: str, per_request_timeout_s: float = 30.0) -> dict:
+    try:
+        return await asyncio.wait_for(client.generate(prompt), timeout=per_request_timeout_s)
+    except asyncio.TimeoutError:
+        raise TimeoutError(f"Provider timed out after {per_request_timeout_s}s")
+
+
+async def batch_with_total_timeout(
+    prompts: list[str],
+    client,
+    max_concurrent: int = 5,
+    per_request_s: float = 30.0,
+    total_timeout_s: float = 120.0,
+) -> list[dict | Exception]:
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def _one(prompt: str) -> dict:
+        async with semaphore:
+            return await generate_with_timeout(client, prompt, per_request_s)
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.gather(*[_one(p) for p in prompts], return_exceptions=True),
+            timeout=total_timeout_s,
+        )
+    except asyncio.TimeoutError:
+        raise TimeoutError(f"Batch timed out after {total_timeout_s}s total")
+```
+
+The per-request timeout catches slow individual calls; the total timeout catches a stalling batch.
+
+### Streaming response handling with async generators
+
+Streaming LLM responses arrive as a sequence of tokens. An async generator forwards tokens as they arrive:
+
+```python
+from collections.abc import AsyncIterator
+
+
+async def stream_response(client, prompt: str) -> AsyncIterator[str]:
+    async with client.stream(prompt) as response:
+        async for chunk in response:
+            token = chunk.choices[0].delta.content
+            if token:
+                yield token
+
+
+async def accumulate_stream(client, prompt: str) -> str:
+    parts = []
+    async for token in stream_response(client, prompt):
+        parts.append(token)
+    return "".join(parts)
+
+
+async def forward_to_websocket(client, prompt: str, websocket) -> str:
+    full_text = []
+    async for token in stream_response(client, prompt):
+        full_text.append(token)
+        await websocket.send_text(token)
+    return "".join(full_text)
+```
+
+The generator pattern decouples streaming from consuming: the same `stream_response` generator works whether accumulating text, forwarding to a WebSocket, or displaying a progress indicator.
+
+## Working example
+
+Three providers in parallel with semaphore rate limiting, per-request timeouts, and structured error handling:
+
+```python
+import asyncio
+import logging
+import time
+from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ProviderResult:
+    provider: str
+    content: str | None
+    error: str | None
+    latency_ms: int
+    success: bool
+
+
+async def multi_provider_eval(
+    prompt: str,
+    clients: dict,
+    max_concurrent: int = 3,
+    timeout_s: float = 45.0,
+) -> list[ProviderResult]:
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def _call_one(name: str, client) -> ProviderResult:
+        async with semaphore:
+            start = time.monotonic()
+            try:
+                response = await asyncio.wait_for(client.generate(prompt), timeout=timeout_s)
+                latency = int((time.monotonic() - start) * 1000)
+                logger.info("provider_ok", extra={"provider": name, "latency_ms": latency})
+                return ProviderResult(provider=name, content=response.content, error=None, latency_ms=latency, success=True)
+            except Exception as exc:
+                latency = int((time.monotonic() - start) * 1000)
+                logger.warning("provider_failed", extra={"provider": name, "error": str(exc), "latency_ms": latency})
+                return ProviderResult(provider=name, content=None, error=str(exc), latency_ms=latency, success=False)
+
+    tasks = [_call_one(name, client) for name, client in clients.items()]
+    results = await asyncio.gather(*tasks)
+    successful = [r for r in results if r.success]
+    logger.info("eval_complete", extra={"total": len(results), "successful": len(successful)})
+    return list(results)
+```
+
+## Common mistakes
+
+**Blocking calls inside async functions.** `time.sleep()`, `requests.get()`, synchronous file reads inside `async def` block the event loop entirely. Use `asyncio.sleep()`, `httpx.AsyncClient`, and `asyncio.to_thread()` for blocking work.
+
+**Skipping `return_exceptions=True`.** One failure in `asyncio.gather` cancels all pending coroutines without it. Always use it for production batch calls.
+
+**No timeout on streaming responses.** A streaming call that starts but stops mid-stream can hang indefinitely. Wrap streaming calls in `asyncio.wait_for` or set a read timeout on the HTTP client.
+
+**Using max_concurrent as a performance dial.** It is a rate limit dial. Set it based on provider documentation. Start at 5, measure for rate limit errors, adjust.
+
+## Try it yourself
+
+1. Write an async function that calls two different LLM clients in parallel using `asyncio.gather`. Add per-request timeouts and return both results (or the error) in a structured dict.
+2. Add a semaphore to a batch processing loop you already have. Compare wall-clock time for `max_concurrent` values of 1, 5, and 10 on a batch of 20 requests.
+3. Implement an async generator that streams tokens from a provider. Write an assertion that the joined tokens equal the content a non-streaming call would return.
+""",
+                "estimated_minutes": 45,
+            },
+            {
+                "title": "Testing AI applications",
+                "summary": "Why AI testing is different from conventional testing, mocking LLM providers for unit tests, snapshot testing for prompt outputs, and eval-driven testing with golden datasets.",
+                "content_md": """## Why this matters
+
+Testing AI applications is genuinely harder than testing conventional software. LLM outputs are non-deterministic: the same prompt can return different phrasings on different runs. Provider APIs are expensive and rate-limited. Evaluation criteria are often qualitative. Engineers who apply conventional unit testing patterns either write tests so loose they catch nothing or so strict they break on every model upgrade.
+
+This lesson covers a layered testing strategy: mock provider calls for fast unit tests, snapshot structural properties for regression testing, and use golden datasets for eval-driven quality gates.
+
+## Core concepts
+
+### Why conventional unit tests are insufficient
+
+- **Non-determinism**: `assert response == expected_string` fails whenever phrasing varies
+- **Slow feedback**: a 2-second LLM call per test case makes a 100-test suite take 3 minutes
+- **Cost**: running tests against live APIs in CI costs money and consumes rate limit budget
+- **No ground truth**: unlike a math function, there is no single correct output to assert against
+
+The solution is layers: mock the provider for unit tests, test structure not content, and use real LLM calls only in scheduled eval runs.
+
+### Mocking LLM providers for unit tests
+
+Mock at the HTTP boundary, not at a high abstraction level:
+
+```python
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+
+def make_anthropic_response(text: str) -> MagicMock:
+    msg = MagicMock()
+    msg.content = [MagicMock(text=text)]
+    msg.stop_reason = "end_turn"
+    msg.usage.input_tokens = 100
+    msg.usage.output_tokens = len(text.split())
+    return msg
+
+
+@pytest.fixture
+def mock_anthropic():
+    with patch("myapp.llm.anthropic_client") as mock_client:
+        mock_client.messages.create = AsyncMock(
+            return_value=make_anthropic_response(
+                '{"entities": ["Alice", "Bob"], "sentiment": "positive", "confidence": 0.9}'
+            )
+        )
+        yield mock_client
+
+
+@pytest.mark.asyncio
+async def test_extraction_returns_structured_output(mock_anthropic):
+    from myapp.extraction import extract_entities
+
+    result = await extract_entities("Alice and Bob had a great meeting.")
+
+    assert result is not None
+    assert "Alice" in result.entities
+    assert result.sentiment == "positive"
+    assert 0.0 <= result.confidence <= 1.0
+    mock_anthropic.messages.create.assert_called_once()
+    call_kwargs = mock_anthropic.messages.create.call_args.kwargs
+    assert "messages" in call_kwargs
+```
+
+This test runs in milliseconds, costs nothing, and verifies extraction logic — not the LLM's phrasing.
+
+### Testing output structure, not content
+
+For non-deterministic outputs, assert structure and type properties instead of exact string equality:
+
+```python
+from pydantic import BaseModel
+
+
+class SummaryOutput(BaseModel):
+    headline: str
+    key_points: list[str]
+    word_count: int
+
+
+def assert_valid_summary(output: SummaryOutput, min_points: int = 2) -> None:
+    assert len(output.headline) > 0, "Headline must not be empty"
+    assert len(output.headline) <= 200, "Headline must be concise"
+    assert len(output.key_points) >= min_points, f"Expected at least {min_points} key points"
+    assert all(len(p) > 0 for p in output.key_points), "Key points must not be empty"
+    assert output.word_count > 0, "Word count must be positive"
+```
+
+### Snapshot testing for prompt regression
+
+When you change a prompt, snapshot testing captures the output shape and fails on unexpected structural changes:
+
+```python
+import json
+from pathlib import Path
+
+SNAPSHOT_DIR = Path("tests/snapshots")
+
+
+def load_snapshot(name: str) -> dict | None:
+    path = SNAPSHOT_DIR / f"{name}.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+def save_snapshot(name: str, data: dict) -> None:
+    SNAPSHOT_DIR.mkdir(exist_ok=True)
+    (SNAPSHOT_DIR / f"{name}.json").write_text(json.dumps(data, indent=2))
+
+
+def assert_snapshot_keys(name: str, actual: dict, update: bool = False) -> None:
+    if update:
+        save_snapshot(name, actual)
+        return
+    expected = load_snapshot(name)
+    if expected is None:
+        save_snapshot(name, actual)
+        return
+    assert set(actual.keys()) == set(expected.keys()), (
+        f"Snapshot key mismatch for {name}: got {set(actual.keys())}, expected {set(expected.keys())}"
+    )
+```
+
+Run with `update=True` when you intentionally change a prompt. CI runs without `update` catch accidental structural regressions.
+
+### Eval-driven testing with golden datasets
+
+For quality gates, run real LLM calls against a curated dataset with known good properties:
+
+```python
+import asyncio
+import json
+from pathlib import Path
+from dataclasses import dataclass, field
+
+
+@dataclass
+class EvalCase:
+    id: str
+    input: str
+    expected_entities: list[str]
+    expected_sentiment: str
+    min_confidence: float = 0.7
+
+
+@dataclass
+class EvalResult:
+    case_id: str
+    passed: bool
+    errors: list[str] = field(default_factory=list)
+
+
+async def run_eval_suite(extract_fn, dataset_path: Path) -> tuple[list[EvalResult], float]:
+    cases = [EvalCase(**c) for c in json.loads(dataset_path.read_text())]
+    results = []
+
+    for case in cases:
+        result = await extract_fn(case.input)
+        errors = []
+
+        if result is None:
+            errors.append("extraction returned None")
+        else:
+            missing = [e for e in case.expected_entities if e not in result.entities]
+            if missing:
+                errors.append(f"missing entities: {missing}")
+            if result.sentiment != case.expected_sentiment:
+                errors.append(f"sentiment mismatch: expected {case.expected_sentiment!r}, got {result.sentiment!r}")
+            if result.confidence < case.min_confidence:
+                errors.append(f"confidence {result.confidence:.2f} below threshold {case.min_confidence}")
+
+        results.append(EvalResult(case_id=case.id, passed=len(errors) == 0, errors=errors))
+
+    pass_rate = sum(1 for r in results if r.passed) / len(results)
+    return results, pass_rate
+```
+
+## Common mistakes
+
+**Asserting exact LLM output strings.** These tests break on model upgrades, temperature variation, and prompt tweaks. Assert structure and properties instead.
+
+**Testing against live APIs in every test run.** Unit tests should not hit provider APIs. Mock at the client level and reserve real API calls for scheduled eval runs.
+
+**No golden dataset maintenance.** Golden datasets rot. When you improve the system, update the expected outputs. When you add a capability, add new eval cases.
+
+**Configuring the mock to return an unconfigured MagicMock.** An unconfigured `MagicMock()` will not surface shape errors in your parsing code. Configure the mock return value to match the actual SDK response shape.
+
+## Try it yourself
+
+1. Write a `pytest` fixture that mocks an LLM client. Write three tests that use it with different response configurations — one valid, one with a missing field, one returning None.
+2. Add structural assertions to an extraction function you have. Verify both a valid mock response and a response with a missing required field are detected correctly.
+3. Create a golden dataset with 5 test cases for a feature you are building. Write an eval runner that loads the dataset, calls your function, and reports a pass rate with per-case failure details.
+""",
+                "estimated_minutes": 45,
+            },
+            {
+                "title": "CLI tools and scripts for AI workflows",
+                "summary": "Building eval runners with typer, batch processing scripts with progress tracking, data preparation pipelines, and machine-readable report output.",
+                "content_md": """## Why this matters
+
+AI engineers spend significant time not building applications but running them: ingesting data, running eval suites, batch-processing prompts, exporting results, comparing prompt variants. A poorly-built script for any of these tasks becomes a reliability problem — a pipeline that crashes without saving partial results, an eval runner that gives no progress feedback on a 20-minute run, a data prep tool that silently skips malformed inputs.
+
+This lesson teaches you to build these tools properly: structured CLI interfaces, progress tracking, partial failure handling, and machine-readable output.
+
+## Core concepts
+
+### Building CLI tools with typer
+
+`typer` generates a full CLI from Python type annotations. No argparse boilerplate, automatic `--help` generation, and type validation on inputs:
+
+```python
+import typer
+from pathlib import Path
+
+app = typer.Typer(name="eval-runner", help="Run evaluation suites against LLM outputs.")
+
+
+@app.command()
+def run(
+    dataset: Path = typer.Argument(..., help="Path to golden dataset JSON file"),
+    output: Path = typer.Option(Path("eval-results.json"), help="Output file for results"),
+    model: str = typer.Option("claude-3-5-sonnet-20241022", help="Model ID to evaluate"),
+    concurrency: int = typer.Option(5, min=1, max=20, help="Max concurrent requests"),
+    pass_threshold: float = typer.Option(0.90, min=0.0, max=1.0, help="Minimum pass rate to exit 0"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    import asyncio
+    import json
+
+    if not dataset.exists():
+        typer.echo(f"Error: dataset not found at {dataset}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Running eval on {dataset.name} with model {model}...")
+    results, pass_rate = asyncio.run(_run_eval(dataset, model, concurrency, verbose))
+
+    report = {
+        "model": model,
+        "dataset": str(dataset),
+        "pass_rate": pass_rate,
+        "total": len(results),
+        "passed": sum(1 for r in results if r["passed"]),
+        "failed": sum(1 for r in results if not r["passed"]),
+        "cases": results,
+    }
+    output.write_text(json.dumps(report, indent=2))
+    typer.echo(f"Pass rate: {pass_rate:.1%} ({report['passed']}/{report['total']})")
+    typer.echo(f"Report written to {output}")
+
+    if pass_rate < pass_threshold:
+        typer.echo(f"FAILED: pass rate {pass_rate:.1%} below threshold {pass_threshold:.1%}", err=True)
+        raise typer.Exit(1)
+
+
+if __name__ == "__main__":
+    app()
+```
+
+`raise typer.Exit(1)` on eval failure lets CI systems detect regressions automatically.
+
+### Progress tracking with rich
+
+Long-running batch jobs need progress feedback. The `rich` library provides progress bars without custom terminal code:
+
+```python
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.console import Console
+
+console = Console()
+
+
+def process_batch_with_progress(items: list[dict], process_fn) -> list[dict]:
+    results = []
+    failed = []
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Processing...", total=len(items))
+        for item in items:
+            try:
+                result = process_fn(item)
+                results.append(result)
+            except Exception as exc:
+                failed.append({"id": item.get("id"), "error": str(exc)})
+            finally:
+                progress.advance(task)
+
+    console.print(f"[green]Done:[/green] {len(results)} processed, {len(failed)} failed")
+    return results
+```
+
+### Batch processing with partial failure handling
+
+Batch scripts must not abort on individual item failures. Capture failures per item, continue processing, report at the end:
+
+```python
+import json
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BatchResult:
+    processed: list[dict] = field(default_factory=list)
+    failed: list[dict] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return len(self.processed) + len(self.failed)
+
+    @property
+    def success_rate(self) -> float:
+        return len(self.processed) / self.total if self.total > 0 else 0.0
+
+    def summary(self) -> str:
+        return f"{len(self.processed)}/{self.total} succeeded ({self.success_rate:.1%}), {len(self.failed)} failed"
+
+
+def run_batch(input_path: Path, output_path: Path, process_fn, overwrite: bool = False) -> BatchResult:
+    if output_path.exists() and not overwrite:
+        raise FileExistsError(f"{output_path} already exists. Pass overwrite=True to replace.")
+
+    items = [json.loads(line) for line in input_path.read_text().splitlines() if line.strip()]
+    logger.info("batch_start", extra={"total_items": len(items)})
+
+    result = BatchResult()
+    for item in items:
+        try:
+            result.processed.append(process_fn(item))
+        except Exception as exc:
+            result.failed.append({"id": item.get("id"), "error": str(exc)})
+            logger.warning("item_failed", extra={"id": item.get("id"), "error": str(exc)})
+
+    output_path.write_text("\\n".join(json.dumps(r) for r in result.processed))
+    logger.info("batch_complete", extra={"summary": result.summary()})
+    return result
+```
+
+### Machine-readable report output
+
+Scripts that produce JSON output compose into pipelines. Support both human-readable and machine-readable output:
+
+```python
+import json
+from pathlib import Path
+
+
+def write_report(results: dict, output_path: Path | None, json_output: bool) -> None:
+    if json_output or output_path:
+        serialized = json.dumps(results, indent=2)
+        if output_path:
+            output_path.write_text(serialized)
+        else:
+            print(serialized)
+    else:
+        print(f"Pass rate: {results['pass_rate']:.1%}")
+        print(f"Total: {results['total']} | Passed: {results['passed']} | Failed: {results['failed']}")
+        if results.get("failed_cases"):
+            print("\\nFailed cases:")
+            for case in results["failed_cases"]:
+                print(f"  {case['id']}: {', '.join(case['errors'])}")
+```
+
+## Common mistakes
+
+**Scripts that abort on any single failure.** A batch of 1000 items should not stop at item 42. Capture per-item errors and continue.
+
+**No overwrite protection.** A script that silently overwrites its own output on rerun deletes the previous results. Require an explicit `--overwrite` flag.
+
+**Missing exit code conventions.** A script that prints "FAILED" but exits with code 0 cannot be detected by CI. Exit with a non-zero code on any meaningful failure.
+
+**Progress output mixed with result output.** Use `stderr` for progress and logging; use `stdout` or a file for machine-readable results.
+
+## Try it yourself
+
+1. Build a `typer` CLI for an eval runner. Include arguments for the dataset path, output file, and model. Verify `--help` is informative and the tool exits with code 1 when the pass rate is below threshold.
+2. Add a `rich` progress bar to a batch processing loop. Verify it shows remaining item count and updates in real time on a synthetic batch of 20 items.
+3. Modify a batch script to capture per-item failures in a `BatchResult` dataclass. Verify that a batch with 2 intentionally broken items processes all items and reports 2 failures without aborting.
+""",
+                "estimated_minutes": 35,
+            },
+            {
+                "title": "Error handling for unreliable AI services",
+                "summary": "Retry strategies with exponential backoff and jitter, circuit breaker pattern for provider failures, timeout cascading in multi-step pipelines, and partial failure handling.",
+                "content_md": """## Why this matters
+
+AI providers are not databases. They rate-limit, return 529s during high traffic, timeout on long generations, return malformed JSON on edge-case prompts, and occasionally go fully offline. A pipeline that propagates every provider error to the user is fragile. A pipeline that silently swallows errors is worse — you end up with corrupted outputs and no signal.
+
+The patterns in this lesson — retry with backoff, circuit breakers, timeout cascading, and partial failure handling — are what separate toy AI integrations from systems that run reliably in production.
+
+## Core concepts
+
+### Retry with exponential backoff and jitter
+
+Most provider failures are transient: rate limits, brief 5xx errors, network blips. A retry with exponential backoff recovers from these without manual intervention:
+
+```python
+import asyncio
+import logging
+import random
+from typing import TypeVar, Callable, Awaitable
+
+logger = logging.getLogger(__name__)
+T = TypeVar("T")
+
+
+class RetryableError(Exception):
+    # Raised for errors that should trigger a retry (rate limits, 5xx, timeouts).
+
+
+class PermanentError(Exception):
+    # Raised for errors that should not be retried (4xx client errors).
+
+
+async def with_retry(
+    fn: Callable[[], Awaitable[T]],
+    max_attempts: int = 3,
+    base_delay_s: float = 1.0,
+    max_delay_s: float = 60.0,
+    retryable_exceptions: tuple = (RetryableError, TimeoutError),
+) -> T:
+    # Retry an async callable with exponential backoff and full jitter.
+    last_exc: Exception | None = None
+
+    for attempt in range(max_attempts):
+        try:
+            return await fn()
+        except PermanentError:
+            raise
+        except retryable_exceptions as exc:
+            last_exc = exc
+            if attempt < max_attempts - 1:
+                cap = min(base_delay_s * (2 ** attempt), max_delay_s)
+                delay = random.uniform(0, cap)
+                logger.warning(
+                    "retry_scheduled",
+                    extra={"attempt": attempt + 1, "max_attempts": max_attempts, "delay_s": round(delay, 2), "error": str(exc)},
+                )
+                await asyncio.sleep(delay)
+
+    raise last_exc  # type: ignore[misc]
+
+
+def classify_http_error(status_code: int) -> type[Exception]:
+    if status_code == 429 or status_code >= 500:
+        return RetryableError
+    return PermanentError
+```
+
+Full jitter (`random.uniform(0, cap)`) spreads retries across the full delay range, preventing thundering herds when many clients retry simultaneously.
+
+### Circuit breaker pattern
+
+A circuit breaker stops hammering a provider that is clearly down, giving it time to recover:
+
+```python
+import time
+from enum import Enum
+from dataclasses import dataclass, field
+from typing import Callable, Awaitable, TypeVar
+
+T = TypeVar("T")
+
+
+class CircuitState(Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+@dataclass
+class CircuitBreaker:
+    failure_threshold: int = 5
+    recovery_timeout_s: float = 60.0
+    _state: CircuitState = field(default=CircuitState.CLOSED, init=False)
+    _failure_count: int = field(default=0, init=False)
+    _last_failure_time: float = field(default=0.0, init=False)
+
+    @property
+    def state(self) -> CircuitState:
+        if self._state == CircuitState.OPEN:
+            if time.monotonic() - self._last_failure_time > self.recovery_timeout_s:
+                self._state = CircuitState.HALF_OPEN
+        return self._state
+
+    def record_success(self) -> None:
+        self._failure_count = 0
+        self._state = CircuitState.CLOSED
+
+    def record_failure(self) -> None:
+        self._failure_count += 1
+        self._last_failure_time = time.monotonic()
+        if self._failure_count >= self.failure_threshold:
+            self._state = CircuitState.OPEN
+
+    async def call(self, fn: Callable[[], Awaitable[T]]) -> T:
+        if self.state == CircuitState.OPEN:
+            raise RuntimeError("Circuit breaker is open — provider unavailable")
+        try:
+            result = await fn()
+            self.record_success()
+            return result
+        except Exception:
+            self.record_failure()
+            raise
+```
+
+After `failure_threshold` consecutive failures, the circuit opens and all calls fail immediately. After `recovery_timeout_s`, it moves to `HALF_OPEN` and allows one test call through.
+
+### Resilient provider wrapper combining retry and circuit breaker
+
+```python
+import asyncio
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+
+
+class ResilientProvider:
+    def __init__(self, client, name: str, max_retries: int = 3, circuit_threshold: int = 5, circuit_timeout_s: float = 60.0) -> None:
+        self._client = client
+        self._name = name
+        self._max_retries = max_retries
+        self._circuit = CircuitBreaker(failure_threshold=circuit_threshold, recovery_timeout_s=circuit_timeout_s)
+
+    async def generate(self, prompt: str, timeout_s: float = 30.0) -> dict:
+        start = time.monotonic()
+        try:
+            result = await self._circuit.call(
+                lambda: with_retry(
+                    lambda: asyncio.wait_for(self._client.generate(prompt), timeout=timeout_s),
+                    max_attempts=self._max_retries,
+                )
+            )
+            latency = int((time.monotonic() - start) * 1000)
+            logger.info("provider_success", extra={"provider": self._name, "latency_ms": latency})
+            return result
+        except RuntimeError as exc:
+            if "Circuit breaker" in str(exc):
+                logger.error("circuit_open_rejection", extra={"provider": self._name})
+            raise
+        except Exception as exc:
+            latency = int((time.monotonic() - start) * 1000)
+            logger.error("provider_failed", extra={"provider": self._name, "latency_ms": latency, "error": str(exc)})
+            raise
+```
+
+### Partial failure handling in multi-step pipelines
+
+When a pipeline has multiple steps and one step fails for some items, continue with the items that succeeded:
+
+```python
+from dataclasses import dataclass, field
+from typing import Any, Callable, Awaitable
+
+
+@dataclass
+class PipelineResult:
+    item_id: str
+    success: bool
+    data: Any = None
+    failed_at_step: str | None = None
+    error: str | None = None
+
+
+async def run_pipeline_with_partial_failures(
+    items: list[dict],
+    steps: list[tuple[str, Callable[[Any], Awaitable[Any]]]],
+) -> list[PipelineResult]:
+    results = []
+
+    for item in items:
+        current_data = item
+        failed = False
+
+        for step_name, step_fn in steps:
+            try:
+                current_data = await step_fn(current_data)
+            except Exception as exc:
+                results.append(PipelineResult(
+                    item_id=item.get("id", "unknown"),
+                    success=False,
+                    failed_at_step=step_name,
+                    error=str(exc),
+                ))
+                failed = True
+                break
+
+        if not failed:
+            results.append(PipelineResult(item_id=item.get("id", "unknown"), success=True, data=current_data))
+
+    successful = [r for r in results if r.success]
+    failed_results = [r for r in results if not r.success]
+    logger.info("pipeline_complete", extra={"total": len(results), "successful": len(successful), "failed": len(failed_results)})
+    return results
+```
+
+## Common mistakes
+
+**Retrying non-retryable errors.** A `400 Bad Request` caused by a malformed prompt will never succeed on retry. Classify errors before retrying. Only retry transient errors (429, 5xx, timeout).
+
+**No jitter on retries.** Without jitter, all clients that hit the same rate limit retry at the same intervals, creating thundering herds. Always add randomness to retry delays.
+
+**Circuit breaker threshold too low.** A threshold of 1 or 2 opens the circuit on the first transient error. Set it high enough that a brief flap does not open the circuit.
+
+**Catching all exceptions at the top level without logging.** `except Exception: return None` hides every error. Log the exception type and message before swallowing.
+
+**No total timeout on the pipeline.** A multi-step pipeline where each step has a 30s timeout can run for 150 seconds if all five steps timeout. Set a total wall-clock budget on the pipeline as well.
+
+## Try it yourself
+
+1. Implement `with_retry` with exponential backoff and jitter. Write a test that injects failures for the first two attempts and verifies it succeeds on the third. Check that the delay between retries is randomized and increasing.
+2. Implement a `CircuitBreaker` class. Write a test that opens the circuit after N consecutive failures, verifies it rejects calls immediately when open, and allows calls again after the recovery timeout.
+3. Build a `ResilientProvider` wrapper for an LLM client you use. Add logging for each retry, circuit state change, and final failure. Run it against a mock that fails the first two calls and succeeds on the third.
+""",
+                "estimated_minutes": 40,
+            },
         ],
     },
     {
