@@ -420,3 +420,32 @@ class CoachingResponse(BaseModel):
     output_tokens: Optional[int] = None
     latency_ms: Optional[int] = None
     created_at: Optional[str] = None
+
+
+class ResumeInput(BaseModel):
+    """User-provided resume context."""
+    full_name: str
+    target_role: str = "AI Engineer"
+    years_experience: int = 0
+    current_role: str = ""
+    summary_override: Optional[str] = None  # User can provide their own summary
+    work_experience: list[dict] = []  # [{company, role, dates, bullets}]
+    education: list[dict] = []  # [{school, degree, year}]
+    projects_override: list[dict] = []  # User can add projects not in portal
+    skills_override: list[str] = []  # Additional skills to include
+    include_portal_data: bool = True  # Pull from portal learning data
+
+
+class ResumeOutput(BaseModel):
+    """Generated resume content."""
+    summary: str
+    skills: list[str]
+    work_experience: list[dict]
+    projects: list[dict]
+    education: list[dict]
+    certifications: list[str]
+    ai_engineering_highlights: list[str]  # From portal mastery data
+    resume_md: str  # Full resume as markdown
+    model: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
