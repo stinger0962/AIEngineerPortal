@@ -71,14 +71,14 @@ export default async function ProjectsPage() {
                   </div>
                 </div>
                 <p className="text-sm text-ink/60 line-clamp-2">{project.summary}</p>
-                {(project.repo_url || project.live_url) && (
+                {(project.repo_url || project.demo_url) && (
                   <div className="flex gap-3 pt-1">
                     {project.repo_url && (
                       <span className="flex items-center gap-1 text-xs text-ink/40">
                         <Github size={12} /> Repo
                       </span>
                     )}
-                    {project.live_url && (
+                    {project.demo_url && (
                       <span className="flex items-center gap-1 text-xs text-ink/40">
                         <ExternalLink size={12} /> Live
                       </span>
