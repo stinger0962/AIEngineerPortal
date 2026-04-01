@@ -2,19 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Brain, Briefcase, Gauge, GraduationCap, MessageSquare, Newspaper, Settings, Sparkles, SquareTerminal } from "lucide-react";
+import { Brain, Gauge, GraduationCap, MessageSquare, Settings, SquareTerminal, BookOpen } from "lucide-react";
 
 const items = [
   { href: "/", label: "Dashboard", icon: Gauge },
-  { href: "/learn", label: "Learning", icon: GraduationCap },
-  { href: "/courses", label: "Courses", icon: BookOpen },
+  { href: "/learn", label: "Learn", icon: GraduationCap },
   { href: "/practice", label: "Practice", icon: SquareTerminal },
   { href: "/review", label: "Review", icon: Brain },
-  { href: "/knowledge", label: "Knowledge", icon: Sparkles },
-  { href: "/projects", label: "Projects", icon: Briefcase },
   { href: "/interview", label: "Interview", icon: BookOpen },
-  { href: "/news", label: "News", icon: Newspaper },
-  { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/copilot", label: "Copilot", icon: MessageSquare },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
