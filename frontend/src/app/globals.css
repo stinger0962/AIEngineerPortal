@@ -47,3 +47,113 @@ pre {
 .memory-card-back {
   transform: rotateY(180deg);
 }
+
+/* Portal prose — rich markdown content styling */
+.portal-prose {
+  @apply text-ink leading-relaxed;
+}
+
+.portal-prose h1 {
+  @apply font-display text-3xl mt-10 mb-4 text-ink;
+}
+
+.portal-prose h2 {
+  @apply font-display text-2xl mt-8 mb-3 text-ink;
+}
+
+.portal-prose h3 {
+  @apply text-xl font-semibold mt-6 mb-2 text-ink;
+}
+
+.portal-prose h4 {
+  @apply text-lg font-semibold mt-4 mb-2 text-ink;
+}
+
+.portal-prose p {
+  @apply my-3 text-ink/85 text-[15px] leading-7;
+}
+
+.portal-prose ul {
+  @apply my-3 ml-6 list-disc space-y-1.5;
+}
+
+.portal-prose ol {
+  @apply my-3 ml-6 list-decimal space-y-1.5;
+}
+
+.portal-prose li {
+  @apply text-ink/85 text-[15px] leading-7;
+}
+
+.portal-prose li > ul {
+  @apply mt-1;
+}
+
+.portal-prose strong {
+  @apply font-semibold text-ink;
+}
+
+.portal-prose em {
+  @apply italic;
+}
+
+.portal-prose blockquote {
+  @apply my-4 border-l-4 border-ember pl-4 italic text-ink/70;
+}
+
+.portal-prose a {
+  @apply text-ember underline underline-offset-2 hover:text-ink transition-colors;
+}
+
+.portal-prose hr {
+  @apply my-8 border-ink/10;
+}
+
+/* Inline code */
+.portal-prose code:not(pre code) {
+  @apply rounded bg-sand/60 px-1.5 py-0.5 text-[13px] font-mono text-pine;
+}
+
+/* Code blocks */
+.portal-prose pre {
+  @apply my-5 overflow-x-auto rounded-2xl border border-ink/10 bg-[#0f172a] p-5 text-sm leading-6;
+}
+
+.portal-prose pre code {
+  @apply text-[13px] leading-6;
+}
+
+/* Tables (GFM) */
+.portal-prose table {
+  @apply my-5 w-full border-collapse text-sm;
+}
+
+.portal-prose th {
+  @apply border-b-2 border-ink/20 px-4 py-2 text-left font-semibold text-ink;
+}
+
+.portal-prose td {
+  @apply border-b border-ink/10 px-4 py-2 text-ink/80;
+}
+
+.portal-prose tr:hover td {
+  @apply bg-cream;
+}
+
+/* Highlight.js theme overrides for our dark code blocks */
+.portal-prose pre .hljs-keyword { color: #c792ea; }
+.portal-prose pre .hljs-string { color: #c3e88d; }
+.portal-prose pre .hljs-number { color: #f78c6c; }
+.portal-prose pre .hljs-comment { color: #546e7a; font-style: italic; }
+.portal-prose pre .hljs-function { color: #82aaff; }
+.portal-prose pre .hljs-title { color: #82aaff; }
+.portal-prose pre .hljs-params { color: #89ddff; }
+.portal-prose pre .hljs-built_in { color: #ffcb6b; }
+.portal-prose pre .hljs-literal { color: #f78c6c; }
+.portal-prose pre .hljs-type { color: #ffcb6b; }
+.portal-prose pre .hljs-attr { color: #ffcb6b; }
+.portal-prose pre .hljs-selector-class { color: #ffcb6b; }
+.portal-prose pre .hljs-template-variable { color: #f07178; }
+.portal-prose pre .hljs-variable { color: #f07178; }
+.portal-prose pre .hljs-meta { color: #546e7a; }
+.portal-prose pre code { color: #d4d4d4; background: transparent; }

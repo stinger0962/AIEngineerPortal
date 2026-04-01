@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { ExerciseAttemptForm } from "@/components/forms/exercise-attempt-form";
 import { VariationSection } from "@/components/forms/variation-section";
+import { LessonMarkdown } from "@/components/learning/lesson-markdown";
 import { Panel } from "@/components/ui/panel";
 import { SectionHeading } from "@/components/ui/section-heading";
 import { portalApi } from "@/lib/api/portal";
@@ -18,7 +19,8 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
 
   return (
     <div className="space-y-6">
-      <SectionHeading eyebrow="Exercise" title={detail.exercise.title} description={detail.exercise.prompt_md} />
+      <SectionHeading eyebrow="Exercise" title={detail.exercise.title} description="" />
+      <LessonMarkdown content={detail.exercise.prompt_md} />
       <Panel className="space-y-4">
         <p className="text-sm text-ink/70">
           {titleCase(detail.exercise.category)} / {detail.exercise.difficulty}
@@ -149,7 +151,7 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
             </div>
             <div className="rounded-2xl bg-cream p-4 text-sm text-ink">
               <div className="font-semibold">Why this answer works</div>
-              <p className="mt-3 whitespace-pre-wrap leading-7 text-ink/80">{detail.exercise.explanation_md}</p>
+              <LessonMarkdown content={detail.exercise.explanation_md} />
             </div>
           </div>
         </Panel>

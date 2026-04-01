@@ -5,6 +5,7 @@ import Link from "next/link";
 import { portalApi } from "@/lib/api/portal";
 import type { AIFeedbackResponse, ExerciseVariation, PinnedExercise, VariationType } from "@/lib/types/portal";
 import { AIFeedbackDisplay } from "@/components/forms/ai-feedback-display";
+import { LessonMarkdown } from "@/components/learning/lesson-markdown";
 
 interface Props {
   variation: ExerciseVariation;
@@ -84,7 +85,7 @@ export function ExerciseVariationPanel({ variation, exerciseId, onDiscard, onPin
 
       {/* Prompt */}
       <div className="px-5 pb-3">
-        <p className="text-sm text-[#14213d]/80 whitespace-pre-wrap leading-relaxed">{variation.prompt_md}</p>
+        <LessonMarkdown content={variation.prompt_md} />
       </div>
 
       {/* Code editor */}
