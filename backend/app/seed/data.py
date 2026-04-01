@@ -24068,6 +24068,302 @@ The rule-based sampler is the most important part. Negative user feedback and `m
 """,
         "tags_json": ["evaluation", "sampling", "production", "observability", "cost-optimization"],
     },
+    {
+        "title": "Implement a judge calibration pipeline",
+        "slug": "implement-judge-calibration-pipeline",
+        "category": "evaluation",
+        "difficulty": "hard",
+        "prompt_md": """\
+## Implement a Judge Calibration Pipeline
+
+You have an LLM-as-judge that scores RAG responses for faithfulness, but you don't know if it agrees with humans. Build a calibration pipeline that measures how well the judge aligns with human labels and flags when calibration degrades.
+
+### Requirements
+
+1. `JudgeCalibrationRun` dataclass: stores `case_id`, `judge_score`, `human_score`, `dimension` (faithfulness/relevance/helpfulness), and `timestamp`.
+
+2. `compute_calibration_metrics(runs: list[JudgeCalibrationRun]) -> dict` that returns:
+   - `agreement_rate`: fraction of cases where `abs(judge_score - human_score) <= 0.2`
+   - `mean_absolute_error`: average `abs(judge_score - human_score)`
+   - `bias`: mean of `judge_score - human_score` (positive = judge rates higher than humans)
+   - `cohens_kappa`: Cohen's Kappa treating scores >= 0.7 as "pass" and < 0.7 as "fail"
+   - `by_dimension`: the above metrics broken down per dimension
+
+3. `is_calibration_healthy(metrics: dict) -> tuple[bool, list[str]]` that returns `(True, [])` when calibration is acceptable, or `(False, [reason, ...])` when it fails. Flag when: `agreement_rate < 0.75`, `mean_absolute_error > 0.25`, or `abs(bias) > 0.15`.
+
+4. A standalone `cohens_kappa(predicted: list[bool], actual: list[bool]) -> float` function using the formula `(p_o - p_e) / (1 - p_e)` where `p_o` is observed agreement and `p_e` is expected agreement by chance.
+
+### Constraints
+
+- No external ML libraries. Pure Python only.
+- `compute_calibration_metrics` must handle the case where a dimension has no data (skip it in `by_dimension`).
+- All scores are floats in [0.0, 1.0].
+""",
+        "starter_code": """\
+from dataclasses import dataclass
+from datetime import datetime
+
+
+@dataclass
+class JudgeCalibrationRun:
+    case_id: str
+    judge_score: float
+    human_score: float
+    dimension: str  # "faithfulness" | "relevance" | "helpfulness"
+    timestamp: datetime
+
+
+def cohens_kappa(predicted: list[bool], actual: list[bool]) -> float:
+    # TODO: implement using p_o and p_e
+    pass
+
+
+def compute_calibration_metrics(runs: list[JudgeCalibrationRun]) -> dict:
+    # TODO: compute agreement_rate, mean_absolute_error, bias, cohens_kappa, by_dimension
+    pass
+
+
+def is_calibration_healthy(metrics: dict) -> tuple[bool, list[str]]:
+    # TODO: return (True, []) if healthy, (False, [reasons]) if not
+    pass
+""",
+        "solution_code": """\
+from dataclasses import dataclass
+from datetime import datetime
+
+
+@dataclass
+class JudgeCalibrationRun:
+    case_id: str
+    judge_score: float
+    human_score: float
+    dimension: str
+    timestamp: datetime
+
+
+def cohens_kappa(predicted: list[bool], actual: list[bool]) -> float:
+    if len(predicted) != len(actual) or len(predicted) == 0:
+        return 0.0
+    n = len(predicted)
+    p_o = sum(p == a for p, a in zip(predicted, actual)) / n
+    p_pos = sum(predicted) / n
+    a_pos = sum(actual) / n
+    p_e = p_pos * a_pos + (1 - p_pos) * (1 - a_pos)
+    if p_e == 1.0:
+        return 1.0
+    return (p_o - p_e) / (1 - p_e)
+
+
+def compute_calibration_metrics(runs: list[JudgeCalibrationRun]) -> dict:
+    if not runs:
+        return {}
+    diffs = [abs(r.judge_score - r.human_score) for r in runs]
+    biases = [r.judge_score - r.human_score for r in runs]
+    agreement_rate = sum(1 for d in diffs if d <= 0.2) / len(runs)
+    judge_pass = [r.judge_score >= 0.7 for r in runs]
+    human_pass = [r.human_score >= 0.7 for r in runs]
+    kappa = cohens_kappa(judge_pass, human_pass)
+
+    by_dimension: dict[str, dict] = {}
+    dims: dict[str, list] = {}
+    for r in runs:
+        dims.setdefault(r.dimension, []).append(r)
+    for dim, dim_runs in dims.items():
+        d_diffs = [abs(r.judge_score - r.human_score) for r in dim_runs]
+        d_biases = [r.judge_score - r.human_score for r in dim_runs]
+        d_judge_pass = [r.judge_score >= 0.7 for r in dim_runs]
+        d_human_pass = [r.human_score >= 0.7 for r in dim_runs]
+        by_dimension[dim] = {
+            "agreement_rate": sum(1 for d in d_diffs if d <= 0.2) / len(dim_runs),
+            "mean_absolute_error": sum(d_diffs) / len(dim_runs),
+            "bias": sum(d_biases) / len(dim_runs),
+            "cohens_kappa": cohens_kappa(d_judge_pass, d_human_pass),
+        }
+
+    return {
+        "agreement_rate": agreement_rate,
+        "mean_absolute_error": sum(diffs) / len(runs),
+        "bias": sum(biases) / len(runs),
+        "cohens_kappa": kappa,
+        "by_dimension": by_dimension,
+    }
+
+
+def is_calibration_healthy(metrics: dict) -> tuple[bool, list[str]]:
+    if not metrics:
+        return False, ["no data"]
+    reasons = []
+    if metrics.get("agreement_rate", 1.0) < 0.75:
+        reasons.append(
+            f"agreement_rate {metrics['agreement_rate']:.2f} is below 0.75"
+        )
+    if metrics.get("mean_absolute_error", 0.0) > 0.25:
+        reasons.append(
+            f"mean_absolute_error {metrics['mean_absolute_error']:.2f} exceeds 0.25"
+        )
+    if abs(metrics.get("bias", 0.0)) > 0.15:
+        reasons.append(
+            f"judge bias {metrics['bias']:.2f} exceeds ±0.15 threshold"
+        )
+    return (len(reasons) == 0), reasons
+""",
+        "explanation_md": """\
+`cohens_kappa` converts continuous scores to binary pass/fail before measuring agreement. `p_e` is the expected agreement if the judge and human were independent — if both often say "pass", `p_e` is high and kappa will be low even with moderate raw agreement. The bias field is directional: a positive bias means the judge consistently rates higher than humans, a systematic tendency that inflates quality signals. The per-dimension breakdown is the most useful diagnostic output — you typically find that faithfulness calibration is poor while relevance is fine, which tells you exactly which rubric to fix.
+""",
+        "tags_json": ["evaluation", "calibration", "llm-judge", "metrics", "human-feedback"],
+    },
+    {
+        "title": "Build an evaluation-driven development workflow",
+        "slug": "build-eval-driven-development-workflow",
+        "category": "evaluation",
+        "difficulty": "medium",
+        "prompt_md": """\
+## Build an Evaluation-Driven Development Workflow
+
+Evaluation-driven development means: write the eval before you write the feature, then use eval results to guide every prompt change. Build the scaffolding for this workflow.
+
+### Requirements
+
+1. `EvalCheckpoint` dataclass: `version` (str), `commit_hash` (str), `timestamp` (datetime), `pass_rate` (float), `avg_score` (float), `regression_cases` (list of case_id strings), `notes` (str).
+
+2. `CheckpointStore` class backed by a list (in-memory, no disk I/O). Methods:
+   - `save(checkpoint: EvalCheckpoint) -> None`
+   - `latest() -> EvalCheckpoint | None`
+   - `history(n: int = 10) -> list[EvalCheckpoint]` — most recent n, newest first
+   - `is_regression(current: EvalCheckpoint, threshold: float = 0.03) -> bool` — True if current `pass_rate` is more than `threshold` below the latest checkpoint's `pass_rate`
+
+3. `EvalGate` class with method `check(current: EvalCheckpoint, store: CheckpointStore) -> tuple[bool, str]`. Returns `(True, "OK")` if:
+   - No prior checkpoints exist (first run always passes)
+   - Pass rate did not regress beyond threshold
+   Returns `(False, reason_string)` if a regression is detected. The reason string should include the previous pass rate, current pass rate, and the list of new regression case IDs (cases in `current.regression_cases` not in the latest checkpoint's `regression_cases`).
+
+4. A `format_regression_report(gate_result: tuple[bool, str], current: EvalCheckpoint) -> str` that returns a one-line summary for CI output:
+   - On pass: `"EVAL PASS v{version}: {pass_rate:.1%} pass rate ({avg_score:.3f} avg score)"`
+   - On fail: `"EVAL FAIL v{version}: {reason}"`
+""",
+        "starter_code": """\
+from dataclasses import dataclass, field
+from datetime import datetime
+
+
+@dataclass
+class EvalCheckpoint:
+    version: str
+    commit_hash: str
+    timestamp: datetime
+    pass_rate: float
+    avg_score: float
+    regression_cases: list[str] = field(default_factory=list)
+    notes: str = ""
+
+
+class CheckpointStore:
+    def __init__(self):
+        self._store: list[EvalCheckpoint] = []
+
+    def save(self, checkpoint: EvalCheckpoint) -> None:
+        pass
+
+    def latest(self) -> "EvalCheckpoint | None":
+        pass
+
+    def history(self, n: int = 10) -> list["EvalCheckpoint"]:
+        pass
+
+    def is_regression(self, current: "EvalCheckpoint", threshold: float = 0.03) -> bool:
+        pass
+
+
+class EvalGate:
+    def check(
+        self, current: EvalCheckpoint, store: CheckpointStore
+    ) -> tuple[bool, str]:
+        pass
+
+
+def format_regression_report(
+    gate_result: tuple[bool, str], current: EvalCheckpoint
+) -> str:
+    pass
+""",
+        "solution_code": """\
+from dataclasses import dataclass, field
+from datetime import datetime
+
+
+@dataclass
+class EvalCheckpoint:
+    version: str
+    commit_hash: str
+    timestamp: datetime
+    pass_rate: float
+    avg_score: float
+    regression_cases: list[str] = field(default_factory=list)
+    notes: str = ""
+
+
+class CheckpointStore:
+    def __init__(self):
+        self._store: list[EvalCheckpoint] = []
+
+    def save(self, checkpoint: EvalCheckpoint) -> None:
+        self._store.append(checkpoint)
+
+    def latest(self) -> "EvalCheckpoint | None":
+        return self._store[-1] if self._store else None
+
+    def history(self, n: int = 10) -> list["EvalCheckpoint"]:
+        return list(reversed(self._store[-n:]))
+
+    def is_regression(self, current: "EvalCheckpoint", threshold: float = 0.03) -> bool:
+        prior = self.latest()
+        if prior is None:
+            return False
+        return current.pass_rate < prior.pass_rate - threshold
+
+
+class EvalGate:
+    def __init__(self, threshold: float = 0.03):
+        self.threshold = threshold
+
+    def check(
+        self, current: EvalCheckpoint, store: CheckpointStore
+    ) -> tuple[bool, str]:
+        prior = store.latest()
+        if prior is None:
+            return True, "OK"
+        if store.is_regression(current, self.threshold):
+            new_failures = [
+                c for c in current.regression_cases
+                if c not in prior.regression_cases
+            ]
+            reason = (
+                f"pass rate dropped from {prior.pass_rate:.1%} to "
+                f"{current.pass_rate:.1%} "
+                f"(threshold -{self.threshold:.0%}); "
+                f"new failures: {new_failures or 'none identified'}"
+            )
+            return False, reason
+        return True, "OK"
+
+
+def format_regression_report(
+    gate_result: tuple[bool, str], current: EvalCheckpoint
+) -> str:
+    passed, reason = gate_result
+    if passed:
+        return (
+            f"EVAL PASS v{current.version}: "
+            f"{current.pass_rate:.1%} pass rate "
+            f"({current.avg_score:.3f} avg score)"
+        )
+    return f"EVAL FAIL v{current.version}: {reason}"
+""",
+        "explanation_md": """\
+`history` uses `reversed(self._store[-n:])` to return newest-first without modifying the underlying list. `is_regression` reads `latest()` rather than taking a prior directly — this keeps the regression check consistent with whatever was last saved, preventing subtle bugs where a caller compares against the wrong baseline. The `new_failures` list in `EvalGate.check` is the most actionable output: it tells the developer exactly which test cases broke, not just that the pass rate dropped. This is the diff that gets pasted into the PR comment.
+""",
+        "tags_json": ["evaluation", "ci-cd", "regression-testing", "workflow", "quality-gates"],
+    },
 ]
 
 
@@ -28150,6 +28446,146 @@ The teams that skip it discover their regressions in production, usually from us
 """,
         "source_links_json": [],
         "tags_json": ["evaluation", "regression-testing", "ci-cd", "golden-dataset", "testing", "quality"],
+    },
+    {
+        "title": "Golden dataset curation and maintenance",
+        "slug": "golden-dataset-curation-maintenance",
+        "category": "evaluation",
+        "summary": "How to build, curate, and keep a golden evaluation dataset useful over time — including seeding from production traffic, avoiding common data quality traps, and retiring stale cases.",
+        "content_md": """\
+## Golden Dataset Curation and Maintenance
+
+A golden dataset is not a one-time artifact — it is a living document that needs the same maintenance discipline as your application code. The teams that treat it as permanent tend to regress silently as the dataset drifts away from the real distribution.
+
+## What belongs in a golden dataset
+
+A golden dataset should cover the distribution your feature actually encounters, not the distribution you wish it encountered. Three sources produce high-quality seed cases:
+
+**Production failures.** When your monitoring surfaces a bad response — a user thumbs-down, a faithfulness score below 0.5, a judge that flagged hallucination — that case should enter the golden dataset immediately. These are guaranteed to be difficult and guaranteed to be real. Log the original query, the retrieved context, the generated response, and what made it fail.
+
+**Sampled production traffic.** A random 0.1% sample of production queries, labeled by human reviewers, gives you cases representative of real usage. Without this, your dataset will skew toward edge cases and miss the "common but subtle" failures.
+
+**Deliberately constructed edge cases.** Cases you construct to test specific behaviors: boundary conditions, ambiguous queries, multi-hop reasoning, off-topic requests, queries in under-represented languages. These test hypotheses about where the feature might fail.
+
+## How many cases you need
+
+| Goal | Minimum cases |
+|---|---|
+| Catch major regressions (>10% pass rate drop) | 30 |
+| Detect moderate regressions (>5% drop) | 100 |
+| Meaningful category-level breakdowns | 20 per category |
+| Statistically significant A/B comparison | 50-100 per variant |
+
+More is not always better. A 10,000-case dataset that takes 90 minutes to run on every PR will be skipped. Keep the core golden set at 50-200 cases and run it on every commit. Maintain a larger "extended" set that runs nightly.
+
+## The labeling process
+
+Good labels require a written rubric before anyone labels anything. The rubric defines what each score value means for this specific task, not in the abstract. Example rubric for a RAG Q&A feature:
+
+- **1.0 (Pass):** All claims in the answer are directly supported by retrieved chunks. The answer addresses the user's question. No relevant information from the context was omitted.
+- **0.5 (Borderline):** Answer is mostly correct but makes one unsupported claim, or the question is addressed but incompletely.
+- **0.0 (Fail):** Answer contains a fabricated fact not present in any context chunk, or the question is not addressed.
+
+Two reviewers should independently label a 20% sample. Compute inter-rater agreement (Cohen's Kappa). If Kappa < 0.6, the rubric is ambiguous — resolve disagreements, update the rubric, re-label. Do not proceed with a rubric that humans cannot consistently apply.
+
+## Dataset rot and maintenance
+
+Golden datasets rot in two ways:
+
+**Distribution rot.** User behavior changes. A golden set seeded from 2023 traffic may not represent 2025 queries. Audit quarterly: compare the query types in your golden set to a recent 1,000-query sample. Add cases from underrepresented patterns, retire cases from patterns that no longer appear.
+
+**Label rot.** Your feature evolves, so "correct" outputs change. A response you labeled 1.0 six months ago may now be borderline because the product added a requirement for citation links. Re-label at least the failure cases whenever the feature's definition of "correct" changes.
+
+## Versioning
+
+Version your golden dataset the same way you version your code. Store it in source control as a JSONL file. Every case has a `case_id`, `version_added`, and optionally `version_retired`. When you retire a case, do not delete it — mark it `"active": false`. This lets you reconstruct historical pass rates accurately.
+
+## The maintenance cadence
+
+- **Continuous:** add new cases from production failures within 24 hours of discovery
+- **Per-deploy:** run the golden set, store results with commit hash
+- **Monthly:** review coverage report, seed from recent production sample, update rubric if needed
+- **Quarterly:** full audit — inter-rater agreement check, distribution comparison, retire stale cases
+""",
+        "source_links_json": [],
+        "tags_json": ["evaluation", "golden-dataset", "data-curation", "testing", "quality"],
+    },
+    {
+        "title": "Cost-aware evaluation strategies",
+        "slug": "cost-aware-evaluation-strategies",
+        "category": "evaluation",
+        "summary": "How to build evaluation systems that stay within budget by combining cheap deterministic checks, sampling strategies, and expensive judge models at the right points in the pipeline.",
+        "content_md": """\
+## Cost-Aware Evaluation Strategies
+
+The naive evaluation approach — run GPT-4o as a judge on every response — is financially unsustainable at production scale. A system generating 100,000 responses per day with a 500-token judge prompt and 200-token response costs roughly $150-200/day in judge fees alone. Cost-aware evaluation is not about cutting corners. It is about spending your evaluation budget where it produces the most signal.
+
+## The cost hierarchy
+
+Different evaluation methods differ by orders of magnitude in cost:
+
+| Method | Relative cost | Throughput | Best for |
+|---|---|---|---|
+| Exact string match | ~0 | Unlimited | Structured output, classification |
+| Schema/type validation | ~0 | Unlimited | JSON extraction, tool calls |
+| Regex / keyword check | ~0 | Unlimited | Format compliance, required terms |
+| Embedding similarity | Low | High | Semantic match, paraphrase detection |
+| Small judge model (Haiku, GPT-4o Mini) | Medium | High | Continuous production sampling |
+| Large judge model (Sonnet, GPT-4o) | High | Medium | Calibration, golden set evaluation |
+| Human annotation | Very high | Low | Ground truth, rubric calibration |
+
+## The tiered evaluation architecture
+
+A practical production system uses all tiers simultaneously, routing each evaluation decision to the cheapest tier that can resolve it.
+
+**Tier 1: Always-on deterministic checks.** Run on 100% of responses. Validate output schema, check required fields, detect truncation (finish_reason = max_tokens), flag empty responses. These catch hard failures instantly with no LLM cost.
+
+**Tier 2: Sampled small-model judge.** Run on 5-10% of production responses, continuously. A small model (GPT-4o Mini, Claude Haiku) scores faithfulness and relevance. Use the score distribution to maintain a real-time quality dashboard. When the mean score drops or the distribution shifts, trigger a deeper investigation.
+
+**Tier 3: Full golden set with large model.** Run on every deploy (not continuously). A large judge model evaluates the full golden dataset. This is the regression gate — it costs $5-20 per run but only runs a few times per day.
+
+**Tier 4: Human annotation batch.** Run monthly or when judge calibration degrades. Label 50-100 cases per quarter to recalibrate judges and refresh the golden dataset. This is the most expensive tier but the ground truth source.
+
+## Rule-based sampling for tier 2
+
+Naive random sampling misses the important cases. A better approach: sample by signal strength.
+
+Always send to judge (100% sampling):
+- Negative user feedback (thumbs down, explicit "wrong")
+- Auto-scorer uncertainty zone (score 0.35-0.65)
+- `finish_reason == max_tokens` (output truncated)
+- Error or retry in the LLM call
+- First 100 responses from a new feature or prompt version
+
+Apply random sampling (5-10%):
+- Normal production traffic with confident auto-scorer score
+
+Never judge (0%):
+- Responses with schema validation failures (already flagged as hard fail)
+- Duplicate (question, response) pairs seen in the last 24 hours
+
+## Caching judge results
+
+Judge results for identical (question, response, context_hash) triples can be cached. In practice, you often evaluate the same golden set cases repeatedly as you iterate on prompts. Cache the judge output for the (case_id, response_hash) pair. When the response changes, invalidate the cache for that case.
+
+## Cost estimation as a first-class metric
+
+Track judge spend as a feature of the evaluation system, not as an afterthought:
+- Total judge cost per deploy run
+- Cost per 1,000 production responses evaluated
+- Judge cost as a percentage of generation cost
+
+When judge cost exceeds 20% of generation cost, your sampling rate or judge model selection is misconfigured. The rule of thumb: judge spend should be 1-5% of total LLM spend.
+
+## What you cannot cut
+
+Some evaluations should not be sampled:
+- Safety evaluation (toxicity, PII detection) on user-visible outputs — run on 100%
+- Evaluations that gate a regulatory compliance requirement — run on 100% or sample at the highest rate your budget allows
+- Any evaluation that you plan to present to leadership as a quality metric — run on enough volume that the confidence interval is meaningful
+""",
+        "source_links_json": [],
+        "tags_json": ["evaluation", "cost-optimization", "sampling", "llm-judge", "production", "budget"],
     },
 ]
 
@@ -33376,6 +33812,95 @@ Quality is not the only dimension. A variant that improves quality by 3% but dou
 Frame A/B eval as a decision-making tool, not just a measurement. The output should be a recommendation (deploy B / keep A / inconclusive) with supporting evidence. The most important practical advice: run on at least 50 cases before acting on the results, and examine per-case results — not just the aggregate — to understand what each variant is actually doing differently.
 """,
         "tags_json": ["evaluation", "ab-testing", "prompt-variants", "testing", "decision-making"],
+    },
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "intermediate",
+        "question_text": "How would you design a golden dataset for a new LLM feature? Walk through the process from scratch.",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you treat evaluation as an engineering discipline with its own design process — not as an afterthought. Strong candidates describe a structured process for deciding what cases go in, how labels are produced, and how the dataset is maintained.
+
+## Start with what "correct" means
+
+Before writing a single test case, write the rubric. What does a 1.0 (pass) response look like? What distinguishes a 0.5 from a 0.0? Without a written rubric, two people labeling the same case will disagree, and your eval signal is noise.
+
+## Source the cases from three places
+
+**Production failures.** The first 20-30 cases should come from cases the system has already gotten wrong — user thumbs-down, low auto-scores, manual reports. These are guaranteed hard and real.
+
+**Random production sample.** Label a 0.1% random sample of recent queries. This gives you cases representative of the real distribution, not just the edge cases that got flagged.
+
+**Deliberately constructed edge cases.** You should be able to predict where the system is likely to fail. Construct cases for: multi-hop reasoning, ambiguous queries, off-topic requests, queries with no correct answer in the context, adversarial phrasing.
+
+## Validate your labels
+
+Have two people independently label 20% of the cases. Compute Cohen's Kappa. If Kappa < 0.6, your rubric is ambiguous — resolve disagreements, update the rubric, and re-label until agreement is consistent.
+
+## Keep it small and runnable
+
+50-200 cases for the core golden set. It should run in under 5 minutes so it can gate every PR. Maintain a larger "extended" set (500-1000 cases) that runs nightly for more thorough analysis.
+
+## Plan for drift
+
+Add cases from production failures continuously. Audit coverage quarterly. Retire stale cases with `active: false` so you can reconstruct historical pass rates accurately.
+
+## Interview takeaway
+
+A golden dataset is an engineering artifact: it needs version control, a written rubric, inter-rater agreement validation, and a maintenance cadence. Saying "I'd collect some test cases" is not enough — describe the process end-to-end, including how you handle label disagreement and how you keep the dataset current.
+""",
+        "tags_json": ["evaluation", "golden-dataset", "testing", "data-curation"],
+    },
+    {
+        "category": "evaluation",
+        "role_type": "ai-engineer",
+        "difficulty": "advanced",
+        "question_text": "How do you design and maintain a human feedback loop for an LLM feature in production?",
+        "answer_outline_md": """\
+## What this question tests
+
+The interviewer wants to see that you can connect the implicit user feedback (engagement, follow-ups, session abandonment) and explicit feedback (thumbs down, corrections) into a system that continuously improves the LLM feature. Strong candidates describe the full loop: collection, annotation, analysis, and action.
+
+## Why human feedback is non-negotiable
+
+Automated metrics measure proxies. Human feedback measures reality. A user who clicks thumbs down is expressing ground truth about quality that no LLM judge can match. Even at 0.5% feedback rate, a system processing 50,000 requests per day gets 250 labeled examples per day — a powerful signal if you use it systematically.
+
+## Explicit vs. implicit feedback
+
+**Explicit:** thumbs up/down, "report a problem," star ratings, corrections the user submits. Strong signal, low volume.
+
+**Implicit:** follow-up questions (user had to rephrase because the first answer was incomplete), copy/paste rate (high = useful), session abandonment after the LLM response, feature re-entry within 60 seconds (common signal for "that didn't work").
+
+Both are valuable. Implicit signals scale; explicit signals are cleaner.
+
+## The annotation pipeline
+
+Raw feedback needs triage before it becomes a training signal or an eval case:
+
+1. **Collect** feedback events with full context: query, response, session ID, timestamp, user action.
+2. **Triage** automatically: filter out duplicate sessions, spam, test traffic.
+3. **Annotate** a sample: human reviewers confirm whether the feedback reflects a genuine quality failure or a user misunderstanding.
+4. **Categorize** by failure type: factual error, incomplete answer, off-topic, formatting problem, slow response. Different failure types need different fixes.
+
+## Closing the loop
+
+Feedback is only useful if it changes something:
+
+- **Short loop (days):** add confirmed failures to the golden dataset immediately. If you see 10 similar failures in a week, that is a pattern to address in the next sprint.
+- **Medium loop (weeks):** use categorized failures to prioritize prompt improvements and retrieval fixes. Run A/B eval on proposed fixes against the failure cases before deploying.
+- **Long loop (months):** use high-volume labeled data for fine-tuning or preference optimization if the failure pattern is systematic and correction is well-defined.
+
+## What not to do
+
+Do not feed raw thumbs-down directly into a training pipeline without annotation. Users give thumbs-down for many reasons, including accurate responses that did not match their mood. Raw feedback without triage produces a noisy, misleading signal.
+
+## Interview takeaway
+
+Human feedback is the calibration source for your entire evaluation system. Design the collection to be lightweight (one click), the annotation to be structured (failure taxonomy, not freeform notes), and the action loop to be short. An LLM feature with no human feedback pipeline has no ground truth signal — it is optimizing in the dark.
+""",
+        "tags_json": ["evaluation", "human-feedback", "annotation", "production", "quality-loops"],
     },
 ]
 
