@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BookOpen, CheckCircle2, Clock, Tag, ArrowLeft } from "lucide-react";
+import { BookOpen, CheckCircle2, Clock, Tag, ArrowLeft, ArrowRight } from "lucide-react";
 
 import { LessonMarkdown } from "@/components/learning/lesson-markdown";
 import { LessonCompleteButton } from "@/components/forms/lesson-complete-button";
@@ -10,7 +10,11 @@ import { portalApi } from "@/lib/api/portal";
 
 export default async function LessonPage({ params }: { params: Promise<{ lessonSlug: string }> }) {
   const { lessonSlug } = await params;
-  const lesson = await portalApi.getLesson(lessonSlug);
+  const [lesson, paths] = await Promise.all([
+    portalApi.getLesson(lessonSlug),
+    portalApi.getLearningPaths(),
+  ]);
+
 
   if (!lesson) {
     notFound();
@@ -100,6 +104,53 @@ export default async function LessonPage({ params }: { params: Promise<{ lessonS
           <DeepDiveSection lessonId={lesson.id} />
         </Panel>
       </div>
+
+      {/* Next / Previous lesson navigation */}
+      {(() => {
+        const currentPath = paths.find((p: any) => p.id === lesson.learning_path_id);
+        if (!currentPath) return null;
+        const sorted = [...currentPath.lessons].sort((a: any, b: any) => a.order_index - b.order_index);
+        const idx = sorted.findIndex((l: any) => l.slug === lessonSlug);
+        const prev = idx > 0 ? sorted[idx - 1] : null;
+        const next = idx < sorted.length - 1 ? sorted[idx + 1] : null;
+
+        return (
+          <div className="grid gap-4 md:grid-cols-2">
+            {prev ? (
+              <Link href={`/learn/lesson/${prev.slug}`} className="group">
+                <Panel className="flex items-center gap-3 hover:shadow-lg transition-shadow h-full">
+                  <ArrowLeft size={16} className="text-ink/30 group-hover:text-ember transition-colors shrink-0" />
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wide text-ink/40">Previous</span>
+                    <p className="text-sm font-semibold text-ink group-hover:text-ember transition-colors">{prev.title}</p>
+                  </div>
+                </Panel>
+              </Link>
+            ) : <div />}
+            {next ? (
+              <Link href={`/learn/lesson/${next.slug}`} className="group">
+                <Panel className="flex items-center justify-end gap-3 hover:shadow-lg transition-shadow h-full text-right">
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wide text-ink/40">Next lesson</span>
+                    <p className="text-sm font-semibold text-ink group-hover:text-ember transition-colors">{next.title}</p>
+                  </div>
+                  <ArrowRight size={16} className="text-ink/30 group-hover:text-ember transition-colors shrink-0" />
+                </Panel>
+              </Link>
+            ) : (
+              <Link href={`/learn/${currentPath.slug}`} className="group">
+                <Panel className="flex items-center justify-end gap-3 hover:shadow-lg transition-shadow h-full text-right bg-mint/20">
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wide text-pine">Path complete!</span>
+                    <p className="text-sm font-semibold text-pine group-hover:text-ink transition-colors">Back to {currentPath.title}</p>
+                  </div>
+                  <CheckCircle2 size={16} className="text-pine shrink-0" />
+                </Panel>
+              </Link>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
