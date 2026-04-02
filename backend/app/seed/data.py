@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 DEFAULT_USER = {
-    "name": "Alex Builder",
+    "name": "Lei Pan",
     "email": "alex@local.portal",
     "target_role": "AI Engineer",
     "skill_profile_json": {

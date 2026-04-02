@@ -14,7 +14,7 @@ import type {
 } from "@/lib/types/portal";
 
 export const mockDashboard: DashboardSummary = {
-  user_name: "Alex Builder",
+  user_name: "Lei Pan",
   headline: "Use the portal to turn your full-stack leverage into visible AI engineering momentum.",
   learning_streak: 5,
   stats: [

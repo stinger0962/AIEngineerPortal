@@ -51,7 +51,7 @@ client = TestClient(app)
 def test_dashboard_summary():
     response = client.get("/api/v1/dashboard/summary")
     assert response.status_code == 200
-    assert response.json()["user_name"] == "Alex Builder"
+    assert response.json()["user_name"] == "Lei Pan"
     assert response.json()["stats"][0]["value"] == "0.0%"
 
 
