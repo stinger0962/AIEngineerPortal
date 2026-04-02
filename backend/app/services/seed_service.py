@@ -40,6 +40,9 @@ def seed_database(db: Session) -> None:
         user = User(**DEFAULT_USER)
         db.add(user)
         db.flush()
+    else:
+        user.name = DEFAULT_USER["name"]
+        db.flush()
 
     sync_learning_content(db)
     sync_courses(db)
