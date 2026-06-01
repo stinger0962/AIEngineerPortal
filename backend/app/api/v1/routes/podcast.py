@@ -128,13 +128,11 @@ async def generate_podcast(payload: GenerateRequest, db: Session = Depends(get_d
             yield {"data": json.dumps({"status": "done", "episode": episode_data})}
 
         except ValueError as exc:
-            if episode:
-                db.rollback()
+            db.rollback()
             logger.warning("Podcast generation error: %s", exc)
             yield {"data": json.dumps({"status": "error", "message": str(exc)})}
         except Exception as exc:
-            if episode:
-                db.rollback()
+            db.rollback()
             logger.exception("Unexpected podcast generation error")
             yield {"data": json.dumps({"status": "error", "message": "Generation failed — please try again."})}
 
