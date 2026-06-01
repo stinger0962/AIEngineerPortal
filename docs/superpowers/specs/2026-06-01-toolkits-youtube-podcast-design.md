@@ -193,7 +193,7 @@ Both voices handle Chinese well with `eleven_multilingual_v2`.
 
 ### Config
 ```
-ELEVENLABS_API_KEY=sk_8cc654...
+ELEVENLABS_API_KEY=sk_your_elevenlabs_key_here
 ELEVENLABS_VOICE_ID_A=21m00Tcm4TlvDq8ikWAM
 ELEVENLABS_VOICE_ID_B=AZnzlk1XvdvUeBnXmlld
 ```
