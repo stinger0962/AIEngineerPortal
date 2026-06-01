@@ -1,13 +1,17 @@
 # Toolkits + YouTube Podcast Feature — Design Spec
 
 **Date:** 2026-06-01  
-**Status:** Approved  
+**Status:** Approved — updated with dialogue format option  
 
 ---
 
 ## Overview
 
 Add a **Toolkits** section to the AI Engineer Portal — a hub for standalone utility tools. The first tool is **YouTube Podcast**: paste a YouTube URL, receive a digested Chinese-language MP3 podcast episode (~5 min) powered by Claude (digest + translate) and ElevenLabs TTS.
+
+Two podcast formats are supported:
+- **Single Narrative** — one host reads a flowing digest (one voice)
+- **Dialogue** — two hosts (A + B) discuss the content conversationally (two voices, stitched audio)
 
 ---
 
@@ -29,9 +33,10 @@ Add a **Toolkits** section to the AI Engineer Portal — a hub for standalone ut
 - **Left panel (~45%):** Generate form
   - YouTube URL input
   - Digest length selector (5 min / 10 min)
-  - Voice selector (dropdown, defaults to Xiaoxiao Neural)
+  - **Format selector** (toggle/radio): Single Narrative | Dialogue
+  - Voice selector: shown for Single (one voice); hidden for Dialogue (auto two-voice)
   - Generate button with loading state
-  - Real-time progress via SSE (Extracting transcript → Digesting → Translating → Generating audio)
+  - Real-time progress via SSE (Extracting transcript → Digesting → Translating → Generating audio → Stitching [dialogue only])
 - **Right panel (~55%):** Episode library
   - List of generated episodes (title, duration, date)
   - Play button (HTML5 audio inline)
@@ -83,14 +88,15 @@ New table: `podcast_episodes`
 
 ```sql
 CREATE TABLE podcast_episodes (
-    id          SERIAL PRIMARY KEY,
-    youtube_url TEXT NOT NULL,
-    video_title TEXT,
+    id                 SERIAL PRIMARY KEY,
+    youtube_url        TEXT NOT NULL,
+    video_title        TEXT,
     digest_length_mins INTEGER NOT NULL DEFAULT 5,
-    script_zh   TEXT,
-    audio_path  TEXT NOT NULL,
-    duration_secs INTEGER,
-    created_at  TIMESTAMP DEFAULT now()
+    format             TEXT NOT NULL DEFAULT 'single',  -- 'single' | 'dialogue'
+    script_zh          TEXT,
+    audio_path         TEXT NOT NULL,
+    duration_secs      INTEGER,
+    created_at         TIMESTAMP DEFAULT now()
 );
 ```
 
@@ -102,29 +108,35 @@ Alembic migration created for the new table.
 ## Data Flow
 
 ```
-1. User pastes YouTube URL + selects digest length → clicks Generate
+1. User pastes YouTube URL, selects digest length + format → clicks Generate
 2. Frontend opens SSE connection to POST /podcast/generate
 3. Backend streams progress events:
-   - {"status": "extracting", "message": "Fetching transcript..."}
-   - {"status": "digesting",  "message": "Digesting with Claude..."}
-   - {"status": "translating","message": "Translating to Chinese..."}
-   - {"status": "tts",        "message": "Generating audio..."}
-   - {"status": "done",       "episode": {...}}
+   - {"status": "extracting",  "message": "Fetching transcript..."}
+   - {"status": "digesting",   "message": "Digesting with Claude..."}
+   - {"status": "translating", "message": "Translating to Chinese..."}
+   - {"status": "tts",         "message": "Generating audio..."}
+   - {"status": "stitching",   "message": "Stitching dialogue..."}  ← dialogue only
+   - {"status": "done",        "episode": {...}}
 4. yt-dlp extracts transcript (subtitles, auto-generated fallback)
-5. Claude API: digest + translate to spoken Chinese podcast script
-6. ElevenLabs API: text → MP3 bytes (zh-CN Xiaoxiao Neural voice)
+5. Claude API: digest + translate → Chinese script (format-dependent prompt)
+6. Audio generation (format-dependent):
+   - Single: one ElevenLabs call → MP3
+   - Dialogue: parse script into (speaker, line) pairs → ElevenLabs call per line
+     alternating Voice A (female) and Voice B (male) → pydub stitches segments → MP3
 7. MP3 saved to /data/podcast_audio/{episode_id}.mp3 (Docker volume)
-8. Episode metadata saved to DB
+8. Episode metadata saved to DB (includes format field)
 9. SSE sends "done" event with episode data
-10. Frontend adds episode to right panel list
+10. Frontend adds episode to right panel list (shows format badge: 单人 / 对话)
 ```
 
 ---
 
 ## Claude Prompt Design
 
+### Single Narrative prompt
+
 ```python
-PODCAST_PROMPT = """你是一位专业的中文播客主持人。请将以下英文视频讲稿整理为一期播客脚本。
+SINGLE_PROMPT = """你是一位专业的中文播客主持人。请将以下英文视频讲稿整理为一期播客脚本。
 
 要求：
 1. 长度约为原文的{pct}%，提炼最核心的观点（目标时长：{target_mins}分钟）
@@ -137,21 +149,65 @@ PODCAST_PROMPT = """你是一位专业的中文播客主持人。请将以下英
 {transcript}"""
 ```
 
+### Dialogue prompt
+
+```python
+DIALOGUE_PROMPT = """你是两位中文播客主持人（主持人A：女声，主持人B：男声）。
+请将以下英文视频讲稿改编为一段自然的双人对话播客脚本。
+
+要求：
+1. 长度约为原文的{pct}%，提炼最核心的观点（目标时长：{target_mins}分钟）
+2. 对话要自然、有来有往，A和B轮流发言，每次发言2-4句话
+3. A负责引入话题和总结，B负责追问、补充例子和表达观点
+4. 语气轻松口语化，像朋友间的专业讨论
+5. 严格按以下格式输出，每行一句发言，不要其他内容：
+
+主持人A: [发言内容]
+主持人B: [发言内容]
+主持人A: [发言内容]
+...
+
+讲稿内容：
+{transcript}"""
+```
+
+**Script parsing for dialogue:** Lines are split on `主持人A:` / `主持人B:` prefix. Each line becomes one TTS call with the corresponding voice ID.
+
 Digest percentages: 5 min → 30% of original, 10 min → 60%.
 
 ---
 
 ## ElevenLabs Integration
 
-- **Voice:** `Xiaoxiao` (zh-CN-XiaoxiaoNeural) via ElevenLabs multilingual v2 model
+- **Model:** `eleven_multilingual_v2` (best Chinese quality)
 - **API endpoint:** `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}`
-- **Config:**
-  ```
-  ELEVENLABS_API_KEY=sk_8cc654...
-  ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
-  ```
+
+### Voices
+
+| Role | Voice name | Voice ID | Used in |
+|------|-----------|----------|---------|
+| Single / Host A | Rachel (multilingual) | `21m00Tcm4TlvDq8ikWAM` | Single + Dialogue |
+| Host B | Domi (multilingual) | `AZnzlk1XvdvUeBnXmlld` | Dialogue only |
+
+Both voices handle Chinese well with `eleven_multilingual_v2`.
+
+### Config
+```
+ELEVENLABS_API_KEY=sk_8cc654...
+ELEVENLABS_VOICE_ID_A=21m00Tcm4TlvDq8ikWAM
+ELEVENLABS_VOICE_ID_B=AZnzlk1XvdvUeBnXmlld
+```
+
+### Dialogue audio stitching
+```python
+# Per dialogue line: call ElevenLabs → get MP3 bytes → AudioSegment
+# Concatenate all segments with 300ms silence between turns
+# Export final combined AudioSegment as MP3
+from pydub import AudioSegment
+```
+
 - Key added to `Settings` in `backend/app/core/config.py`
-- Key added to `.env` (not committed) and `.env.example` (placeholder)
+- Keys added to `.env` (not committed) and `.env.example` (placeholder)
 
 ---
 
@@ -174,7 +230,10 @@ Digest percentages: 5 min → 30% of original, 10 min → 60%.
 yt-dlp
 elevenlabs
 sse-starlette
+pydub
 ```
+
+`ffmpeg` must be available in the Docker container (added to backend Dockerfile).
 
 **Frontend:** No new npm packages — uses native `EventSource` for SSE, HTML5 `<audio>` for playback.
 
@@ -200,3 +259,4 @@ sse-starlette
 - Audio player controls beyond play/pause (browser native handles it)
 - Bilibili support (YouTube only for now)
 - Voice cloning or custom voices
+- Per-speaker volume normalisation (pydub default is sufficient)
