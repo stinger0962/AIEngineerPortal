@@ -77,10 +77,17 @@ jobs:
               exit 1
             fi
 
-            # Ensure ANTHROPIC_API_KEY is present
-            if ! grep -q "ANTHROPIC_API_KEY" "$ENV_FILE" 2>/dev/null; then
-              echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> "$ENV_FILE"
-            fi
+            # Inject secrets — upsert so key rotations take effect on every deploy
+            upsert_env() {
+              local key=$1 val=$2
+              if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+                sed -i "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
+              else
+                echo "${key}=${val}" >> "$ENV_FILE"
+              fi
+            }
+            upsert_env ANTHROPIC_API_KEY "${{ secrets.ANTHROPIC_API_KEY }}"
+            upsert_env ELEVENLABS_API_KEY "${{ secrets.ELEVENLABS_API_KEY }}"
 
             # Update repo for docker-compose file and scripts
             cd $APP_DIR
