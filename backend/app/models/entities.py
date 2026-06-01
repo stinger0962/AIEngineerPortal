@@ -294,3 +294,17 @@ class MemoryCard(Base):
     next_review_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     is_seeded: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+
+
+class PodcastEpisode(Base):
+    __tablename__ = "podcast_episodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    youtube_url: Mapped[str] = mapped_column(Text, nullable=False)
+    video_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    digest_length_mins: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    format: Mapped[str] = mapped_column(String(20), nullable=False, default="single")
+    script_zh: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    audio_path: Mapped[str] = mapped_column(Text, nullable=False)
+    duration_secs: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
