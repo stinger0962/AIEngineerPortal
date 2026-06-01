@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { API_BASE } from "@/lib/api";
 
 interface Episode {
   id: number;
@@ -36,6 +37,8 @@ const STATUS_LABELS: Record<ProgressStatus, string> = {
   error: "Generation failed",
 };
 
+const VALID_STATUSES = new Set<string>(Object.keys(STATUS_LABELS));
+
 const YOUTUBE_RE =
   /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
 
@@ -47,18 +50,27 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
   const [status, setStatus] = useState<ProgressStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
+
   const isGenerating = status !== "idle" && status !== "done" && status !== "error";
   const urlValid = YOUTUBE_RE.test(url);
 
   async function handleGenerate() {
     if (!urlValid || isGenerating) return;
 
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setStatus("extracting");
     setErrorMsg("");
 
     try {
-      const response = await fetch(`${apiBase}/podcast/generate`, {
+      const response = await fetch(`${API_BASE}/podcast/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -67,6 +79,7 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
           format,
           ...(format === "single" ? { voice_id: voiceId } : {}),
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok || !response.body) {
@@ -79,7 +92,7 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || controller.signal.aborted) break;
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
@@ -89,7 +102,9 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
           if (!line.startsWith("data:")) continue;
           try {
             const payload = JSON.parse(line.slice(5).trim());
-            if (payload.status) setStatus(payload.status as ProgressStatus);
+            if (payload.status && VALID_STATUSES.has(payload.status)) {
+              setStatus(payload.status as ProgressStatus);
+            }
             if (payload.status === "done" && payload.episode) {
               onEpisodeReady(payload.episode);
               setUrl("");
@@ -102,7 +117,8 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
           }
         }
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       setStatus("error");
       setErrorMsg("Connection failed — is the backend running?");
     }

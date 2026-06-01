@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { PodcastGenerator } from "@/components/toolkits/podcast-generator";
 import { PodcastEpisodeList } from "@/components/toolkits/podcast-episode-list";
+import { API_BASE } from "@/lib/api";
 
 interface Episode {
   id: number;
@@ -16,14 +17,14 @@ interface Episode {
 
 export default function PodcastPage() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    fetch(`${apiBase}/podcast/episodes`)
+    fetch(`${API_BASE}/podcast/episodes`)
       .then((r) => r.json())
       .then((data: Episode[]) => setEpisodes(data))
-      .catch(() => {});
-  }, [apiBase]);
+      .catch(() => setLoadError(true));
+  }, []);
 
   const handleNewEpisode = useCallback((ep: Episode) => {
     setEpisodes((prev) => [ep, ...prev]);
@@ -67,7 +68,7 @@ export default function PodcastPage() {
               {episodes.length > 0 ? `${episodes.length} episode${episodes.length === 1 ? "" : "s"}` : ""}
             </span>
           </div>
-          <PodcastEpisodeList episodes={episodes} />
+          <PodcastEpisodeList episodes={episodes} loadError={loadError} />
         </div>
       </div>
     </div>

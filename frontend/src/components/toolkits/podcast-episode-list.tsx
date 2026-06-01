@@ -1,5 +1,7 @@
 "use client";
 
+import { API_BASE } from "@/lib/api";
+
 interface Episode {
   id: number;
   video_title: string | null;
@@ -11,6 +13,7 @@ interface Episode {
 
 interface PodcastEpisodeListProps {
   episodes: Episode[];
+  loadError?: boolean;
 }
 
 function formatDuration(secs: number | null): string {
@@ -29,8 +32,14 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function PodcastEpisodeList({ episodes }: PodcastEpisodeListProps) {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+export function PodcastEpisodeList({ episodes, loadError }: PodcastEpisodeListProps) {
+  if (loadError) {
+    return (
+      <p className="text-sm text-red-400/80 px-4 py-2">
+        Failed to load episodes — is the backend running?
+      </p>
+    );
+  }
 
   if (episodes.length === 0) {
     return (
@@ -81,11 +90,11 @@ export function PodcastEpisodeList({ episodes }: PodcastEpisodeListProps) {
           <div className="flex items-center gap-2 flex-shrink-0">
             <audio
               controls
-              src={`${apiBase}/podcast/episodes/${ep.id}/download`}
+              src={`${API_BASE}/podcast/episodes/${ep.id}/download`}
               className="h-7 w-32 opacity-70 hover:opacity-100 transition-opacity"
             />
             <a
-              href={`${apiBase}/podcast/episodes/${ep.id}/download`}
+              href={`${API_BASE}/podcast/episodes/${ep.id}/download`}
               download={`podcast-${ep.id}.mp3`}
               className="text-cream/40 hover:text-ember transition-colors p-1"
               title="Download MP3"
