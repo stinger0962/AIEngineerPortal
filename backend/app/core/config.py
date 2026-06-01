@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     ai_model: str = "claude-sonnet-4-20250514"
     ai_daily_token_budget: int = 100_000
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id_a: str = "21m00Tcm4TlvDq8ikWAM"   # Rachel — single narrator + host A
+    elevenlabs_voice_id_b: str = "AZnzlk1XvdvUeBnXmlld"   # Domi — host B (dialogue only)
 
     @property
     def cors_origins_list(self) -> List[str]:

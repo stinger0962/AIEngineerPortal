@@ -9,6 +9,7 @@ __pycache__/
 htmlcov/
 .DS_Store
 Thumbs.db
+.env
 backend/.env
 infra/.env.production
 frontend/.env.local
