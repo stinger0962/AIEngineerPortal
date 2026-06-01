@@ -32,41 +32,48 @@ export default function PodcastPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
         <Link
           href="/toolkits"
-          className="text-xs text-cream/30 hover:text-cream/60 transition-colors mb-2 inline-flex items-center gap-1"
+          className="text-xs text-ink/40 hover:text-ember transition-colors mb-2 inline-flex items-center gap-1"
         >
           ← Toolkits
         </Link>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 mt-1">
           <span className="text-3xl">🎙</span>
           <div>
             <span className="text-xs font-semibold uppercase tracking-[0.28em] text-ember">
               Toolkits
             </span>
-            <h1 className="font-display text-2xl text-cream leading-tight">
+            <h1 className="font-display text-2xl text-ink leading-tight">
               YouTube Podcast
             </h1>
           </div>
         </div>
-        <p className="text-cream/40 text-sm mt-1 ml-12">
+        <p className="text-ink/50 text-sm mt-1 ml-12">
           Paste a YouTube link — get a digested Chinese podcast episode.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-0 rounded-2xl border border-white/10 overflow-hidden min-h-[600px]">
-        <div className="border-b lg:border-b-0 lg:border-r border-white/10 bg-white/[0.02] p-6">
+      {/* Split panel */}
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] rounded-[28px] border border-ink/10 bg-white/85 shadow-panel overflow-hidden min-h-[600px]">
+        {/* Left: generator */}
+        <div className="border-b lg:border-b-0 lg:border-r border-ink/10 p-6 bg-sand/20">
           <PodcastGenerator onEpisodeReady={handleNewEpisode} />
         </div>
+
+        {/* Right: episode library */}
         <div className="p-6">
-          <div className="mb-4">
-            <span className="text-xs font-semibold uppercase tracking-[0.28em] text-cream/40">
+          <div className="flex items-baseline gap-2 mb-5">
+            <span className="text-xs font-semibold uppercase tracking-[0.28em] text-ink/40">
               My Episodes
             </span>
-            <span className="ml-2 text-[10px] text-cream/20">
-              {episodes.length > 0 ? `${episodes.length} episode${episodes.length === 1 ? "" : "s"}` : ""}
-            </span>
+            {episodes.length > 0 && (
+              <span className="text-[10px] text-ink/30">
+                {episodes.length} episode{episodes.length === 1 ? "" : "s"}
+              </span>
+            )}
           </div>
           <PodcastEpisodeList episodes={episodes} loadError={loadError} />
         </div>

@@ -17,7 +17,7 @@ interface PodcastEpisodeListProps {
 }
 
 function formatDuration(secs: number | null): string {
-  if (!secs) return "—";
+  if (secs == null) return "—";
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return `${m}m ${s.toString().padStart(2, "0")}s`;
@@ -35,18 +35,18 @@ function formatDate(iso: string): string {
 export function PodcastEpisodeList({ episodes, loadError }: PodcastEpisodeListProps) {
   if (loadError) {
     return (
-      <p className="text-sm text-red-400/80 px-4 py-2">
-        Failed to load episodes — is the backend running?
-      </p>
+      <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+        <p className="text-sm text-red-600">Failed to load episodes — is the backend running?</p>
+      </div>
     );
   }
 
   if (episodes.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full py-20 text-center">
-        <div className="text-5xl mb-4 opacity-30">🎙</div>
-        <p className="text-cream/40 text-sm font-medium">No episodes yet</p>
-        <p className="text-cream/25 text-xs mt-1">
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <div className="text-5xl mb-4 opacity-20">🎙</div>
+        <p className="text-sm font-medium text-ink/40">No episodes yet</p>
+        <p className="text-xs text-ink/30 mt-1">
           Generate your first podcast from the form on the left
         </p>
       </div>
@@ -58,49 +58,57 @@ export function PodcastEpisodeList({ episodes, loadError }: PodcastEpisodeListPr
       {episodes.map((ep) => (
         <div
           key={ep.id}
-          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3 hover:border-white/20 transition-colors"
+          className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-ember/30 hover:shadow-sm transition-all"
         >
-          <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-ember/20 flex items-center justify-center text-base">
-            🎙
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-cream truncate">
-              {ep.video_title ?? "Untitled video"}
-            </p>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-[10px] text-cream/40">
-                {formatDuration(ep.duration_secs)}
-              </span>
-              <span className="text-[10px] text-cream/20">·</span>
-              <span
-                className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                  ep.format === "dialogue"
-                    ? "bg-blue-500/20 text-blue-300"
-                    : "bg-white/10 text-cream/40"
-                }`}
-              >
-                {ep.format === "dialogue" ? "对话" : "单人"}
-              </span>
-              <span className="text-[10px] text-cream/20">·</span>
-              <span className="text-[10px] text-cream/40">{formatDate(ep.created_at)}</span>
+          <div className="flex items-start gap-3">
+            {/* Icon */}
+            <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-ember/10 flex items-center justify-center text-base">
+              🎙
             </div>
-          </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <audio
-              controls
-              src={`${API_BASE}/podcast/episodes/${ep.id}/download`}
-              className="h-7 w-32 opacity-70 hover:opacity-100 transition-opacity"
-            />
+            {/* Meta */}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-ink truncate">
+                {ep.video_title ?? "Untitled video"}
+              </p>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <span className="text-[11px] text-ink/40">
+                  {formatDuration(ep.duration_secs)}
+                </span>
+                <span className="text-[11px] text-ink/20">·</span>
+                <span
+                  className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                    ep.format === "dialogue"
+                      ? "bg-pine/10 text-pine"
+                      : "bg-ink/8 text-ink/50"
+                  }`}
+                >
+                  {ep.format === "dialogue" ? "对话" : "单人"}
+                </span>
+                <span className="text-[11px] text-ink/20">·</span>
+                <span className="text-[11px] text-ink/40">{formatDate(ep.created_at)}</span>
+              </div>
+            </div>
+
+            {/* Download */}
             <a
               href={`${API_BASE}/podcast/episodes/${ep.id}/download`}
               download={`podcast-${ep.id}.mp3`}
-              className="text-cream/40 hover:text-ember transition-colors p-1"
+              aria-label="Download episode MP3"
+              className="flex-shrink-0 text-ink/30 hover:text-ember transition-colors p-1 text-lg leading-none"
               title="Download MP3"
             >
               ↓
             </a>
+          </div>
+
+          {/* Audio player */}
+          <div className="mt-3">
+            <audio
+              controls
+              src={`${API_BASE}/podcast/episodes/${ep.id}/download`}
+              className="w-full h-8"
+            />
           </div>
         </div>
       ))}

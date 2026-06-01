@@ -126,33 +126,33 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
 
   return (
     <div className="space-y-5">
-      <div>
-        <span className="text-xs font-semibold uppercase tracking-[0.28em] text-cream/40">
-          Generate New Episode
-        </span>
-      </div>
+      <span className="text-xs font-semibold uppercase tracking-[0.28em] text-ink/40">
+        Generate New Episode
+      </span>
 
+      {/* URL input */}
       <div className="space-y-1.5">
-        <label className="text-xs text-cream/60">YouTube URL</label>
+        <label className="text-xs font-medium text-ink/60">YouTube URL</label>
         <input
           type="url"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://youtube.com/watch?v=..."
           disabled={isGenerating}
-          className={`w-full rounded-xl border px-3 py-2.5 text-sm bg-white/5 text-cream placeholder:text-cream/20 outline-none transition-colors ${
+          className={`w-full rounded-xl border px-3 py-2.5 text-sm bg-white text-ink placeholder:text-ink/30 outline-none transition-colors ${
             url && !urlValid
-              ? "border-red-500/50 focus:border-red-500"
-              : "border-white/10 focus:border-ember/50"
+              ? "border-red-400 focus:border-red-500"
+              : "border-ink/15 focus:border-ember"
           } disabled:opacity-40`}
         />
         {url && !urlValid && (
-          <p className="text-[11px] text-red-400">Please enter a valid YouTube URL</p>
+          <p className="text-[11px] text-red-500">Please enter a valid YouTube URL</p>
         )}
       </div>
 
+      {/* Digest length */}
       <div className="space-y-1.5">
-        <label className="text-xs text-cream/60">Digest length</label>
+        <label className="text-xs font-medium text-ink/60">Digest length</label>
         <div className="flex gap-2">
           {([5, 10] as const).map((mins) => (
             <button
@@ -161,8 +161,8 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
               disabled={isGenerating}
               className={`flex-1 rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-40 ${
                 digestMins === mins
-                  ? "bg-ember/20 text-ember border border-ember/40"
-                  : "bg-white/5 text-cream/50 border border-white/10 hover:border-white/20"
+                  ? "bg-ember/15 text-ember border border-ember/40"
+                  : "bg-white text-ink/50 border border-ink/15 hover:border-ink/30"
               }`}
             >
               ~{mins} min
@@ -171,8 +171,9 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
         </div>
       </div>
 
+      {/* Format */}
       <div className="space-y-1.5">
-        <label className="text-xs text-cream/60">Format</label>
+        <label className="text-xs font-medium text-ink/60">Format</label>
         <div className="flex gap-2">
           {(["single", "dialogue"] as const).map((fmt) => (
             <button
@@ -181,29 +182,30 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
               disabled={isGenerating}
               className={`flex-1 rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-40 ${
                 format === fmt
-                  ? "bg-ember/20 text-ember border border-ember/40"
-                  : "bg-white/5 text-cream/50 border border-white/10 hover:border-white/20"
+                  ? "bg-ember/15 text-ember border border-ember/40"
+                  : "bg-white text-ink/50 border border-ink/15 hover:border-ink/30"
               }`}
             >
               {fmt === "single" ? "单人叙述" : "双人对话"}
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-cream/30">
+        <p className="text-[11px] text-ink/40">
           {format === "dialogue"
             ? "Two hosts (A + B) discuss the content — takes slightly longer"
             : "Single narrator reads the digest"}
         </p>
       </div>
 
+      {/* Voice selector — single only */}
       {format === "single" && (
         <div className="space-y-1.5">
-          <label className="text-xs text-cream/60">Voice</label>
+          <label className="text-xs font-medium text-ink/60">Voice</label>
           <select
             value={voiceId}
             onChange={(e) => setVoiceId(e.target.value)}
             disabled={isGenerating}
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-cream outline-none transition-colors focus:border-ember/50 disabled:opacity-40"
+            className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition-colors focus:border-ember disabled:opacity-40"
           >
             <option value="21m00Tcm4TlvDq8ikWAM">Rachel (Female)</option>
             <option value="AZnzlk1XvdvUeBnXmlld">Domi (Female)</option>
@@ -211,27 +213,13 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
         </div>
       )}
 
+      {/* Progress / Generate button */}
       {isGenerating ? (
         <div className="rounded-xl border border-ember/20 bg-ember/5 px-4 py-3">
           <div className="flex items-center gap-2">
-            <svg
-              className="animate-spin h-4 w-4 text-ember flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8v8z"
-              />
+            <svg className="animate-spin h-4 w-4 text-ember flex-shrink-0" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
             </svg>
             <span className="text-sm text-ember">{STATUS_LABELS[status]}</span>
           </div>
@@ -242,22 +230,24 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
           disabled={!urlValid}
           className="w-full rounded-xl bg-ember py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
         >
-          🎙 Generate Podcast
+          <span aria-hidden="true">🎙</span>{" "}Generate Podcast
         </button>
       )}
 
+      {/* Success */}
       {status === "done" && (
-        <div className="rounded-xl border border-green-500/20 bg-green-500/5 px-4 py-3 text-sm text-green-400">
+        <div className="rounded-xl border border-pine/20 bg-mint/30 px-4 py-3 text-sm text-pine font-medium">
           ✓ Episode ready — check the list on the right!
         </div>
       )}
 
+      {/* Error */}
       {status === "error" && (
-        <div className="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3">
-          <p className="text-sm text-red-400">{errorMsg}</p>
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-sm text-red-600">{errorMsg}</p>
           <button
             onClick={() => setStatus("idle")}
-            className="text-xs text-red-400/60 hover:text-red-400 mt-1 underline"
+            className="text-xs text-red-400 hover:text-red-600 mt-1 underline"
           >
             Try again
           </button>
