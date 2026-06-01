@@ -19,6 +19,7 @@ type ProgressStatus =
   | "idle"
   | "extracting"
   | "digesting"
+  | "translating"
   | "tts"
   | "stitching"
   | "done"
@@ -28,6 +29,7 @@ const STATUS_LABELS: Record<ProgressStatus, string> = {
   idle: "",
   extracting: "Fetching transcript...",
   digesting: "Digesting with Claude...",
+  translating: "Translating to Chinese...",
   tts: "Generating audio...",
   stitching: "Stitching dialogue...",
   done: "Done!",
@@ -41,6 +43,7 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
   const [url, setUrl] = useState("");
   const [digestMins, setDigestMins] = useState<5 | 10>(5);
   const [format, setFormat] = useState<"single" | "dialogue">("single");
+  const [voiceId, setVoiceId] = useState("21m00Tcm4TlvDq8ikWAM");
   const [status, setStatus] = useState<ProgressStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -62,6 +65,7 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
           youtube_url: url,
           digest_length_mins: digestMins,
           format,
+          ...(format === "single" ? { voice_id: voiceId } : {}),
         }),
       });
 
@@ -175,6 +179,21 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
             : "Single narrator reads the digest"}
         </p>
       </div>
+
+      {format === "single" && (
+        <div className="space-y-1.5">
+          <label className="text-xs text-cream/60">Voice</label>
+          <select
+            value={voiceId}
+            onChange={(e) => setVoiceId(e.target.value)}
+            disabled={isGenerating}
+            className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-cream outline-none transition-colors focus:border-ember/50 disabled:opacity-40"
+          >
+            <option value="21m00Tcm4TlvDq8ikWAM">Rachel (Female)</option>
+            <option value="AZnzlk1XvdvUeBnXmlld">Domi (Female)</option>
+          </select>
+        </div>
+      )}
 
       {isGenerating ? (
         <div className="rounded-xl border border-ember/20 bg-ember/5 px-4 py-3">
