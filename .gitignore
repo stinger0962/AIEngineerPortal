@@ -19,3 +19,4 @@ backend/alembic/versions/__pycache__/
 frontend/.next/
 frontend/node_modules/
 *.log
+.worktrees/
