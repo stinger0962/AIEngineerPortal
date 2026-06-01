@@ -12,7 +12,12 @@ import yt_dlp
 from pydub import AudioSegment
 
 AUDIO_DIR = Path(os.getenv("PODCAST_AUDIO_DIR", "/data/podcast_audio"))
-AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _ensure_audio_dir() -> Path:
+    """Create AUDIO_DIR on first use — avoids mkdir at import time in test envs."""
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    return AUDIO_DIR
 
 YOUTUBE_REGEX = re.compile(
     r"(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})"
@@ -121,7 +126,7 @@ _DIALOGUE_PROMPT = """你是两位中文播客主持人（主持人A：女声，
 
 def _build_prompt(transcript: str, digest_length_mins: int, fmt: str) -> str:
     """Build the Claude prompt for the given format and length."""
-    pct = _DIGEST_PCT.get(digest_length_mins, 30)
+    pct = _DIGEST_PCT.get(digest_length_mins, 30)  # unknown lengths default to 30% (5 min)
     template = _SINGLE_PROMPT if fmt == "single" else _DIALOGUE_PROMPT
     return template.format(pct=pct, target_mins=digest_length_mins, transcript=transcript)
 
@@ -194,7 +199,7 @@ def generate_audio_single(
     Returns (audio_path, duration_secs).
     """
     mp3_bytes = _tts_bytes(script, voice_id_a, api_key)
-    audio_path = AUDIO_DIR / f"{episode_id}.mp3"
+    audio_path = _ensure_audio_dir() / f"{episode_id}.mp3"
     audio_path.write_bytes(mp3_bytes)
     segment = AudioSegment.from_mp3(io.BytesIO(mp3_bytes))
     duration_secs = int(len(segment) / 1000)
@@ -228,7 +233,7 @@ def generate_audio_dialogue(
             combined += silence
         combined += segment
 
-    audio_path = AUDIO_DIR / f"{episode_id}.mp3"
+    audio_path = _ensure_audio_dir() / f"{episode_id}.mp3"
     combined.export(str(audio_path), format="mp3")
     duration_secs = int(len(combined) / 1000)
     return audio_path, duration_secs
