@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import io
+import json as _json
 import os
 import re
+import urllib.parse as _urllib_parse
+import urllib.request as _urllib_request
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -87,12 +90,10 @@ def extract_transcript(youtube_url: str) -> Tuple[str, str]:
 
 def fetch_video_title(youtube_url: str) -> str:
     """Fetch video title from YouTube oEmbed API. Returns empty string on any failure."""
-    import urllib.request as _req
-    import json as _json
     try:
-        encoded = _req.quote(youtube_url, safe="")
+        encoded = _urllib_parse.quote(youtube_url, safe="")
         oembed_url = f"https://www.youtube.com/oembed?url={encoded}&format=json"
-        with _req.urlopen(oembed_url, timeout=5) as resp:
+        with _urllib_request.urlopen(oembed_url, timeout=5) as resp:
             data = _json.loads(resp.read())
             return data.get("title", "")
     except Exception:

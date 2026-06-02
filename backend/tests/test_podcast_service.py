@@ -53,25 +53,72 @@ def test_parse_dialogue_skips_blank_lines():
     assert len(lines) == 2
 
 
-def test_fetch_video_title_bad_id_returns_str():
+def test_fetch_video_title_returns_title_on_success():
+    """fetch_video_title parses the oEmbed JSON and returns the title field."""
+    from unittest.mock import patch, MagicMock
     from app.services.podcast_service import fetch_video_title
-    # Invalid video ID — oEmbed returns 404, function must not raise
-    result = fetch_video_title("https://www.youtube.com/watch?v=INVALID_XXXXX")
-    assert isinstance(result, str)
+    import json
+
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps({"title": "Test Video Title"}).encode()
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        result = fetch_video_title("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert result == "Test Video Title"
 
 
-def test_get_chinese_title_skips_claude_when_no_key():
-    """get_chinese_title raises AuthenticationError with a fake key — that's expected behaviour.
-    We just verify it raises rather than silently returning wrong data."""
+def test_fetch_video_title_returns_empty_on_failure():
+    """fetch_video_title never raises — returns '' on any network error."""
+    from unittest.mock import patch
+    from app.services.podcast_service import fetch_video_title
+
+    with patch("urllib.request.urlopen", side_effect=Exception("network error")):
+        result = fetch_video_title("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert result == ""
+
+
+def test_get_chinese_title_uses_translation_prompt_when_title_provided():
+    """When english_title is provided, get_chinese_title builds a translation prompt."""
+    from unittest.mock import patch, MagicMock
     from app.services.podcast_service import get_chinese_title
-    import pytest
-    with pytest.raises(Exception):
-        get_chinese_title(
-            english_title="Test Title",
-            transcript="some transcript",
-            anthropic_api_key="fake_key",
-            model="claude-haiku-4-20250514",
-        )
+
+    mock_message = MagicMock()
+    mock_message.content = [MagicMock(text="  测试视频标题  ")]
+
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_message
+
+    with patch("anthropic.Anthropic", return_value=mock_client):
+        result = get_chinese_title("Test Title", "some transcript", "fake_key", "fake_model")
+
+    assert result == "测试视频标题"
+    call_args = mock_client.messages.create.call_args
+    prompt = call_args.kwargs["messages"][0]["content"]
+    assert "翻译" in prompt
+    assert "Test Title" in prompt
+
+
+def test_get_chinese_title_uses_inference_prompt_when_no_title():
+    """When english_title is empty, get_chinese_title infers title from transcript."""
+    from unittest.mock import patch, MagicMock
+    from app.services.podcast_service import get_chinese_title
+
+    mock_message = MagicMock()
+    mock_message.content = [MagicMock(text="推断出的标题")]
+
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = mock_message
+
+    with patch("anthropic.Anthropic", return_value=mock_client):
+        result = get_chinese_title("", "This is the transcript content...", "fake_key", "fake_model")
+
+    assert result == "推断出的标题"
+    call_args = mock_client.messages.create.call_args
+    prompt = call_args.kwargs["messages"][0]["content"]
+    assert "讲稿" in prompt
+    assert "This is the transcript content..." in prompt
 
 
 def test_webshare_proxy_config_accepts_correct_kwargs():

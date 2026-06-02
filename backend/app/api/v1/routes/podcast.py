@@ -81,6 +81,7 @@ async def generate_podcast(payload: GenerateRequest, db: Session = Depends(get_d
             )
 
             # Translate or infer Chinese title
+            yield {"data": json.dumps({"status": "translating", "message": "Generating Chinese title..."})}
             video_title = get_chinese_title(
                 english_title=video_title,
                 transcript=transcript,
