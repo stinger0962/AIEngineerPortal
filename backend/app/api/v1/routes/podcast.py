@@ -170,6 +170,24 @@ def list_episodes(db: Session = Depends(get_db)):
     ]
 
 
+@router.delete("/episodes/{episode_id}", status_code=204)
+def delete_episode(episode_id: int, db: Session = Depends(get_db)):
+    """Delete episode DB row and MP3 file from disk."""
+    episode = db.get(PodcastEpisode, episode_id)
+    if not episode:
+        raise HTTPException(status_code=404, detail="Episode not found")
+
+    audio_path = Path(episode.audio_path)
+    try:
+        if audio_path.exists():
+            audio_path.unlink()
+    except OSError:
+        pass  # best-effort file deletion — DB row removed regardless
+
+    db.delete(episode)
+    db.commit()
+
+
 @router.get("/episodes/{episode_id}/download")
 def download_episode(episode_id: int, db: Session = Depends(get_db)):
     """Stream the MP3 file for the given episode."""

@@ -30,6 +30,10 @@ export default function PodcastPage() {
     setEpisodes((prev) => [ep, ...prev]);
   }, []);
 
+  const handleDeleteEpisode = useCallback((id: number) => {
+    setEpisodes((prev) => prev.filter((e) => e.id !== id));
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -75,7 +79,7 @@ export default function PodcastPage() {
               </span>
             )}
           </div>
-          <PodcastEpisodeList episodes={episodes} loadError={loadError} />
+          <PodcastEpisodeList episodes={episodes} loadError={loadError} onDelete={handleDeleteEpisode} />
         </div>
       </div>
     </div>
