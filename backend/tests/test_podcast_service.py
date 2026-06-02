@@ -53,10 +53,9 @@ def test_parse_dialogue_skips_blank_lines():
     assert len(lines) == 2
 
 
-def test_generic_proxy_config_accepts_correct_kwargs():
-    """GenericProxyConfig uses http_url/https_url, not http_proxy/https_proxy."""
-    from youtube_transcript_api.proxies import GenericProxyConfig
-    proxy_url = "http://user:pass@host:1234"
+def test_webshare_proxy_config_accepts_correct_kwargs():
+    """WebshareProxyConfig uses proxy_username/proxy_password."""
+    from youtube_transcript_api.proxies import WebshareProxyConfig
     # Must not raise TypeError
-    cfg = GenericProxyConfig(http_url=proxy_url, https_url=proxy_url)
+    cfg = WebshareProxyConfig(proxy_username="user", proxy_password="pass")
     assert cfg is not None

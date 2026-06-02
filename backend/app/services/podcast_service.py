@@ -42,13 +42,14 @@ def extract_transcript(youtube_url: str) -> Tuple[str, str]:
     video_id = match.group(1)
 
     try:
-        proxy_url = os.getenv("YOUTUBE_PROXY_URL", "")
-        if proxy_url:
-            from youtube_transcript_api.proxies import GenericProxyConfig
+        proxy_username = os.getenv("WEBSHARE_PROXY_USERNAME", "")
+        proxy_password = os.getenv("WEBSHARE_PROXY_PASSWORD", "")
+        if proxy_username and proxy_password:
+            from youtube_transcript_api.proxies import WebshareProxyConfig
             api = YouTubeTranscriptApi(
-                proxy_config=GenericProxyConfig(
-                    http_url=proxy_url,
-                    https_url=proxy_url,
+                proxy_config=WebshareProxyConfig(
+                    proxy_username=proxy_username,
+                    proxy_password=proxy_password,
                 )
             )
         else:

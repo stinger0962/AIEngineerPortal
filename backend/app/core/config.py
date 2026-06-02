@@ -24,7 +24,8 @@ class Settings(BaseSettings):
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id_a: str = "21m00Tcm4TlvDq8ikWAM"   # Rachel - single narrator + host A
     elevenlabs_voice_id_b: str = "AZnzlk1XvdvUeBnXmlld"   # Domi - host B (dialogue only)
-    youtube_proxy_url: str = ""   # Optional HTTP proxy for youtube-transcript-api (needed on cloud IPs)
+    webshare_proxy_username: str = ""   # Webshare rotating residential proxy username (proxy.webshare.io)
+    webshare_proxy_password: str = ""   # Webshare rotating residential proxy password
 
     @property
     def cors_origins_list(self) -> List[str]:
