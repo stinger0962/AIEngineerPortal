@@ -46,7 +46,7 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
   const [url, setUrl] = useState("");
   const [digestMins, setDigestMins] = useState<5 | 10>(5);
   const [format, setFormat] = useState<"single" | "dialogue">("single");
-  const [voiceId, setVoiceId] = useState("21m00Tcm4TlvDq8ikWAM");
+  const [voiceId, setVoiceId] = useState("W8lBaQb9YIoddhxfQNLP");
   const [status, setStatus] = useState<ProgressStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -207,8 +207,9 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
             disabled={isGenerating}
             className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition-colors focus:border-ember disabled:opacity-40"
           >
-            <option value="21m00Tcm4TlvDq8ikWAM">Rachel (Female)</option>
-            <option value="AZnzlk1XvdvUeBnXmlld">Domi (Female)</option>
+            <option value="W8lBaQb9YIoddhxfQNLP">小刘（女）</option>
+            <option value="UFDAUkGzdLAEJlINT3Fx">小林（女）</option>
+            <option value="bhJUNIXWQQ94l8eI2VUf">艾米（女）</option>
           </select>
         </div>
       )}
