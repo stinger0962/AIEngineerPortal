@@ -97,7 +97,7 @@ async def generate_podcast(payload: GenerateRequest, db: Session = Depends(get_d
                 audio_path, duration_secs = generate_audio_single(
                     script=script_zh,
                     episode_id=episode.id,
-                    voice_id_a=settings.elevenlabs_voice_id_a,
+                    voice_id_a=settings.elevenlabs_voice_id_narration,
                     api_key=settings.elevenlabs_api_key,
                 )
             else:

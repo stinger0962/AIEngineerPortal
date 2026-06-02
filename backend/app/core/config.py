@@ -22,8 +22,9 @@ class Settings(BaseSettings):
     ai_model: str = "claude-sonnet-4-20250514"
     ai_daily_token_budget: int = 100_000
     elevenlabs_api_key: str = ""
-    elevenlabs_voice_id_a: str = "21m00Tcm4TlvDq8ikWAM"   # Rachel - single narrator + host A
-    elevenlabs_voice_id_b: str = "AZnzlk1XvdvUeBnXmlld"   # Domi - host B (dialogue only)
+    elevenlabs_voice_id_narration: str = "W8lBaQb9YIoddhxfQNLP"  # Single narrative voice
+    elevenlabs_voice_id_a: str = "UFDAUkGzdLAEJlINT3Fx"         # Dialogue host A
+    elevenlabs_voice_id_b: str = "bhJUNIXWQQ94l8eI2VUf"         # Dialogue host B
     webshare_proxy_username: str = ""   # Webshare rotating residential proxy username (proxy.webshare.io)
     webshare_proxy_password: str = ""   # Webshare rotating residential proxy password
 
