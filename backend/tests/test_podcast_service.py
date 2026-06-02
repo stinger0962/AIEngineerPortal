@@ -194,3 +194,44 @@ def test_webshare_proxy_config_accepts_correct_kwargs():
     # Must not raise TypeError
     cfg = WebshareProxyConfig(proxy_username="user", proxy_password="pass")
     assert cfg is not None
+
+
+def test_tts_bytes_decodes_minimax_hex_audio():
+    """_tts_bytes posts to MiniMax and decodes the hex audio field to raw bytes."""
+    from unittest.mock import patch, MagicMock
+    from app.services.podcast_service import _tts_bytes
+
+    raw = b"\x49\x44\x33fakemp3"  # arbitrary bytes
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.return_value = None
+    mock_resp.json.return_value = {
+        "data": {"audio": raw.hex()},
+        "base_resp": {"status_code": 0, "status_msg": "success"},
+    }
+
+    with patch("httpx.post", return_value=mock_resp) as mock_post:
+        out = _tts_bytes("你好", "Chinese (Mandarin)_Radio_Host", "key", "gid")
+
+    assert out == raw
+    # Verify the request shape: GroupId in URL, voice_id + mp3 format in body
+    call = mock_post.call_args
+    assert "GroupId=gid" in call.args[0]
+    assert call.kwargs["json"]["voice_setting"]["voice_id"] == "Chinese (Mandarin)_Radio_Host"
+    assert call.kwargs["json"]["audio_setting"]["format"] == "mp3"
+
+
+def test_tts_bytes_raises_on_minimax_error_status():
+    """A non-zero MiniMax status_code surfaces as a ValueError, not silent garbage."""
+    from unittest.mock import patch, MagicMock
+    from app.services.podcast_service import _tts_bytes
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.return_value = None
+    mock_resp.json.return_value = {
+        "data": None,
+        "base_resp": {"status_code": 1004, "status_msg": "invalid voice_id"},
+    }
+
+    with patch("httpx.post", return_value=mock_resp):
+        with pytest.raises(ValueError, match="1004"):
+            _tts_bytes("你好", "bad_voice", "key", "gid")

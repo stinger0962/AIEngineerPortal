@@ -87,12 +87,10 @@ jobs:
               fi
             }
             upsert_env ANTHROPIC_API_KEY "${{ secrets.ANTHROPIC_API_KEY }}"
-            upsert_env ELEVENLABS_API_KEY "${{ secrets.ELEVENLABS_API_KEY }}"
             upsert_env WEBSHARE_PROXY_USERNAME "${{ secrets.WEBSHARE_PROXY_USERNAME }}"
             upsert_env WEBSHARE_PROXY_PASSWORD "${{ secrets.WEBSHARE_PROXY_PASSWORD }}"
-            upsert_env ELEVENLABS_VOICE_ID_NARRATION "W8lBaQb9YIoddhxfQNLP"
-            upsert_env ELEVENLABS_VOICE_ID_A "UFDAUkGzdLAEJlINT3Fx"
-            upsert_env ELEVENLABS_VOICE_ID_B "bhJUNIXWQQ94l8eI2VUf"
+            upsert_env MINIMAX_API_KEY "${{ secrets.MINIMAX_API_KEY }}"
+            upsert_env MINIMAX_GROUP_ID "${{ secrets.MINIMAX_GROUP_ID }}"
 
             # Update repo for docker-compose file and scripts
             cd $APP_DIR

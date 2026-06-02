@@ -34,6 +34,7 @@ class GenerateRequest(BaseModel):
     youtube_url: str
     digest_length_mins: int = 5   # 5 or 10
     format: str = "single"        # "single" or "dialogue"
+    voice_id: Optional[str] = None  # narration voice for single format; ignored for dialogue
 
 
 class EpisodeOut(BaseModel):
@@ -108,17 +109,23 @@ async def generate_podcast(payload: GenerateRequest, db: Session = Depends(get_d
                 audio_path, duration_secs = generate_audio_single(
                     script=script_zh,
                     episode_id=episode.id,
-                    voice_id_a=settings.elevenlabs_voice_id_narration,
-                    api_key=settings.elevenlabs_api_key,
+                    voice_id_a=payload.voice_id or settings.minimax_voice_id_narration,
+                    api_key=settings.minimax_api_key,
+                    group_id=settings.minimax_group_id,
+                    model=settings.minimax_model,
+                    api_base=settings.minimax_api_base,
                 )
             else:
                 yield {"data": json.dumps({"status": "stitching", "message": "Stitching dialogue..."})}
                 audio_path, duration_secs = generate_audio_dialogue(
                     script=script_zh,
                     episode_id=episode.id,
-                    voice_id_a=settings.elevenlabs_voice_id_a,
-                    voice_id_b=settings.elevenlabs_voice_id_b,
-                    api_key=settings.elevenlabs_api_key,
+                    voice_id_a=settings.minimax_voice_id_a,
+                    voice_id_b=settings.minimax_voice_id_b,
+                    api_key=settings.minimax_api_key,
+                    group_id=settings.minimax_group_id,
+                    model=settings.minimax_model,
+                    api_base=settings.minimax_api_base,
                 )
 
             # Finalise DB row

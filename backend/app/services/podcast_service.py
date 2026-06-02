@@ -1,4 +1,4 @@
-"""Podcast generation service: transcript extraction, Claude digest, ElevenLabs TTS."""
+"""Podcast generation service: transcript extraction, Claude digest, MiniMax TTS."""
 from __future__ import annotations
 
 import io
@@ -273,22 +273,61 @@ def _parse_dialogue(script: str) -> List[Tuple[str, str]]:
     return pairs
 
 
-def _tts_bytes(text: str, voice_id: str, api_key: str) -> bytes:
+def _tts_bytes(
+    text: str,
+    voice_id: str,
+    api_key: str,
+    group_id: str,
+    model: str = "speech-2.6-hd",
+    api_base: str = "https://api.minimax.io",
+) -> bytes:
     """
-    Call ElevenLabs TTS API and return raw MP3 bytes.
-    Uses eleven_multilingual_v2 model for best Chinese quality.
-    """
-    from elevenlabs.client import ElevenLabs
+    Call MiniMax (海螺) T2A v2 API and return raw MP3 bytes.
 
-    client = ElevenLabs(api_key=api_key)
-    audio = client.text_to_speech.convert(
-        voice_id=voice_id,
-        text=text,
-        model_id="eleven_multilingual_v2",
-        output_format="mp3_44100_128",
+    MiniMax is purpose-built for Mandarin (far better than ElevenLabs on Chinese).
+    The API returns hex-encoded audio in data.audio; we decode it to raw MP3 bytes.
+    Raises ValueError on a non-zero MiniMax status code.
+    """
+    import httpx
+
+    url = f"{api_base}/v1/t2a_v2?GroupId={group_id}"
+    resp = httpx.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "text": text,
+            "stream": False,
+            "voice_setting": {
+                "voice_id": voice_id,
+                "speed": 1.0,
+                "vol": 1.0,
+                "pitch": 0,
+            },
+            "audio_setting": {
+                "sample_rate": 32000,
+                "bitrate": 128000,
+                "format": "mp3",
+            },
+        },
+        timeout=120.0,
     )
-    # The SDK returns a generator of bytes chunks
-    return b"".join(audio)
+    resp.raise_for_status()
+    payload = resp.json()
+
+    base = payload.get("base_resp") or {}
+    if base.get("status_code", 0) != 0:
+        raise ValueError(
+            f"MiniMax TTS error {base.get('status_code')}: {base.get('status_msg')}"
+        )
+
+    audio_hex = (payload.get("data") or {}).get("audio")
+    if not audio_hex:
+        raise ValueError("MiniMax TTS returned no audio data")
+    return bytes.fromhex(audio_hex)
 
 
 def generate_audio_single(
@@ -296,12 +335,15 @@ def generate_audio_single(
     episode_id: int,
     voice_id_a: str,
     api_key: str,
+    group_id: str,
+    model: str = "speech-2.6-hd",
+    api_base: str = "https://api.minimax.io",
 ) -> Tuple[Path, int]:
     """
     Generate a single-narrator MP3 from the full script.
     Returns (audio_path, duration_secs).
     """
-    mp3_bytes = _tts_bytes(script, voice_id_a, api_key)
+    mp3_bytes = _tts_bytes(script, voice_id_a, api_key, group_id, model, api_base)
     audio_path = _ensure_audio_dir() / f"{episode_id}.mp3"
     audio_path.write_bytes(mp3_bytes)
     segment = AudioSegment.from_mp3(io.BytesIO(mp3_bytes))
@@ -315,9 +357,12 @@ def generate_audio_dialogue(
     voice_id_a: str,
     voice_id_b: str,
     api_key: str,
+    group_id: str,
+    model: str = "speech-2.6-hd",
+    api_base: str = "https://api.minimax.io",
 ) -> Tuple[Path, int]:
     """
-    Generate a two-person dialogue MP3 by calling ElevenLabs once per line
+    Generate a two-person dialogue MP3 by calling MiniMax once per line
     and stitching with 300ms silence between turns.
     Returns (audio_path, duration_secs).
     """
@@ -330,7 +375,7 @@ def generate_audio_dialogue(
 
     for speaker, text in lines:
         voice_id = voice_id_a if speaker == "A" else voice_id_b
-        mp3_bytes = _tts_bytes(text, voice_id, api_key)
+        mp3_bytes = _tts_bytes(text, voice_id, api_key, group_id, model, api_base)
         segment = AudioSegment.from_mp3(io.BytesIO(mp3_bytes))
         if len(combined) > 0:
             combined += silence
