@@ -98,6 +98,11 @@ jobs:
             git checkout "${{ github.sha }}"
             git reset --hard "${{ github.sha }}"
 
+            # Free disk space before pulling — remove all unused images and build cache
+            # This prevents "no space left on device" on the 48GB droplet
+            docker system prune -af --volumes=false
+            docker builder prune -af
+
             # Login to GHCR and pull pre-built images
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
