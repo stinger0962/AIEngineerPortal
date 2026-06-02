@@ -42,7 +42,7 @@ def extract_transcript(youtube_url: str) -> Tuple[str, str]:
     video_id = match.group(1)
 
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript_list = YouTubeTranscriptApi().list(video_id)
 
         # Prefer manual English, then auto-generated English, then anything
         try:
