@@ -9,7 +9,7 @@ redis==5.2.1
 httpx==0.28.1
 pytest==8.3.4
 anthropic>=0.42.0
-yt-dlp>=2024.1.0
+youtube-transcript-api>=0.6.0
 elevenlabs>=1.0.0
 sse-starlette>=2.1.0
 pydub>=0.25.1

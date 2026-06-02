@@ -1,6 +1,6 @@
 """Unit tests for podcast_service helpers (no network calls)."""
 import pytest
-from app.services.podcast_service import validate_youtube_url, _parse_subtitle
+from app.services.podcast_service import validate_youtube_url
 
 
 def test_validate_youtube_url_standard():
@@ -11,39 +11,13 @@ def test_validate_youtube_url_short():
     assert validate_youtube_url("https://youtu.be/dQw4w9WgXcQ") is True
 
 
+def test_validate_youtube_url_with_timestamp():
+    assert validate_youtube_url("https://www.youtube.com/watch?v=48IEIUMtFbI&t=1500s") is True
+
+
 def test_validate_youtube_url_invalid():
     assert validate_youtube_url("https://vimeo.com/123456") is False
     assert validate_youtube_url("not a url") is False
-
-
-def test_parse_subtitle_vtt():
-    raw = """WEBVTT
-
-00:00:00.000 --> 00:00:02.000
-Hello world
-
-00:00:02.000 --> 00:00:04.000
-Hello world
-
-00:00:04.000 --> 00:00:06.000
-This is a test
-"""
-    result = _parse_subtitle(raw, ".vtt")
-    assert "Hello world" in result
-    assert "This is a test" in result
-    # Duplicate consecutive lines should be collapsed
-    assert result.count("Hello world") == 1
-
-
-def test_parse_subtitle_strips_tags():
-    raw = """WEBVTT
-
-00:00:00.000 --> 00:00:02.000
-<c>Hello</c> <b>world</b>
-"""
-    result = _parse_subtitle(raw, ".vtt")
-    assert "<c>" not in result
-    assert "Hello world" in result
 
 
 def test_build_single_prompt_contains_transcript():

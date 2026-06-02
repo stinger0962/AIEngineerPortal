@@ -4,11 +4,10 @@ from __future__ import annotations
 import io
 import os
 import re
-import tempfile
 from pathlib import Path
-from typing import Generator, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
-import yt_dlp
+from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
 from pydub import AudioSegment
 
 AUDIO_DIR = Path(os.getenv("PODCAST_AUDIO_DIR", "/data/podcast_audio"))
@@ -31,64 +30,48 @@ def validate_youtube_url(url: str) -> bool:
 
 def extract_transcript(youtube_url: str) -> Tuple[str, str]:
     """
-    Download auto-generated or manual subtitles using yt-dlp.
+    Fetch transcript using youtube-transcript-api (no cookies, no bot detection).
 
-    Returns (video_title, transcript_text).
-    Raises ValueError if no subtitles are available.
+    Tries English transcripts first (manual then auto-generated), falls back to
+    any available language. Returns (video_title, transcript_text).
+    Raises ValueError if no transcript is available.
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ydl_opts = {
-            "writesubtitles": True,
-            "writeautomaticsub": True,
-            "subtitleslangs": ["en", "en-US", "en-GB"],
-            "skip_download": True,
-            "outtmpl": f"{tmpdir}/video.%(ext)s",
-            "quiet": True,
-            "no_warnings": True,
-        }
+    match = YOUTUBE_REGEX.search(youtube_url)
+    if not match:
+        raise ValueError("Invalid YouTube URL")
+    video_id = match.group(1)
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(youtube_url, download=True)
-            video_title: str = info.get("title", "Unknown Video")
+    try:
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
-        # Find the downloaded subtitle file (.vtt or .srt)
-        sub_files = list(Path(tmpdir).glob("video.*.vtt")) + list(
-            Path(tmpdir).glob("video.*.srt")
+        # Prefer manual English, then auto-generated English, then anything
+        try:
+            transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
+        except NoTranscriptFound:
+            try:
+                transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
+            except NoTranscriptFound:
+                # Take whatever is available (first in list)
+                transcript = next(iter(transcript_list))
+
+        snippets = transcript.fetch()
+        text = " ".join(s.text for s in snippets)
+        # Clean up newlines within snippet text
+        text = re.sub(r"\s+", " ", text).strip()
+
+        # Use video_id as title placeholder — transcript API doesn't return title
+        # Route will update it from the SSE payload if available
+        video_title = f"YouTube video ({video_id})"
+
+    except TranscriptsDisabled:
+        raise ValueError(
+            "Transcripts are disabled for this video. "
+            "Try a video with captions enabled."
         )
-        if not sub_files:
-            raise ValueError(
-                "No subtitles found for this video. "
-                "Try a video with auto-generated captions enabled."
-            )
+    except Exception as exc:
+        raise ValueError(f"Could not fetch transcript: {exc}") from exc
 
-        raw = sub_files[0].read_text(encoding="utf-8")
-        transcript = _parse_subtitle(raw, suffix=sub_files[0].suffix)
-
-    return video_title, transcript
-
-
-def _parse_subtitle(raw: str, suffix: str) -> str:
-    """Strip timestamps and markup from VTT/SRT, return plain text."""
-    # Remove VTT/SRT header
-    text = re.sub(r"WEBVTT.*?\n\n", "", raw, flags=re.DOTALL)
-    # Remove timestamp lines (both VTT and SRT formats)
-    text = re.sub(
-        r"\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[.,]\d{3}.*?\n",
-        "",
-        text,
-    )
-    # Remove sequence numbers (SRT)
-    text = re.sub(r"^\d+\s*$", "", text, flags=re.MULTILINE)
-    # Remove HTML/VTT tags
-    text = re.sub(r"<[^>]+>", "", text)
-    # Collapse whitespace
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    # Deduplicate consecutive identical lines (common in auto-captions)
-    deduped: List[str] = []
-    for ln in lines:
-        if not deduped or ln != deduped[-1]:
-            deduped.append(ln)
-    return " ".join(deduped)
+    return video_title, text
 
 
 _DIGEST_PCT = {5: 30, 10: 60}
