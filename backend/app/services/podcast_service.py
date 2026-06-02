@@ -42,7 +42,18 @@ def extract_transcript(youtube_url: str) -> Tuple[str, str]:
     video_id = match.group(1)
 
     try:
-        transcript_list = YouTubeTranscriptApi().list(video_id)
+        proxy_url = os.getenv("YOUTUBE_PROXY_URL", "")
+        if proxy_url:
+            from youtube_transcript_api.proxies import GenericProxyConfig
+            api = YouTubeTranscriptApi(
+                proxy_config=GenericProxyConfig(
+                    http_proxy=proxy_url,
+                    https_proxy=proxy_url,
+                )
+            )
+        else:
+            api = YouTubeTranscriptApi()
+        transcript_list = api.list(video_id)
 
         # Prefer manual English, then auto-generated English, then anything
         try:

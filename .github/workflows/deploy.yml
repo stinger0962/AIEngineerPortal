@@ -88,6 +88,7 @@ jobs:
             }
             upsert_env ANTHROPIC_API_KEY "${{ secrets.ANTHROPIC_API_KEY }}"
             upsert_env ELEVENLABS_API_KEY "${{ secrets.ELEVENLABS_API_KEY }}"
+            upsert_env YOUTUBE_PROXY_URL "${{ secrets.YOUTUBE_PROXY_URL }}"
 
             # Update repo for docker-compose file and scripts
             cd $APP_DIR
