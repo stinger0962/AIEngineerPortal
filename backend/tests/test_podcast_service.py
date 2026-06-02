@@ -220,28 +220,42 @@ def test_tts_bytes_decodes_minimax_hex_audio():
     assert call.kwargs["json"]["audio_setting"]["format"] == "mp3"
 
 
-def test_pick_random_voice_respects_gender():
-    from app.services.podcast_service import pick_random_voice, VOICE_CATALOG
-    female_ids = {v["voice_id"] for v in VOICE_CATALOG if v["gender"] == "female"}
-    male_ids = {v["voice_id"] for v in VOICE_CATALOG if v["gender"] == "male"}
+def test_pick_dialogue_voice_respects_gender():
+    from app.services.podcast_service import pick_dialogue_voice, DIALOGUE_CATALOG
+    female_ids = {v["voice_id"] for v in DIALOGUE_CATALOG if v["gender"] == "female"}
+    male_ids = {v["voice_id"] for v in DIALOGUE_CATALOG if v["gender"] == "male"}
     # Many draws should always stay within the requested gender pool
     for _ in range(50):
-        assert pick_random_voice("female") in female_ids
-        assert pick_random_voice("male") in male_ids
-        assert pick_random_voice() in (female_ids | male_ids)
+        assert pick_dialogue_voice("female") in female_ids
+        assert pick_dialogue_voice("male") in male_ids
+
+
+def test_pick_random_narration_in_pool():
+    from app.services.podcast_service import pick_random_narration, _NARRATION_VOICE_IDS
+    for _ in range(50):
+        assert pick_random_narration() in _NARRATION_VOICE_IDS
 
 
 def test_resolve_voice_random_and_explicit():
-    from app.services.podcast_service import resolve_voice, _VALID_VOICE_IDS
-    # "random" / None / "" -> a valid catalog voice
-    assert resolve_voice("random") in _VALID_VOICE_IDS
-    assert resolve_voice(None) in _VALID_VOICE_IDS
-    assert resolve_voice("") in _VALID_VOICE_IDS
+    from app.services.podcast_service import resolve_voice, _NARRATION_VOICE_IDS
+    # "random" / None / "" -> a valid narration voice
+    assert resolve_voice("random") in _NARRATION_VOICE_IDS
+    assert resolve_voice(None) in _NARRATION_VOICE_IDS
+    assert resolve_voice("") in _NARRATION_VOICE_IDS
     # explicit valid voice is preserved
-    a_valid = next(iter(_VALID_VOICE_IDS))
+    a_valid = next(iter(_NARRATION_VOICE_IDS))
     assert resolve_voice(a_valid) == a_valid
     # unknown voice falls back to a valid one (never passes garbage to the API)
-    assert resolve_voice("Nonexistent_Voice_XYZ") in _VALID_VOICE_IDS
+    assert resolve_voice("Nonexistent_Voice_XYZ") in _NARRATION_VOICE_IDS
+
+
+def test_narration_and_dialogue_pools_are_distinct_concepts():
+    """Dialogue female/male pools must each be non-empty so casting never fails."""
+    from app.services.podcast_service import DIALOGUE_CATALOG
+    females = [v for v in DIALOGUE_CATALOG if v["gender"] == "female"]
+    males = [v for v in DIALOGUE_CATALOG if v["gender"] == "male"]
+    assert len(females) >= 1
+    assert len(males) >= 1
 
 
 def test_tts_bytes_raises_on_minimax_error_status():

@@ -56,43 +56,63 @@ def validate_youtube_url(url: str) -> bool:
     return bool(YOUTUBE_REGEX.search(url))
 
 
-# MiniMax Chinese (Mandarin) system voices — the single source of truth for the
-# voice dropdown and for random selection. Pulled from MiniMax's get_voice API.
-# `gender` drives dialogue casting (host A = female, host B = male).
-VOICE_CATALOG: List[Dict[str, str]] = [
+# MiniMax Chinese (Mandarin) system voices, curated into two pools.
+# NARRATION_CATALOG drives the single-narration dropdown (and its 随机 option).
+# DIALOGUE_CATALOG drives dialogue casting: host A = a random female, host B = a
+# random male, chosen once per episode. Both are the single source of truth.
+
+NARRATION_CATALOG: List[Dict[str, str]] = [
     # Female
-    {"voice_id": "Chinese (Mandarin)_IntellectualGirl", "name": "知性女声 Intellectual Girl", "gender": "female"},
-    {"voice_id": "Chinese (Mandarin)_Warm_Girl", "name": "温柔女孩 Warm Girl", "gender": "female"},
     {"voice_id": "Chinese (Mandarin)_News_Anchor", "name": "新闻女主播 News Anchor", "gender": "female"},
-    {"voice_id": "Chinese (Mandarin)_Sweet_Lady", "name": "甜美女声 Sweet Lady", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_Wise_Women", "name": "智慧女声 Wise Woman", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_ExplorativeGirl", "name": "好奇女孩 Explorative Girl", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_HK_Flight_Attendant", "name": "港风空姐 HK Flight Attendant", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_Gentle_Senior", "name": "温和长辈(女) Gentle Senior", "gender": "female"},
     # Male
     {"voice_id": "Chinese (Mandarin)_Radio_Host", "name": "电台主持 Radio Host", "gender": "male"},
     {"voice_id": "Chinese (Mandarin)_Male_Announcer", "name": "播音男声 Male Announcer", "gender": "male"},
-    {"voice_id": "Chinese (Mandarin)_Gentleman", "name": "磁性绅士 Gentleman", "gender": "male"},
-    {"voice_id": "Chinese (Mandarin)_Lyrical_Voice", "name": "抒情男声 Lyrical Voice", "gender": "male"},
+    {"voice_id": "Chinese (Mandarin)_Gentle_Youth", "name": "温柔青年 Gentle Youth", "gender": "male"},
 ]
 
-_VALID_VOICE_IDS = {v["voice_id"] for v in VOICE_CATALOG}
+DIALOGUE_CATALOG: List[Dict[str, str]] = [
+    # Female (host A pool)
+    {"voice_id": "Chinese (Mandarin)_Warm_Girl", "name": "温柔女孩 Warm Girl", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_Sweet_Lady", "name": "甜美女声 Sweet Lady", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_Crisp_Girl", "name": "清脆女孩 Crisp Girl", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_Soft_Girl", "name": "软糯女声 Soft Girl", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_Warm_Bestie", "name": "暖心闺蜜 Warm Bestie", "gender": "female"},
+    # Male (host B pool)
+    {"voice_id": "Chinese (Mandarin)_Humorous_Elder", "name": "幽默长者(男) Humorous Elder", "gender": "male"},
+    {"voice_id": "Chinese (Mandarin)_Straightforward_Boy", "name": "直率男孩 Straightforward Boy", "gender": "male"},
+    {"voice_id": "Chinese (Mandarin)_Pure-hearted_Boy", "name": "纯真男孩 Pure-hearted Boy", "gender": "male"},
+    {"voice_id": "Chinese (Mandarin)_Southern_Young_Man", "name": "南方青年 Southern Young Man", "gender": "male"},
+]
+
+_NARRATION_VOICE_IDS = {v["voice_id"] for v in NARRATION_CATALOG}
 
 
-def pick_random_voice(gender: Optional[str] = None) -> str:
-    """Return a random voice_id from the catalog, optionally filtered by gender."""
-    pool = [v["voice_id"] for v in VOICE_CATALOG if gender is None or v["gender"] == gender]
-    return random.choice(pool)
+def pick_random_narration() -> str:
+    """Return a random voice_id from the narration pool (any gender)."""
+    return random.choice([v["voice_id"] for v in NARRATION_CATALOG])
+
+
+def pick_dialogue_voice(gender: str) -> str:
+    """Return a random dialogue voice_id of the given gender (female=host A, male=host B)."""
+    return random.choice([v["voice_id"] for v in DIALOGUE_CATALOG if v["gender"] == gender])
 
 
 def resolve_voice(requested: Optional[str]) -> str:
     """
     Resolve a single-narration voice request:
-    - None / "" / "random" -> a random voice from the full catalog
-    - a known voice_id      -> that voice
-    - an unknown voice_id    -> fall back to random (avoids invalid-voice API errors)
+    - None / "" / "random" -> a random voice from the narration pool
+    - a known narration voice_id -> that voice
+    - an unknown voice_id -> fall back to random (avoids invalid-voice API errors)
     """
     if not requested or requested == "random":
-        return pick_random_voice()
-    if requested in _VALID_VOICE_IDS:
+        return pick_random_narration()
+    if requested in _NARRATION_VOICE_IDS:
         return requested
-    return pick_random_voice()
+    return pick_random_narration()
 
 
 def _build_transcript_api() -> YouTubeTranscriptApi:
