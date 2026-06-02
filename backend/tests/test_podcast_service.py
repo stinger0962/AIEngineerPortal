@@ -220,6 +220,30 @@ def test_tts_bytes_decodes_minimax_hex_audio():
     assert call.kwargs["json"]["audio_setting"]["format"] == "mp3"
 
 
+def test_pick_random_voice_respects_gender():
+    from app.services.podcast_service import pick_random_voice, VOICE_CATALOG
+    female_ids = {v["voice_id"] for v in VOICE_CATALOG if v["gender"] == "female"}
+    male_ids = {v["voice_id"] for v in VOICE_CATALOG if v["gender"] == "male"}
+    # Many draws should always stay within the requested gender pool
+    for _ in range(50):
+        assert pick_random_voice("female") in female_ids
+        assert pick_random_voice("male") in male_ids
+        assert pick_random_voice() in (female_ids | male_ids)
+
+
+def test_resolve_voice_random_and_explicit():
+    from app.services.podcast_service import resolve_voice, _VALID_VOICE_IDS
+    # "random" / None / "" -> a valid catalog voice
+    assert resolve_voice("random") in _VALID_VOICE_IDS
+    assert resolve_voice(None) in _VALID_VOICE_IDS
+    assert resolve_voice("") in _VALID_VOICE_IDS
+    # explicit valid voice is preserved
+    a_valid = next(iter(_VALID_VOICE_IDS))
+    assert resolve_voice(a_valid) == a_valid
+    # unknown voice falls back to a valid one (never passes garbage to the API)
+    assert resolve_voice("Nonexistent_Voice_XYZ") in _VALID_VOICE_IDS
+
+
 def test_tts_bytes_raises_on_minimax_error_status():
     """A non-zero MiniMax status_code surfaces as a ValueError, not silent garbage."""
     from unittest.mock import patch, MagicMock

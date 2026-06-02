@@ -12,6 +12,12 @@ interface Episode {
   created_at: string;
 }
 
+interface Voice {
+  voice_id: string;
+  name: string;
+  gender: "female" | "male";
+}
+
 interface PodcastGeneratorProps {
   onEpisodeReady: (episode: Episode) => void;
 }
@@ -46,7 +52,8 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
   const [url, setUrl] = useState("");
   const [digestMins, setDigestMins] = useState<5 | 10>(5);
   const [format, setFormat] = useState<"single" | "dialogue">("single");
-  const [voiceId, setVoiceId] = useState("Chinese (Mandarin)_Radio_Host");
+  const [voiceId, setVoiceId] = useState("random");
+  const [voices, setVoices] = useState<Voice[]>([]);
   const [status, setStatus] = useState<ProgressStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -55,6 +62,16 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
   useEffect(() => {
     return () => abortRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/podcast/voices`)
+      .then((r) => r.json())
+      .then((data: Voice[]) => setVoices(data))
+      .catch(() => setVoices([]));
+  }, []);
+
+  const femaleVoices = voices.filter((v) => v.gender === "female");
+  const maleVoices = voices.filter((v) => v.gender === "male");
 
   const isGenerating = status !== "idle" && status !== "done" && status !== "error";
   const urlValid = YOUTUBE_RE.test(url);
@@ -207,9 +224,25 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
             disabled={isGenerating}
             className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition-colors focus:border-ember disabled:opacity-40"
           >
-            <option value="Chinese (Mandarin)_Radio_Host">电台主持（男）</option>
-            <option value="Chinese (Mandarin)_IntellectualGirl">知性女声</option>
-            <option value="Chinese (Mandarin)_Male_Announcer">播音男声</option>
+            <option value="random">🎲 随机 Random</option>
+            {femaleVoices.length > 0 && (
+              <optgroup label="女声 Female">
+                {femaleVoices.map((v) => (
+                  <option key={v.voice_id} value={v.voice_id}>
+                    {v.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {maleVoices.length > 0 && (
+              <optgroup label="男声 Male">
+                {maleVoices.map((v) => (
+                  <option key={v.voice_id} value={v.voice_id}>
+                    {v.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
       )}

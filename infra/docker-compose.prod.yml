@@ -45,9 +45,6 @@ services:
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       MINIMAX_GROUP_ID: ${MINIMAX_GROUP_ID:-}
       MINIMAX_MODEL: ${MINIMAX_MODEL:-speech-2.6-hd}
-      MINIMAX_VOICE_ID_NARRATION: "${MINIMAX_VOICE_ID_NARRATION:-Chinese (Mandarin)_Radio_Host}"
-      MINIMAX_VOICE_ID_A: "${MINIMAX_VOICE_ID_A:-Chinese (Mandarin)_IntellectualGirl}"
-      MINIMAX_VOICE_ID_B: "${MINIMAX_VOICE_ID_B:-Chinese (Mandarin)_Male_Announcer}"
       WEBSHARE_PROXY_USERNAME: ${WEBSHARE_PROXY_USERNAME:-}
       WEBSHARE_PROXY_PASSWORD: ${WEBSHARE_PROXY_PASSWORD:-}
     volumes:

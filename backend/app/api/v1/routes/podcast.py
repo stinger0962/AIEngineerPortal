@@ -17,12 +17,15 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.entities import PodcastEpisode
 from app.services.podcast_service import (
+    VOICE_CATALOG,
     extract_transcript,
     fetch_video_title,
     generate_audio_dialogue,
     generate_audio_single,
     generate_script,
     get_chinese_title,
+    pick_random_voice,
+    resolve_voice,
     validate_youtube_url,
 )
 
@@ -109,7 +112,7 @@ async def generate_podcast(payload: GenerateRequest, db: Session = Depends(get_d
                 audio_path, duration_secs = generate_audio_single(
                     script=script_zh,
                     episode_id=episode.id,
-                    voice_id_a=payload.voice_id or settings.minimax_voice_id_narration,
+                    voice_id_a=resolve_voice(payload.voice_id),
                     api_key=settings.minimax_api_key,
                     group_id=settings.minimax_group_id,
                     model=settings.minimax_model,
@@ -120,8 +123,8 @@ async def generate_podcast(payload: GenerateRequest, db: Session = Depends(get_d
                 audio_path, duration_secs = generate_audio_dialogue(
                     script=script_zh,
                     episode_id=episode.id,
-                    voice_id_a=settings.minimax_voice_id_a,
-                    voice_id_b=settings.minimax_voice_id_b,
+                    voice_id_a=pick_random_voice("female"),   # host A
+                    voice_id_b=pick_random_voice("male"),     # host B
                     api_key=settings.minimax_api_key,
                     group_id=settings.minimax_group_id,
                     model=settings.minimax_model,
@@ -155,6 +158,12 @@ async def generate_podcast(payload: GenerateRequest, db: Session = Depends(get_d
             yield {"data": json.dumps({"status": "error", "message": "Generation failed — please try again."})}
 
     return EventSourceResponse(event_stream())
+
+
+@router.get("/voices")
+def list_voices():
+    """Return the curated MiniMax voice catalog for the single-narration dropdown."""
+    return VOICE_CATALOG
 
 
 @router.get("/episodes", response_model=List[EpisodeOut])

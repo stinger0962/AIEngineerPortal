@@ -4,12 +4,13 @@ from __future__ import annotations
 import io
 import json as _json
 import os
+import random
 import re
 import time
 import urllib.parse as _urllib_parse
 import urllib.request as _urllib_request
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
 from youtube_transcript_api._errors import (
@@ -53,6 +54,45 @@ YOUTUBE_REGEX = re.compile(
 def validate_youtube_url(url: str) -> bool:
     """Return True if url looks like a valid YouTube video URL."""
     return bool(YOUTUBE_REGEX.search(url))
+
+
+# MiniMax Chinese (Mandarin) system voices — the single source of truth for the
+# voice dropdown and for random selection. Pulled from MiniMax's get_voice API.
+# `gender` drives dialogue casting (host A = female, host B = male).
+VOICE_CATALOG: List[Dict[str, str]] = [
+    # Female
+    {"voice_id": "Chinese (Mandarin)_IntellectualGirl", "name": "知性女声 Intellectual Girl", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_Warm_Girl", "name": "温柔女孩 Warm Girl", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_News_Anchor", "name": "新闻女主播 News Anchor", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_Sweet_Lady", "name": "甜美女声 Sweet Lady", "gender": "female"},
+    # Male
+    {"voice_id": "Chinese (Mandarin)_Radio_Host", "name": "电台主持 Radio Host", "gender": "male"},
+    {"voice_id": "Chinese (Mandarin)_Male_Announcer", "name": "播音男声 Male Announcer", "gender": "male"},
+    {"voice_id": "Chinese (Mandarin)_Gentleman", "name": "磁性绅士 Gentleman", "gender": "male"},
+    {"voice_id": "Chinese (Mandarin)_Lyrical_Voice", "name": "抒情男声 Lyrical Voice", "gender": "male"},
+]
+
+_VALID_VOICE_IDS = {v["voice_id"] for v in VOICE_CATALOG}
+
+
+def pick_random_voice(gender: Optional[str] = None) -> str:
+    """Return a random voice_id from the catalog, optionally filtered by gender."""
+    pool = [v["voice_id"] for v in VOICE_CATALOG if gender is None or v["gender"] == gender]
+    return random.choice(pool)
+
+
+def resolve_voice(requested: Optional[str]) -> str:
+    """
+    Resolve a single-narration voice request:
+    - None / "" / "random" -> a random voice from the full catalog
+    - a known voice_id      -> that voice
+    - an unknown voice_id    -> fall back to random (avoids invalid-voice API errors)
+    """
+    if not requested or requested == "random":
+        return pick_random_voice()
+    if requested in _VALID_VOICE_IDS:
+        return requested
+    return pick_random_voice()
 
 
 def _build_transcript_api() -> YouTubeTranscriptApi:

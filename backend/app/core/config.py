@@ -26,9 +26,8 @@ class Settings(BaseSettings):
     minimax_group_id: str = ""
     minimax_api_base: str = "https://api.minimax.io"
     minimax_model: str = "speech-2.6-hd"
-    minimax_voice_id_narration: str = "Chinese (Mandarin)_Radio_Host"      # Single narrative voice
-    minimax_voice_id_a: str = "Chinese (Mandarin)_IntellectualGirl"       # Dialogue host A (female)
-    minimax_voice_id_b: str = "Chinese (Mandarin)_Male_Announcer"         # Dialogue host B (male)
+    # Voice selection is driven by VOICE_CATALOG in podcast_service.py (curated pool
+    # + random picker), not by fixed env vars.
     webshare_proxy_username: str = ""   # Webshare rotating residential proxy username (proxy.webshare.io)
     webshare_proxy_password: str = ""   # Webshare rotating residential proxy password
 
