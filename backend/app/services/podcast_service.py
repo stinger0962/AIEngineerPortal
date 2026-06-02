@@ -47,8 +47,8 @@ def extract_transcript(youtube_url: str) -> Tuple[str, str]:
             from youtube_transcript_api.proxies import GenericProxyConfig
             api = YouTubeTranscriptApi(
                 proxy_config=GenericProxyConfig(
-                    http_proxy=proxy_url,
-                    https_proxy=proxy_url,
+                    http_url=proxy_url,
+                    https_url=proxy_url,
                 )
             )
         else:

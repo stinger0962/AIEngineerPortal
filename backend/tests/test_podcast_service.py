@@ -51,3 +51,12 @@ def test_parse_dialogue_skips_blank_lines():
     script = "主持人A: 第一句。\n\n主持人B: 第二句。"
     lines = _parse_dialogue(script)
     assert len(lines) == 2
+
+
+def test_generic_proxy_config_accepts_correct_kwargs():
+    """GenericProxyConfig uses http_url/https_url, not http_proxy/https_proxy."""
+    from youtube_transcript_api.proxies import GenericProxyConfig
+    proxy_url = "http://user:pass@host:1234"
+    # Must not raise TypeError
+    cfg = GenericProxyConfig(http_url=proxy_url, https_url=proxy_url)
+    assert cfg is not None
