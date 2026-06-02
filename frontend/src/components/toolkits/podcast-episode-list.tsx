@@ -99,14 +99,14 @@ function EpisodeCard({
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1 flex-shrink-0">
+        {/* Actions — 40px touch targets for mobile */}
+        <div className="flex items-center gap-0.5 flex-shrink-0 -mr-1">
           {/* Download */}
           <a
             href={`${API_BASE}/podcast/episodes/${ep.id}/download`}
             download={`podcast-${ep.id}.mp3`}
             aria-label="Download episode MP3"
-            className="text-ink/30 hover:text-ember transition-colors p-1 text-lg leading-none"
+            className="flex items-center justify-center w-10 h-10 rounded-full text-ink/40 hover:text-ember hover:bg-ember/10 active:bg-ember/15 transition-colors text-lg leading-none"
             title="Download MP3"
           >
             ↓
@@ -118,7 +118,7 @@ function EpisodeCard({
             disabled={deleting}
             aria-label="Delete episode"
             title="Delete episode"
-            className="text-ink/30 hover:text-red-400 transition-colors p-1 text-lg leading-none disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center justify-center w-10 h-10 rounded-full text-ink/40 hover:text-red-400 hover:bg-red-50 active:bg-red-100 transition-colors text-xl leading-none disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {deleting ? "…" : "×"}
           </button>
@@ -157,7 +157,7 @@ export function PodcastEpisodeList({ episodes, loadError, onDelete }: PodcastEpi
         <div className="text-5xl mb-4 opacity-20">🎙</div>
         <p className="text-sm font-medium text-ink/40">No episodes yet</p>
         <p className="text-xs text-ink/30 mt-1">
-          Generate your first podcast from the form on the left
+          Use the generator to create your first episode
         </p>
       </div>
     );
