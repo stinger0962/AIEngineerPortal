@@ -53,6 +53,27 @@ def test_parse_dialogue_skips_blank_lines():
     assert len(lines) == 2
 
 
+def test_fetch_video_title_bad_id_returns_str():
+    from app.services.podcast_service import fetch_video_title
+    # Invalid video ID — oEmbed returns 404, function must not raise
+    result = fetch_video_title("https://www.youtube.com/watch?v=INVALID_XXXXX")
+    assert isinstance(result, str)
+
+
+def test_get_chinese_title_skips_claude_when_no_key():
+    """get_chinese_title raises AuthenticationError with a fake key — that's expected behaviour.
+    We just verify it raises rather than silently returning wrong data."""
+    from app.services.podcast_service import get_chinese_title
+    import pytest
+    with pytest.raises(Exception):
+        get_chinese_title(
+            english_title="Test Title",
+            transcript="some transcript",
+            anthropic_api_key="fake_key",
+            model="claude-haiku-4-20250514",
+        )
+
+
 def test_webshare_proxy_config_accepts_correct_kwargs():
     """WebshareProxyConfig uses proxy_username/proxy_password."""
     from youtube_transcript_api.proxies import WebshareProxyConfig

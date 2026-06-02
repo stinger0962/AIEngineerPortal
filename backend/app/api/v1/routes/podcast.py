@@ -18,9 +18,11 @@ from app.db.session import get_db
 from app.models.entities import PodcastEpisode
 from app.services.podcast_service import (
     extract_transcript,
+    fetch_video_title,
     generate_audio_dialogue,
     generate_audio_single,
     generate_script,
+    get_chinese_title,
     validate_youtube_url,
 )
 
@@ -74,6 +76,14 @@ async def generate_podcast(payload: GenerateRequest, db: Session = Depends(get_d
                 transcript=transcript,
                 digest_length_mins=payload.digest_length_mins,
                 fmt=payload.format,
+                anthropic_api_key=settings.anthropic_api_key,
+                model=settings.ai_model,
+            )
+
+            # Translate or infer Chinese title
+            video_title = get_chinese_title(
+                english_title=video_title,
+                transcript=transcript,
                 anthropic_api_key=settings.anthropic_api_key,
                 model=settings.ai_model,
             )

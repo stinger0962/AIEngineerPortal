@@ -71,9 +71,8 @@ def extract_transcript(youtube_url: str) -> Tuple[str, str]:
         # Clean up newlines within snippet text
         text = re.sub(r"\s+", " ", text).strip()
 
-        # Use video_id as title placeholder — transcript API doesn't return title
-        # Route will update it from the SSE payload if available
-        video_title = f"YouTube video ({video_id})"
+        # Fetch real title from oEmbed; falls back to "" on any failure
+        video_title = fetch_video_title(youtube_url)
 
     except TranscriptsDisabled:
         raise ValueError(
@@ -84,6 +83,53 @@ def extract_transcript(youtube_url: str) -> Tuple[str, str]:
         raise ValueError(f"Could not fetch transcript: {exc}") from exc
 
     return video_title, text
+
+
+def fetch_video_title(youtube_url: str) -> str:
+    """Fetch video title from YouTube oEmbed API. Returns empty string on any failure."""
+    import urllib.request as _req
+    import json as _json
+    try:
+        encoded = _req.quote(youtube_url, safe="")
+        oembed_url = f"https://www.youtube.com/oembed?url={encoded}&format=json"
+        with _req.urlopen(oembed_url, timeout=5) as resp:
+            data = _json.loads(resp.read())
+            return data.get("title", "")
+    except Exception:
+        return ""
+
+
+def get_chinese_title(
+    english_title: str,
+    transcript: str,
+    anthropic_api_key: str,
+    model: str,
+) -> str:
+    """
+    Return a Chinese title for the episode.
+    - If english_title is provided: translate it to Chinese.
+    - If empty (live stream / oEmbed failed): infer a concise Chinese title from transcript.
+    Returns a plain Chinese string, no quotes, no punctuation wrapping.
+    """
+    import anthropic
+    client = anthropic.Anthropic(api_key=anthropic_api_key)
+    if english_title:
+        prompt = (
+            f"将以下视频标题翻译成中文，只输出翻译结果，不要引号或任何解释：\n{english_title}"
+        )
+    else:
+        # Truncate transcript to first 1000 chars to keep tokens low
+        snippet = transcript[:1000]
+        prompt = (
+            "根据以下视频讲稿片段，为这个视频起一个简洁的中文标题（10字以内），"
+            "只输出标题本身，不要引号或任何解释：\n" + snippet
+        )
+    message = client.messages.create(
+        model=model,
+        max_tokens=60,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text.strip()
 
 
 _DIGEST_PCT = {5: 30, 10: 60}
