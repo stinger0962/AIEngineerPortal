@@ -5,13 +5,37 @@ import io
 import json as _json
 import os
 import re
+import time
 import urllib.parse as _urllib_parse
 import urllib.request as _urllib_request
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
+from youtube_transcript_api._errors import (
+    AgeRestricted,
+    InvalidVideoId,
+    VideoUnavailable,
+    VideoUnplayable,
+)
 from pydub import AudioSegment
+
+# How many times to retry transcript extraction. Webshare's residential proxy
+# gives a STICKY exit IP per session, so the library's internal retries all hit
+# the same (possibly YouTube-blocked) IP. Building a fresh YouTubeTranscriptApi
+# per attempt forces a new session -> new exit IP, which is what actually
+# rotates past a blocked IP. ~50%+ of IPs work, so 6 attempts -> >98% success.
+_TRANSCRIPT_MAX_ATTEMPTS = 6
+
+# Genuine content problems — retrying with a different IP will never help, so we
+# surface them immediately instead of burning all attempts.
+_NON_RETRYABLE_TRANSCRIPT_ERRORS = (
+    TranscriptsDisabled,
+    VideoUnavailable,
+    VideoUnplayable,
+    InvalidVideoId,
+    AgeRestricted,
+)
 
 AUDIO_DIR = Path(os.getenv("PODCAST_AUDIO_DIR", "/data/podcast_audio"))
 
@@ -31,61 +55,98 @@ def validate_youtube_url(url: str) -> bool:
     return bool(YOUTUBE_REGEX.search(url))
 
 
+def _build_transcript_api() -> YouTubeTranscriptApi:
+    """
+    Build a fresh YouTubeTranscriptApi. When Webshare credentials are present,
+    route through Webshare residential proxies. Each fresh instance gets a new
+    requests.Session and therefore a new sticky exit IP (Webshare rotates per
+    session, not per request), which is how we rotate past a blocked IP.
+
+    retries_when_blocked is kept low (2) because all internal retries reuse the
+    same session IP — they rarely help. The outer retry loop in
+    extract_transcript provides the real IP rotation.
+    """
+    proxy_username = os.getenv("WEBSHARE_PROXY_USERNAME", "")
+    proxy_password = os.getenv("WEBSHARE_PROXY_PASSWORD", "")
+    if proxy_username and proxy_password:
+        from youtube_transcript_api.proxies import WebshareProxyConfig
+        return YouTubeTranscriptApi(
+            proxy_config=WebshareProxyConfig(
+                proxy_username=proxy_username,
+                proxy_password=proxy_password,
+                retries_when_blocked=2,
+            )
+        )
+    return YouTubeTranscriptApi()
+
+
+def _fetch_transcript_text(api: YouTubeTranscriptApi, video_id: str) -> str:
+    """
+    Fetch and flatten the transcript text for a video using the given api.
+    Prefers manual English, then auto-generated English, then any language.
+    May raise transcript-api errors (blocked IP, disabled, etc.).
+    """
+    transcript_list = api.list(video_id)
+
+    try:
+        transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
+    except NoTranscriptFound:
+        try:
+            transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
+        except NoTranscriptFound:
+            # Take whatever is available (first in list)
+            transcript = next(iter(transcript_list))
+
+    snippets = transcript.fetch()
+    text = " ".join(s.text for s in snippets)
+    # Clean up newlines within snippet text
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def extract_transcript(youtube_url: str) -> Tuple[str, str]:
     """
-    Fetch transcript using youtube-transcript-api (no cookies, no bot detection).
+    Fetch transcript using youtube-transcript-api, routed through Webshare
+    residential proxies when configured.
 
-    Tries English transcripts first (manual then auto-generated), falls back to
-    any available language. Returns (video_title, transcript_text).
-    Raises ValueError if no transcript is available.
+    YouTube blocks many proxy exit IPs with a 429/CAPTCHA. Because Webshare
+    gives a sticky IP per session, we retry with a FRESH api instance (new
+    session -> new exit IP) up to _TRANSCRIPT_MAX_ATTEMPTS times. Genuine
+    content errors (disabled captions, unavailable video) are surfaced
+    immediately rather than retried.
+
+    Returns (video_title, transcript_text). Raises ValueError on failure.
     """
     match = YOUTUBE_REGEX.search(youtube_url)
     if not match:
         raise ValueError("Invalid YouTube URL")
     video_id = match.group(1)
 
-    try:
-        proxy_username = os.getenv("WEBSHARE_PROXY_USERNAME", "")
-        proxy_password = os.getenv("WEBSHARE_PROXY_PASSWORD", "")
-        if proxy_username and proxy_password:
-            from youtube_transcript_api.proxies import WebshareProxyConfig
-            api = YouTubeTranscriptApi(
-                proxy_config=WebshareProxyConfig(
-                    proxy_username=proxy_username,
-                    proxy_password=proxy_password,
-                )
-            )
-        else:
-            api = YouTubeTranscriptApi()
-        transcript_list = api.list(video_id)
-
-        # Prefer manual English, then auto-generated English, then anything
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, _TRANSCRIPT_MAX_ATTEMPTS + 1):
         try:
-            transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
-        except NoTranscriptFound:
-            try:
-                transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
-            except NoTranscriptFound:
-                # Take whatever is available (first in list)
-                transcript = next(iter(transcript_list))
+            api = _build_transcript_api()  # fresh session -> fresh exit IP
+            text = _fetch_transcript_text(api, video_id)
+            # Fetch real title from oEmbed; falls back to "" on any failure
+            video_title = fetch_video_title(youtube_url)
+            return video_title, text
 
-        snippets = transcript.fetch()
-        text = " ".join(s.text for s in snippets)
-        # Clean up newlines within snippet text
-        text = re.sub(r"\s+", " ", text).strip()
+        except TranscriptsDisabled:
+            raise ValueError(
+                "Transcripts are disabled for this video. "
+                "Try a video with captions enabled."
+            )
+        except _NON_RETRYABLE_TRANSCRIPT_ERRORS as exc:
+            raise ValueError(f"Could not fetch transcript: {exc}") from exc
+        except Exception as exc:
+            # Transient: blocked IP / 429 / network. Retry with a new exit IP.
+            last_exc = exc
+            if attempt < _TRANSCRIPT_MAX_ATTEMPTS:
+                time.sleep(1)
 
-        # Fetch real title from oEmbed; falls back to "" on any failure
-        video_title = fetch_video_title(youtube_url)
-
-    except TranscriptsDisabled:
-        raise ValueError(
-            "Transcripts are disabled for this video. "
-            "Try a video with captions enabled."
-        )
-    except Exception as exc:
-        raise ValueError(f"Could not fetch transcript: {exc}") from exc
-
-    return video_title, text
+    raise ValueError(
+        f"Could not fetch transcript after {_TRANSCRIPT_MAX_ATTEMPTS} attempts — "
+        f"YouTube is rate-limiting the proxy IPs right now. Please try again in a moment."
+    )
 
 
 def fetch_video_title(youtube_url: str) -> str:

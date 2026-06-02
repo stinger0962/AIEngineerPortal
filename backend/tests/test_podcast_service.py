@@ -20,6 +20,73 @@ def test_validate_youtube_url_invalid():
     assert validate_youtube_url("not a url") is False
 
 
+def test_extract_transcript_retries_then_succeeds(monkeypatch):
+    """A blocked IP on the first attempt should trigger a retry with a fresh api
+    that succeeds — the sticky-IP rotation strategy."""
+    import app.services.podcast_service as svc
+
+    attempts = {"n": 0}
+
+    def fake_build_api():
+        return object()  # api object is opaque; _fetch is mocked
+
+    def fake_fetch(api, video_id):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("blocked: too many 429 error responses")
+        return "the transcript text"
+
+    monkeypatch.setattr(svc, "_build_transcript_api", fake_build_api)
+    monkeypatch.setattr(svc, "_fetch_transcript_text", fake_fetch)
+    monkeypatch.setattr(svc, "fetch_video_title", lambda url: "My Title")
+    monkeypatch.setattr(svc.time, "sleep", lambda s: None)  # no real delay
+
+    title, text = svc.extract_transcript("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert title == "My Title"
+    assert text == "the transcript text"
+    assert attempts["n"] == 2  # failed once, succeeded on retry
+
+
+def test_extract_transcript_does_not_retry_disabled(monkeypatch):
+    """TranscriptsDisabled is a genuine content error — fail fast, no retries."""
+    import app.services.podcast_service as svc
+    from youtube_transcript_api import TranscriptsDisabled
+
+    attempts = {"n": 0}
+
+    def fake_fetch(api, video_id):
+        attempts["n"] += 1
+        raise TranscriptsDisabled(video_id)
+
+    monkeypatch.setattr(svc, "_build_transcript_api", lambda: object())
+    monkeypatch.setattr(svc, "_fetch_transcript_text", fake_fetch)
+    monkeypatch.setattr(svc.time, "sleep", lambda s: None)
+
+    with pytest.raises(ValueError, match="disabled"):
+        svc.extract_transcript("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert attempts["n"] == 1  # no retry on genuine error
+
+
+def test_extract_transcript_exhausts_attempts(monkeypatch):
+    """If every attempt is blocked, raise a clear rate-limit ValueError after
+    exhausting all attempts."""
+    import app.services.podcast_service as svc
+
+    attempts = {"n": 0}
+
+    def fake_fetch(api, video_id):
+        attempts["n"] += 1
+        raise RuntimeError("blocked: too many 429 error responses")
+
+    monkeypatch.setattr(svc, "_build_transcript_api", lambda: object())
+    monkeypatch.setattr(svc, "_fetch_transcript_text", fake_fetch)
+    monkeypatch.setattr(svc.time, "sleep", lambda s: None)
+
+    with pytest.raises(ValueError, match="rate-limiting"):
+        svc.extract_transcript("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    assert attempts["n"] == svc._TRANSCRIPT_MAX_ATTEMPTS
+
+
 def test_build_single_prompt_contains_transcript():
     from app.services.podcast_service import _build_prompt
     prompt = _build_prompt("This is the transcript.", digest_length_mins=5, fmt="single")
