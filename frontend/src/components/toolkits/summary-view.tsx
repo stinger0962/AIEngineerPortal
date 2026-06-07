@@ -1,13 +1,17 @@
 "use client";
 
+export interface Section {
+  heading: string;
+  points: string[];
+}
+
 export interface Summary {
   id: number;
   source_type: string;
   source_url: string | null;
   title: string;
   tldr: string;
-  key_points: string[];
-  takeaways: string[];
+  sections: Section[];
   char_count: number;
   created_at: string;
 }
@@ -15,6 +19,7 @@ export interface Summary {
 export function SummaryView({ summary }: { summary: Summary }) {
   return (
     <div className="space-y-4">
+      {/* TL;DR — most prominent */}
       <div className="rounded-2xl border border-teal/20 bg-teal/5 p-4">
         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal/70 mb-1">
           TL;DR
@@ -22,38 +27,24 @@ export function SummaryView({ summary }: { summary: Summary }) {
         <p className="text-base font-medium text-ink leading-relaxed">{summary.tldr}</p>
       </div>
 
-      {summary.key_points.length > 0 && (
-        <div>
+      {/* Adaptive sections — headings chosen by the model per content type */}
+      {summary.sections.map((sec, i) => (
+        <div key={i}>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/40 mb-2">
-            关键要点 Key Points
+            {sec.heading}
           </p>
           <ul className="space-y-1.5">
-            {summary.key_points.map((p, i) => (
-              <li key={i} className="flex gap-2 text-sm text-ink/80 leading-relaxed">
+            {sec.points.map((p, j) => (
+              <li key={j} className="flex gap-2 text-sm text-ink/80 leading-relaxed">
                 <span className="text-teal flex-shrink-0">•</span>
                 <span>{p}</span>
               </li>
             ))}
           </ul>
         </div>
-      )}
+      ))}
 
-      {summary.takeaways.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/40 mb-2">
-            核心收获 Takeaways
-          </p>
-          <ul className="space-y-1.5">
-            {summary.takeaways.map((t, i) => (
-              <li key={i} className="flex gap-2 text-sm text-ink/80 leading-relaxed">
-                <span className="text-pine flex-shrink-0">✓</span>
-                <span>{t}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
+      {/* Source link */}
       {summary.source_url && (
         <a
           href={summary.source_url}
