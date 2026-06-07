@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Layers } from "lucide-react";
 import { API_BASE } from "@/lib/api";
 import { SummaryView, type Summary } from "./summary-view";
 
@@ -46,11 +47,9 @@ function SummaryCard({ s, onDelete }: { s: Summary; onDelete: (id: number) => vo
   }
 
   return (
-    <div className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-ember/30 hover:shadow-sm transition-all">
+    <div className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-teal/30 hover:shadow-sm transition-all">
       <div className="flex items-start gap-3 cursor-pointer" onClick={() => setOpen((o) => !o)}>
-        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-ember/10 flex items-center justify-center text-base">
-          📝
-        </div>
+        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-teal/10 text-teal flex items-center justify-center"><Layers className="w-[18px] h-[18px]" strokeWidth={2} /></div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-ink truncate">{s.title}</p>
           <div className="flex items-center gap-2 mt-1 flex-wrap">

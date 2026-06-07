@@ -10,7 +10,8 @@ const config: Config = {
         ember: "#f77f00",
         sand: "#e7d8c9",
         pine: "#264653",
-        mint: "#d9f0e1"
+        mint: "#d9f0e1",
+        teal: "#1f6f6b"
       },
       boxShadow: {
         panel: "0 20px 50px rgba(20, 33, 61, 0.12)"

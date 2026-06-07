@@ -101,7 +101,7 @@ export function SummaryGenerator({ onSummaryReady }: Props) {
               disabled={isBusy}
               className={`flex-1 rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-40 ${
                 sourceType === t
-                  ? "bg-ember/15 text-ember border border-ember/40"
+                  ? "bg-teal/15 text-teal border border-teal/40"
                   : "bg-white text-ink/50 border border-ink/15 hover:border-ink/30"
               }`}
             >
@@ -119,7 +119,7 @@ export function SummaryGenerator({ onSummaryReady }: Props) {
             placeholder="粘贴要总结的文本..."
             disabled={isBusy}
             rows={8}
-            className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink placeholder:text-ink/30 outline-none transition-colors focus:border-ember disabled:opacity-40 resize-none"
+            className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink placeholder:text-ink/30 outline-none transition-colors focus:border-teal disabled:opacity-40 resize-none"
           />
         ) : (
           <input
@@ -128,31 +128,31 @@ export function SummaryGenerator({ onSummaryReady }: Props) {
             onChange={(e) => setValue(e.target.value)}
             placeholder={sourceType === "web" ? "https://example.com/article" : "https://youtube.com/watch?v=..."}
             disabled={isBusy}
-            className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink placeholder:text-ink/30 outline-none transition-colors focus:border-ember disabled:opacity-40"
+            className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink placeholder:text-ink/30 outline-none transition-colors focus:border-teal disabled:opacity-40"
           />
         )}
       </div>
 
       {isBusy ? (
-        <div className="rounded-xl border border-ember/20 bg-ember/5 px-4 py-3 flex items-center gap-2">
-          <svg className="animate-spin h-4 w-4 text-ember flex-shrink-0" fill="none" viewBox="0 0 24 24">
+        <div className="rounded-xl border border-teal/20 bg-teal/5 px-4 py-3 flex items-center gap-2">
+          <svg className="animate-spin h-4 w-4 text-teal flex-shrink-0" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
           </svg>
-          <span className="text-sm text-ember">{STATUS_LABELS[status]}</span>
+          <span className="text-sm text-teal">{STATUS_LABELS[status]}</span>
         </div>
       ) : (
         <button
           onClick={handleGenerate}
           disabled={!valid}
-          className="w-full rounded-xl bg-ember py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+          className="w-full rounded-xl bg-teal py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
         >
           <span aria-hidden="true">📝</span> Generate Summary
         </button>
       )}
 
       {status === "done" && (
-        <div className="rounded-xl border border-pine/20 bg-mint/30 px-4 py-3 text-sm text-pine font-medium">
+        <div className="rounded-xl border border-teal/20 bg-teal/5 px-4 py-3 text-sm text-teal font-medium">
           ✓ Summary ready — see the list on the right!
         </div>
       )}
