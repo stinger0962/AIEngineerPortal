@@ -14,19 +14,21 @@ def _mock_claude(monkeypatch, response_text):
 
 def test_generate_summary_parses_valid_json(monkeypatch):
     from app.services.summary_service import generate_summary
-    _mock_claude(monkeypatch, '{"title":"标题","tldr":"一句话","key_points":["要点1","要点2"],"takeaways":["收获1"]}')
+    _mock_claude(monkeypatch, '{"title":"标题","tldr":"一句话","sections":[{"heading":"背景","points":["要点1","要点2"]},{"heading":"影响","points":["影响1"]}]}')
     out = generate_summary("正文内容", "fake_key", "fake_model")
     assert out["title"] == "标题"
     assert out["tldr"] == "一句话"
-    assert out["key_points"] == ["要点1", "要点2"]
-    assert out["takeaways"] == ["收获1"]
+    assert out["sections"][0]["heading"] == "背景"
+    assert out["sections"][0]["points"] == ["要点1", "要点2"]
+    assert out["sections"][1]["heading"] == "影响"
 
 
 def test_generate_summary_strips_code_fences(monkeypatch):
     from app.services.summary_service import generate_summary
-    _mock_claude(monkeypatch, '```json\n{"title":"T","tldr":"x","key_points":[],"takeaways":[]}\n```')
+    _mock_claude(monkeypatch, '```json\n{"title":"T","tldr":"x","sections":[{"heading":"H","points":["p"]}]}\n```')
     out = generate_summary("正文", "k", "m")
     assert out["tldr"] == "x"
+    assert out["sections"][0]["heading"] == "H"
 
 
 def test_generate_summary_malformed_raises(monkeypatch):
@@ -36,8 +38,8 @@ def test_generate_summary_malformed_raises(monkeypatch):
         generate_summary("正文", "k", "m")
 
 
-def test_generate_summary_missing_tldr_raises(monkeypatch):
+def test_generate_summary_missing_sections_raises(monkeypatch):
     from app.services.summary_service import generate_summary
-    _mock_claude(monkeypatch, '{"title":"T","key_points":[],"takeaways":[]}')
-    with pytest.raises(ValueError, match="tldr"):
+    _mock_claude(monkeypatch, '{"title":"T","tldr":"x"}')
+    with pytest.raises(ValueError, match="sections"):
         generate_summary("正文", "k", "m")

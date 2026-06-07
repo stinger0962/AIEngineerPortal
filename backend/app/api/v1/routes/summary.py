@@ -28,16 +28,31 @@ class SummaryRequest(BaseModel):
     value: str
 
 
+class Section(BaseModel):
+    heading: str
+    points: List[str]
+
+
 class SummaryOut(BaseModel):
     id: int
     source_type: str
     source_url: Optional[str]
     title: str
     tldr: str
-    key_points: List[str]
-    takeaways: List[str]
+    sections: List[Section]
     char_count: int
     created_at: str
+
+
+def _sections_for(s: Summary) -> list:
+    if s.sections:
+        return s.sections
+    legacy = []
+    if s.key_points:
+        legacy.append({"heading": "关键要点", "points": s.key_points})
+    if s.takeaways:
+        legacy.append({"heading": "核心收获", "points": s.takeaways})
+    return legacy
 
 
 def _to_out(s: Summary) -> dict:
@@ -47,8 +62,7 @@ def _to_out(s: Summary) -> dict:
         "source_url": s.source_url,
         "title": s.title,
         "tldr": s.tldr,
-        "key_points": s.key_points or [],
-        "takeaways": s.takeaways or [],
+        "sections": _sections_for(s),
         "char_count": s.char_count,
         "created_at": s.created_at.isoformat(),
     }
@@ -79,8 +93,9 @@ async def generate(payload: SummaryRequest, db: Session = Depends(get_db)):
                 source_url=source_url,
                 title=final_title,
                 tldr=result["tldr"],
-                key_points=result["key_points"],
-                takeaways=result["takeaways"],
+                key_points=[],
+                takeaways=[],
+                sections=result["sections"],
                 char_count=len(text),
             )
             db.add(summary)

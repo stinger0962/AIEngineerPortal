@@ -7,20 +7,28 @@ from typing import Dict
 
 _MAX_INPUT_CHARS = 20000  # cap input to keep token cost bounded
 
-_SUMMARY_PROMPT = """你是一位专业的中文内容编辑。请阅读以下内容，并输出一份结构化中文摘要。
+_SUMMARY_PROMPT = """你是一位专业的中文内容编辑。请阅读以下内容，输出一份结构化中文摘要。
 
-严格按照以下 JSON 格式输出，不要任何额外文字、说明或前言：
+请根据内容类型，自行决定最合适的分节方式。例如：
+- 新闻/资讯 → 背景、关键事实、影响
+- 教程/方法 → 核心要点、操作步骤、行动建议
+- 观点/评论 → 主要论点、支撑论据、结论
+- 访谈/对话 → 核心话题、精彩观点、金句
+请自由选择 2-4 个最贴合内容的小节。
+
+严格按以下 JSON 格式输出，不要任何额外文字、说明或前言：
 {{
   "title": "简洁标题（不超过20字）",
   "tldr": "一句话总结核心内容",
-  "key_points": ["关键要点1", "关键要点2"],
-  "takeaways": ["核心收获1", "核心收获2"]
+  "sections": [
+    {{"heading": "小节标题", "points": ["要点1", "要点2"]}},
+    {{"heading": "小节标题", "points": ["要点1", "要点2"]}}
+  ]
 }}
 
 要求：
-- key_points 提炼 3-7 条最重要的观点
-- takeaways 提炼 2-4 条值得记住或可执行的收获
-- 全部使用中文，简洁清晰
+- sections 2-4 个，每节 2-6 条要点
+- 标题与要点全部使用中文，简洁清晰
 
 内容：
 {content}"""
@@ -40,9 +48,9 @@ def _extract_json(raw: str) -> dict:
 
 
 def generate_summary(text: str, anthropic_api_key: str, model: str) -> Dict:
-    """Return {title, tldr, key_points[], takeaways[]} (all Chinese).
+    """Return {title, tldr, sections[]} (all Chinese).
 
-    Raises ValueError if the model output cannot be parsed or is missing a tldr.
+    Raises ValueError if the model output cannot be parsed or is missing required fields.
     """
     import anthropic
 
@@ -64,14 +72,27 @@ def generate_summary(text: str, anthropic_api_key: str, model: str) -> Dict:
     if not isinstance(tldr, str) or not tldr.strip():
         raise ValueError("Summary missing tldr")
 
-    key_points = data.get("key_points") or []
-    takeaways = data.get("takeaways") or []
-    if not isinstance(key_points, list) or not isinstance(takeaways, list):
-        raise ValueError("Summary key_points/takeaways must be lists")
+    raw_sections = data.get("sections")
+    if not isinstance(raw_sections, list) or not raw_sections:
+        raise ValueError("Summary missing sections")
+
+    sections = []
+    for sec in raw_sections:
+        if not isinstance(sec, dict):
+            continue
+        heading = str(sec.get("heading") or "").strip()
+        pts = sec.get("points") or []
+        if not isinstance(pts, list):
+            continue
+        points = [str(p).strip() for p in pts if str(p).strip()]
+        if heading and points:
+            sections.append({"heading": heading, "points": points})
+
+    if not sections:
+        raise ValueError("Summary has no valid sections")
 
     return {
         "title": (data.get("title") or "").strip(),
         "tldr": tldr.strip(),
-        "key_points": [str(k).strip() for k in key_points if str(k).strip()],
-        "takeaways": [str(t).strip() for t in takeaways if str(t).strip()],
+        "sections": sections,
     }

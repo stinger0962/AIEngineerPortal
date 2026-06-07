@@ -4,5 +4,5 @@ def test_summary_model_table_and_columns():
     cols = set(Summary.__table__.columns.keys())
     assert {
         "id", "source_type", "source_url", "title",
-        "tldr", "key_points", "takeaways", "char_count", "created_at",
+        "tldr", "key_points", "takeaways", "sections", "char_count", "created_at",
     }.issubset(cols)

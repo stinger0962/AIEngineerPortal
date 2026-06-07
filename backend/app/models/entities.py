@@ -320,5 +320,6 @@ class Summary(Base):
     tldr: Mapped[str] = mapped_column(Text, nullable=False)
     key_points: Mapped[List] = mapped_column(JSON, default=list)
     takeaways: Mapped[List] = mapped_column(JSON, default=list)
+    sections: Mapped[List] = mapped_column(JSON, default=list)  # [{"heading": str, "points": [str]}]
     char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
