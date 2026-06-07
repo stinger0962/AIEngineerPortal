@@ -1,4 +1,4 @@
-import { Header } from "@/components/layout/header";
+import { ConditionalHeader } from "@/components/layout/conditional-header";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -8,7 +8,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <SidebarNav />
         <main className="min-h-screen flex-1 px-4 py-4 pt-16 lg:px-8 lg:py-6 lg:pt-6">
           <div className="space-y-8">
-            <Header />
+            <ConditionalHeader />
             {children}
           </div>
         </main>
