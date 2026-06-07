@@ -13,7 +13,7 @@ const items = [
   { href: "/interview", label: "Interview", icon: BookOpen },
   { href: "/projects", label: "Portfolio", icon: Briefcase },
   { href: "/resume", label: "Resume", icon: FileText },
-  { href: "/toolkits", label: "Toolkits", icon: Wrench },
+  { href: "/toolkits", label: "蒸馏所", icon: Wrench },
   { href: "/jobs/live", label: "Jobs", icon: Search },
   { href: "/copilot", label: "Copilot", icon: MessageSquare },
   { href: "/settings", label: "Settings", icon: Settings },

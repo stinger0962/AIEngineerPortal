@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { Layers } from "lucide-react";
 import { SummaryGenerator } from "@/components/toolkits/summary-generator";
 import { SummaryList } from "@/components/toolkits/summary-list";
 import type { Summary } from "@/components/toolkits/summary-view";
@@ -37,19 +38,23 @@ export default function SummarizePage() {
           href="/toolkits"
           className="text-xs text-ink/40 hover:text-ember transition-colors mb-2 inline-flex items-center gap-1"
         >
-          ← Toolkits
+          ← 蒸馏所
         </Link>
         <div className="flex items-center gap-3 mt-1">
-          <span className="text-3xl">📝</span>
+          <div className="flex-shrink-0 w-11 h-11 rounded-[14px] bg-pine/12 text-pine flex items-center justify-center">
+            <Layers className="w-6 h-6" strokeWidth={2} />
+          </div>
           <div>
             <span className="text-xs font-semibold uppercase tracking-[0.28em] text-ember">
-              Toolkits
+              蒸馏所 · Distill
             </span>
-            <h1 className="font-display text-2xl text-ink leading-tight">内容摘要 Summarize</h1>
+            <h1 className="font-display text-2xl text-ink leading-tight">
+              织 <span className="text-ink/40 text-lg font-medium">Loom</span>
+            </h1>
           </div>
         </div>
-        <p className="text-ink/50 text-sm mt-1 ml-12">
-          粘贴文本、网页或 YouTube 链接 — 获得结构化中文摘要。
+        <p className="text-ink/55 text-sm mt-2">
+          把文本、网页、YouTube 或微信文章织成结构化中文摘要。
         </p>
       </div>
 

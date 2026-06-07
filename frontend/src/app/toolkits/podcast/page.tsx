@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { Flame } from "lucide-react";
 import { PodcastGenerator } from "@/components/toolkits/podcast-generator";
 import { PodcastEpisodeList } from "@/components/toolkits/podcast-episode-list";
 import { API_BASE } from "@/lib/api";
@@ -49,21 +50,23 @@ export default function PodcastPage() {
           href="/toolkits"
           className="text-xs text-ink/40 hover:text-ember transition-colors mb-2 inline-flex items-center gap-1"
         >
-          ← Toolkits
+          ← 蒸馏所
         </Link>
         <div className="flex items-center gap-3 mt-1">
-          <span className="text-3xl">🎙</span>
+          <div className="flex-shrink-0 w-11 h-11 rounded-[14px] bg-ember/12 text-ember flex items-center justify-center">
+            <Flame className="w-6 h-6" strokeWidth={2} />
+          </div>
           <div>
             <span className="text-xs font-semibold uppercase tracking-[0.28em] text-ember">
-              Toolkits
+              蒸馏所 · Distill
             </span>
             <h1 className="font-display text-2xl text-ink leading-tight">
-              YouTube Podcast
+              炼 <span className="text-ink/40 text-lg font-medium">Forge</span>
             </h1>
           </div>
         </div>
-        <p className="text-ink/50 text-sm mt-1 ml-12">
-          Paste a YouTube link — get a digested Chinese podcast episode.
+        <p className="text-ink/55 text-sm mt-2">
+          把 YouTube 视频炼成中文播客 —— 单人讲述或双人对话。
         </p>
       </div>
 
