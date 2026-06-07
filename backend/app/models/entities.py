@@ -308,3 +308,17 @@ class PodcastEpisode(Base):
     audio_path: Mapped[str] = mapped_column(Text, nullable=False)
     duration_secs: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Summary(Base):
+    __tablename__ = "summaries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False)  # text|web|youtube
+    source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    tldr: Mapped[str] = mapped_column(Text, nullable=False)
+    key_points: Mapped[List] = mapped_column(JSON, default=list)
+    takeaways: Mapped[List] = mapped_column(JSON, default=list)
+    char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
