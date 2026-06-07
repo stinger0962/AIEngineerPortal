@@ -7,8 +7,8 @@ export default function ToolkitsPage() {
         <span className="text-xs font-semibold uppercase tracking-[0.28em] text-ember">
           Toolkits
         </span>
-        <h1 className="font-display text-3xl text-cream mt-1">Your toolkit.</h1>
-        <p className="text-cream/50 text-sm mt-1">
+        <h1 className="font-display text-3xl text-ink mt-1">Your toolkit.</h1>
+        <p className="text-ink/50 text-sm mt-1">
           Standalone utilities to accelerate your AI engineering journey.
         </p>
       </div>
@@ -26,11 +26,15 @@ export default function ToolkitsPage() {
           ]}
         />
         <ToolkitCard
-          icon="📄"
-          name="Doc Builder"
-          description="Generate structured documents from raw notes and outlines."
-          comingSoon
-          tags={[{ label: "Coming soon", variant: "soon" }]}
+          icon="📝"
+          name="内容摘要 Summarize"
+          description="粘贴文本、网页或 YouTube 链接，获得结构化中文摘要 — TL;DR、关键要点与核心收获。"
+          href="/toolkits/summarize"
+          tags={[
+            { label: "AI summary", variant: "default" },
+            { label: "Web · YouTube", variant: "default" },
+            { label: "Ready", variant: "ready" },
+          ]}
         />
         <ToolkitCard
           icon="🔍"
