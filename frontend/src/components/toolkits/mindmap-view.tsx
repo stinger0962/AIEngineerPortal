@@ -10,6 +10,8 @@ export function MindMapView({ markdown }: { markdown: string }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const mmRef = useRef<Markmap | null>(null);
 
+  // Render / update on markdown change. Reuse the instance via setData rather than
+  // recreating, so we don't leave stale D3 listeners between updates.
   useEffect(() => {
     if (!svgRef.current) return;
     try {
@@ -23,11 +25,15 @@ export function MindMapView({ markdown }: { markdown: string }) {
     } catch {
       // swallow render errors; the empty-markdown fallback below covers the no-data case
     }
+  }, [markdown]);
+
+  // Destroy the instance only on unmount.
+  useEffect(() => {
     return () => {
       mmRef.current?.destroy();
       mmRef.current = null;
     };
-  }, [markdown]);
+  }, []);
 
   if (!markdown) {
     return (

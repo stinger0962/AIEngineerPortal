@@ -175,7 +175,7 @@ export function SummaryGenerator({ onSummaryReady }: Props) {
 
       {status === "done" && (
         <div className="rounded-xl border border-teal/20 bg-teal/5 px-4 py-3 text-sm text-teal font-medium">
-          ✓ Summary ready — see the list on the right!
+          ✓ {outputType === "mindmap" ? "Mind map ready" : "Summary ready"} — see the list on the right!
         </div>
       )}
       {status === "error" && (
