@@ -12,6 +12,8 @@
     "@tanstack/react-query": "^5.62.8",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
     "next": "^15.1.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
