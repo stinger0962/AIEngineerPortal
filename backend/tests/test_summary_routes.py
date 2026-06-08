@@ -61,3 +61,8 @@ def test_list_summaries_returns_list():
 def test_delete_missing_summary_404():
     r = client.delete("/api/v1/summary/99999999")
     assert r.status_code == 404
+
+
+def test_generate_rejects_bad_output_type():
+    r = client.post("/api/v1/summary/generate", json={"source_type": "text", "value": "x", "output_type": "podcast"})
+    assert r.status_code == 422

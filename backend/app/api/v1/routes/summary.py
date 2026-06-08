@@ -15,17 +15,20 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.entities import Summary
 from app.services.ingestion_service import ingest
+from app.services.mindmap_service import generate_mindmap
 from app.services.summary_service import generate_summary
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/summary", tags=["summary"])
 
 VALID_SOURCE_TYPES = {"text", "web", "youtube"}
+VALID_OUTPUT_TYPES = {"summary", "mindmap"}
 
 
 class SummaryRequest(BaseModel):
     source_type: str
     value: str
+    output_type: str = "summary"  # summary | mindmap
 
 
 class Section(BaseModel):
@@ -42,6 +45,8 @@ class SummaryOut(BaseModel):
     sections: List[Section]
     char_count: int
     created_at: str
+    output_type: str
+    mindmap_md: Optional[str]
 
 
 def _sections_for(s: Summary) -> list:
@@ -65,6 +70,8 @@ def _to_out(s: Summary) -> dict:
         "sections": _sections_for(s),
         "char_count": s.char_count,
         "created_at": s.created_at.isoformat(),
+        "output_type": s.output_type,
+        "mindmap_md": s.mindmap_md,
     }
 
 
@@ -74,6 +81,8 @@ async def generate(payload: SummaryRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=422, detail="Invalid source_type")
     if not payload.value or not payload.value.strip():
         raise HTTPException(status_code=422, detail="value is required")
+    if payload.output_type not in VALID_OUTPUT_TYPES:
+        raise HTTPException(status_code=422, detail="Invalid output_type")
 
     settings = get_settings()
 
@@ -81,37 +90,53 @@ async def generate(payload: SummaryRequest, db: Session = Depends(get_db)):
         try:
             yield {"data": json.dumps({"status": "fetching", "message": "Fetching content..."})}
             title, text = ingest(payload.source_type, payload.value)
-
-            yield {"data": json.dumps({"status": "summarizing", "message": "Summarizing with Claude..."})}
-            result = generate_summary(text, settings.anthropic_api_key, settings.ai_model)
-
-            final_title = title or result["title"] or "未命名摘要"
             source_url = payload.value if payload.source_type in ("web", "youtube") else None
 
-            summary = Summary(
-                source_type=payload.source_type,
-                source_url=source_url,
-                title=final_title,
-                tldr=result["tldr"],
-                key_points=[],
-                takeaways=[],
-                sections=result["sections"],
-                char_count=len(text),
-            )
-            db.add(summary)
-            db.commit()
-            db.refresh(summary)
+            if payload.output_type == "mindmap":
+                yield {"data": json.dumps({"status": "mapping", "message": "Building mind map..."})}
+                mm = generate_mindmap(text, settings.anthropic_api_key, settings.ai_model)
+                item = Summary(
+                    source_type=payload.source_type,
+                    source_url=source_url,
+                    title=(title or mm["title"] or "思维导图"),
+                    tldr="",
+                    key_points=[],
+                    takeaways=[],
+                    sections=[],
+                    output_type="mindmap",
+                    mindmap_md=mm["markdown"],
+                    char_count=len(text),
+                )
+            else:
+                yield {"data": json.dumps({"status": "summarizing", "message": "Summarizing with Claude..."})}
+                result = generate_summary(text, settings.anthropic_api_key, settings.ai_model)
+                item = Summary(
+                    source_type=payload.source_type,
+                    source_url=source_url,
+                    title=(title or result["title"] or "未命名摘要"),
+                    tldr=result["tldr"],
+                    key_points=[],
+                    takeaways=[],
+                    sections=result["sections"],
+                    output_type="summary",
+                    mindmap_md=None,
+                    char_count=len(text),
+                )
 
-            yield {"data": json.dumps({"status": "done", "summary": _to_out(summary)})}
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+
+            yield {"data": json.dumps({"status": "done", "summary": _to_out(item)})}
 
         except ValueError as exc:
             db.rollback()
-            logger.warning("Summary error: %s", exc)
+            logger.warning("Loom generation error: %s", exc)
             yield {"data": json.dumps({"status": "error", "message": str(exc)})}
         except Exception:
             db.rollback()
-            logger.exception("Unexpected summary error")
-            yield {"data": json.dumps({"status": "error", "message": "Could not generate summary — please try again."})}
+            logger.exception("Unexpected Loom generation error")
+            yield {"data": json.dumps({"status": "error", "message": "Generation failed — please try again."})}
 
     return EventSourceResponse(event_stream())
 
