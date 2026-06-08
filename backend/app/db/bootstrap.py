@@ -41,6 +41,15 @@ PHASE_TWO_COLUMN_PATCHES = {
 }
 
 
+SUMMARIES_COLUMN_PATCHES = {
+    "summaries": [
+        ("sections", "ALTER TABLE summaries ADD COLUMN sections JSON"),
+        ("output_type", "ALTER TABLE summaries ADD COLUMN output_type VARCHAR(20) DEFAULT 'summary'"),
+        ("mindmap_md", "ALTER TABLE summaries ADD COLUMN mindmap_md TEXT"),
+    ],
+}
+
+
 MEMORY_CARDS_CREATE_DDL = """
 CREATE TABLE IF NOT EXISTS memory_cards (
     id SERIAL PRIMARY KEY,
@@ -89,7 +98,7 @@ def apply_runtime_schema_patches(engine: Engine) -> None:
         if "memory_cards" not in existing_tables:
             connection.execute(text(MEMORY_CARDS_CREATE_DDL))
 
-        all_patches = {**PHASE_TWO_COLUMN_PATCHES, **PHASE_FIVE_COLUMN_PATCHES}
+        all_patches = {**PHASE_TWO_COLUMN_PATCHES, **PHASE_FIVE_COLUMN_PATCHES, **SUMMARIES_COLUMN_PATCHES}
         for table_name, patches in all_patches.items():
             if table_name not in existing_tables:
                 continue

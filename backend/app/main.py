@@ -27,15 +27,6 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
-    # Lightweight additive migration: ensure newer columns exist on pre-existing tables.
-    # create_all() does not ALTER existing tables. Idempotent via try/except (errors when
-    # the column already exists, e.g. fresh DBs or sqlite test runs).
-    from sqlalchemy import text
-    with engine.begin() as conn:
-        try:
-            conn.execute(text("ALTER TABLE summaries ADD COLUMN sections JSON"))
-        except Exception:
-            pass
     apply_runtime_schema_patches(engine)
     db = SessionLocal()
     try:
