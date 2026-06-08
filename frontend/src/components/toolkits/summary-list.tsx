@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Layers } from "lucide-react";
 import { API_BASE } from "@/lib/api";
 import { SummaryView, type Summary } from "./summary-view";
+import { MindMapView } from "./mindmap-view";
 
 interface SummaryListProps {
   summaries: Summary[];
@@ -53,6 +54,9 @@ function SummaryCard({ s, onDelete }: { s: Summary; onDelete: (id: number) => vo
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-ink truncate">{s.title}</p>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-teal/10 text-teal">
+              {s.output_type === "mindmap" ? "思维导图" : "摘要"}
+            </span>
             <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-ink/8 text-ink/50">
               {SOURCE_LABEL[s.source_type] ?? s.source_type}
             </span>
@@ -71,10 +75,14 @@ function SummaryCard({ s, onDelete }: { s: Summary; onDelete: (id: number) => vo
         </button>
       </div>
 
-      {!open && <p className="text-xs text-ink/50 mt-2 line-clamp-2">{s.tldr}</p>}
+      {!open && s.output_type !== "mindmap" && <p className="text-xs text-ink/50 mt-2 line-clamp-2">{s.tldr}</p>}
       {open && (
         <div className="mt-4 pt-4 border-t border-ink/10">
-          <SummaryView summary={s} />
+          {s.output_type === "mindmap" ? (
+            <MindMapView markdown={s.mindmap_md ?? ""} />
+          ) : (
+            <SummaryView summary={s} />
+          )}
         </div>
       )}
       {deleteError && <p className="mt-2 text-[11px] text-red-400">{deleteError}</p>}

@@ -12,6 +12,8 @@ export interface Summary {
   title: string;
   tldr: string;
   sections: Section[];
+  output_type: "summary" | "mindmap";
+  mindmap_md: string | null;
   char_count: number;
   created_at: string;
 }

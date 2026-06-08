@@ -8,12 +8,13 @@ interface Props {
   onSummaryReady: (summary: Summary) => void;
 }
 
-type Status = "idle" | "fetching" | "summarizing" | "done" | "error";
+type Status = "idle" | "fetching" | "summarizing" | "mapping" | "done" | "error";
 
 const STATUS_LABELS: Record<Status, string> = {
   idle: "",
   fetching: "Fetching content...",
   summarizing: "Summarizing with Claude...",
+  mapping: "Building mind map...",
   done: "Done!",
   error: "Failed",
 };
@@ -25,12 +26,13 @@ export function SummaryGenerator({ onSummaryReady }: Props) {
   const [sourceType, setSourceType] = useState<SourceType>("text");
   const [value, setValue] = useState("");
   const [status, setStatus] = useState<Status>("idle");
+  const [outputType, setOutputType] = useState<"summary" | "mindmap">("summary");
   const [errorMsg, setErrorMsg] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const isBusy = status === "fetching" || status === "summarizing";
+  const isBusy = status === "fetching" || status === "summarizing" || status === "mapping";
   const valid = value.trim().length > 0;
 
   async function handleGenerate() {
@@ -45,7 +47,7 @@ export function SummaryGenerator({ onSummaryReady }: Props) {
       const response = await fetch(`${API_BASE}/summary/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source_type: sourceType, value }),
+        body: JSON.stringify({ source_type: sourceType, value, output_type: outputType }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) throw new Error("Failed to start");
@@ -90,6 +92,26 @@ export function SummaryGenerator({ onSummaryReady }: Props) {
       <span className="text-xs font-semibold uppercase tracking-[0.28em] text-ink/40">
         Generate Summary
       </span>
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-ink/60">Output 输出</label>
+        <div className="flex gap-2">
+          {([["summary", "摘要"], ["mindmap", "思维导图"]] as const).map(([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setOutputType(val)}
+              disabled={isBusy}
+              className={`flex-1 rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-40 ${
+                outputType === val
+                  ? "bg-teal/15 text-teal border border-teal/40"
+                  : "bg-white text-ink/50 border border-ink/15 hover:border-ink/30"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-ink/60">Source</label>
@@ -147,7 +169,7 @@ export function SummaryGenerator({ onSummaryReady }: Props) {
           disabled={!valid}
           className="w-full rounded-xl bg-teal py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
         >
-          <span aria-hidden="true">📝</span> Generate Summary
+          <span aria-hidden="true">📝</span> {outputType === "mindmap" ? "Generate Mind Map" : "Generate Summary"}
         </button>
       )}
 
