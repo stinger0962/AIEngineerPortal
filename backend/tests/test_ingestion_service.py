@@ -75,6 +75,60 @@ def test_ingest_web_falls_back_to_proxy(monkeypatch):
     assert "代理获取的正文" in text
 
 
+def test_ingest_x_tweet_via_fxtwitter(monkeypatch):
+    """X/Twitter URLs fetch tweet text via the fxtwitter embed API."""
+    import app.services.ingestion_service as ing
+    from unittest.mock import MagicMock
+    import httpx
+
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"tweet": {"text": "这是一条推文。" * 30, "author": {"name": "某人"}}}
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: resp)
+
+    title, text = ing._ingest_web("https://x.com/foo/status/123")
+    assert "某人" in title
+    assert "这是一条推文" in text
+
+
+def test_ingest_x_article_raises(monkeypatch):
+    """X long-form Articles can't be extracted → clear error, not junk."""
+    import app.services.ingestion_service as ing
+    from unittest.mock import MagicMock
+    import httpx
+
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"tweet": {"text": "http://x.com/i/article/999", "author": {"name": "某人"}}}
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: resp)
+
+    with pytest.raises(ValueError, match="长文"):
+        ing._ingest_web("https://x.com/foo/status/123")
+
+
+def test_ingest_web_js_shell_raises(monkeypatch):
+    """A JavaScript-only shell page must error, not be summarized into nonsense."""
+    import app.services.ingestion_service as ing
+    import trafilatura
+
+    monkeypatch.setattr(trafilatura, "fetch_url", lambda url: "<html>shell</html>")
+    monkeypatch.setattr(
+        trafilatura, "extract",
+        lambda *a, **k: "We've detected that JavaScript is disabled in this browser. Please enable JavaScript.",
+    )
+    monkeypatch.setattr(ing, "_fetch_via_proxy", lambda url, ua: None)
+    with pytest.raises(ValueError, match="JavaScript"):
+        ing._ingest_web("https://example.com/spa-page")
+
+
+def test_x_host_not_falsely_matched():
+    """'x.com' substring must not match unrelated hosts like netflix.com."""
+    from app.services.ingestion_service import _host, _X_HOSTS
+    assert _host("https://netflix.com/title/123") not in _X_HOSTS
+    assert _host("https://x.com/foo/status/1") in _X_HOSTS
+    assert _host("https://twitter.com/foo/status/1") in _X_HOSTS
+
+
 def test_ingest_youtube_reuses_extract_transcript(monkeypatch):
     import app.services.ingestion_service as ing
     monkeypatch.setattr(ing, "_ingest_youtube", lambda url: ("Vid", "视频讲稿内容。" * 80))
