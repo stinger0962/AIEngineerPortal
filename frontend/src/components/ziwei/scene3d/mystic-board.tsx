@@ -1,11 +1,15 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useRef } from "react";
+import { useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
+import * as THREE from "three";
 import type { ZiweiChart } from "@/lib/ziwei/types";
 import { CELL_W, CELL_D, PLATE_H } from "./layout";
 import { PalacePlate } from "./palace-plate";
 import { SihuaBeams } from "./sihua-beams";
+import { useReducedMotion } from "./camera-rig";
 import { ZIWEI_FONT_URL, ZIWEI_GLYPHS } from "./glyphs";
 
 function CenterPlate({ chart }: { chart: ZiweiChart }) {
@@ -51,8 +55,20 @@ export type MysticBoardProps = {
 };
 
 export function MysticBoard({ chart, selectedBranch, onSelectBranch, children }: MysticBoardProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const progressRef = useRef(0);
+  const reducedMotion = useReducedMotion();
+
+  useFrame((_, delta) => {
+    if (!groupRef.current) return;
+    if (reducedMotion) progressRef.current = 1;
+    progressRef.current = Math.min(1, progressRef.current + delta / 1.2);
+    const eased = 1 - Math.pow(1 - progressRef.current, 3);
+    groupRef.current.position.y = -1.2 * (1 - eased);
+  });
+
   return (
-    <group>
+    <group ref={groupRef}>
       {chart.palaces.map((palace) => (
         <PalacePlate
           key={palace.earthlyBranch}

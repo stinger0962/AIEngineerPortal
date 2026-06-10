@@ -14,9 +14,10 @@ export type Scene3DProps = {
   chart: ZiweiChart;
   selectedBranch: string | null;
   onSelectBranch: (branch: string | null) => void;
+  onRenderError?: () => void;
 };
 
-export default function Scene3D({ chart, selectedBranch, onSelectBranch }: Scene3DProps) {
+export default function Scene3D({ chart, selectedBranch, onSelectBranch, onRenderError }: Scene3DProps) {
   const [quality, setQuality] = useState<"high" | "low">("high");
   const selectedPalace = chart.palaces.find((p) => p.earthlyBranch === selectedBranch) ?? null;
 
@@ -26,6 +27,9 @@ export default function Scene3D({ chart, selectedBranch, onSelectBranch }: Scene
       camera={{ position: [0, 12, 10.5], fov: 42 }}
       style={{ background: "#050310" }}
       onPointerMissed={() => onSelectBranch(null)}
+      onCreated={({ gl }) => {
+        gl.domElement.addEventListener("webglcontextlost", () => onRenderError?.(), { once: true });
+      }}
     >
       <PerformanceMonitor onDecline={() => setQuality("low")}>
         <color attach="background" args={["#050310"]} />

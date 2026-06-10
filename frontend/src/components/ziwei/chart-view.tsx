@@ -34,6 +34,7 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
   const [webgl, setWebgl] = useState<boolean | null>(null);
   const [mode, setMode] = useState<"3d" | "2d">("3d");
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
+  const [renderFailed, setRenderFailed] = useState(false);
 
   // 档案切换时重置选宫（不能用 key 重挂——那会销毁 WebGL 上下文重跑检测）
   const [prevChart, setPrevChart] = useState(chart);
@@ -56,6 +57,7 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
   const switchMode = (next: "3d" | "2d") => {
     setMode(next);
     setSelectedBranch(null); // 模式往返不保留选宫（约定：3D→2D→3D 回到总览）
+    if (next === "3d") setRenderFailed(false); // 用户主动重试 3D 时清除渲染失败标记
     try {
       window.localStorage.setItem(VIEW_KEY, next);
     } catch {
@@ -63,7 +65,7 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
     }
   };
 
-  const show3d = mode === "3d" && webgl === true;
+  const show3d = mode === "3d" && webgl === true && !renderFailed;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -84,7 +86,7 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
               type="button"
               aria-pressed={mode === m}
               onClick={() => switchMode(m)}
-              className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+              className={`rounded-full px-3 py-2 text-xs font-semibold transition-colors ${
                 mode === m ? "bg-violet-600 text-white" : "text-violet-300/70 hover:text-violet-100"
               }`}
             >
@@ -96,12 +98,17 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
 
       {show3d ? (
         <div className="h-[72vh] min-h-[480px]">
-          <Scene3D chart={chart} selectedBranch={selectedBranch} onSelectBranch={setSelectedBranch} />
+          <Scene3D
+            chart={chart}
+            selectedBranch={selectedBranch}
+            onSelectBranch={setSelectedBranch}
+            onRenderError={() => setRenderFailed(true)}
+          />
           {show3d && selectedBranch ? (
             <button
               type="button"
               onClick={() => setSelectedBranch(null)}
-              className="absolute left-3 top-3 z-10 rounded-full border border-violet-500/40 bg-[#120a2e]/85 px-4 py-1.5 text-xs font-semibold text-violet-100 backdrop-blur transition-colors hover:bg-violet-600/40"
+              className="absolute left-3 top-3 z-10 rounded-full border border-violet-500/40 bg-[#120a2e]/85 px-4 py-2 text-xs font-semibold text-violet-100 backdrop-blur transition-colors hover:bg-violet-600/40"
             >
               ← 返回总览
             </button>
@@ -109,7 +116,9 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
         </div>
       ) : (
         <div className="p-2 sm:p-3">
-          {webgl === false ? (
+          {renderFailed ? (
+            <p className="px-2 pb-2 text-xs text-violet-300/60">3D 渲染中断，已切换 2D 命盘。</p>
+          ) : webgl === false ? (
             <p className="px-2 pb-2 text-xs text-violet-300/60">当前设备不支持 WebGL，已切换为 2D 命盘。</p>
           ) : null}
           <ChartGrid2D chart={chart} />
