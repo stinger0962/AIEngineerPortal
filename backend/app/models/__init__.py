@@ -15,6 +15,8 @@ from app.models.entities import (
     Project,
     User,
     UserExerciseAttempt,
+    ZiweiConversation,
+    ZiweiMessage,
     ZiweiProfile,
 )
 
@@ -35,5 +37,7 @@ __all__ = [
     "Project",
     "User",
     "UserExerciseAttempt",
+    "ZiweiConversation",
+    "ZiweiMessage",
     "ZiweiProfile",
 ]
