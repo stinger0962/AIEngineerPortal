@@ -575,10 +575,11 @@ export const PERSONA_LABELS: Record<string, string> = {
 
 /** 四化徽标配色 */
 export const MUTAGEN_STYLES: Record<string, string> = {
-  禄: "bg-emerald-500/90 text-white",
-  权: "bg-amber-500/90 text-white",
-  科: "bg-sky-500/90 text-white",
-  忌: "bg-rose-500/90 text-white",
+  // 依赖 chart.ts 固定 zh-CN locale；amber 用 600 保证白字对比度
+  禄: "bg-emerald-600/90 text-white",
+  权: "bg-amber-600/90 text-white",
+  科: "bg-sky-600/90 text-white",
+  忌: "bg-rose-600/90 text-white",
 };
 ```
 
@@ -791,6 +792,11 @@ git commit -m "feat(ziwei): typed frontend API client for profiles"
 ```tsx
 "use client";
 
+/**
+ * WebGL 降级 / Phase 1 主视图：2D 暗夜方盘。
+ * 刻意只渲染主星+辅星——adjectiveStars/changsheng12/ages 留给后续 3D 单宫内景与 AI 上下文，
+ * 以保证小格子里的可读性（spec 原则「不懂紫微的人也能看懂」）。
+ */
 import { MUTAGEN_STYLES } from "@/lib/ziwei/constants";
 import type { ZiweiChart, ZiweiPalace, ZiweiStar } from "@/lib/ziwei/types";
 
@@ -826,7 +832,10 @@ function StarBadge({ star, major }: { star: ZiweiStar; major: boolean }) {
 
 function PalaceCell({ palace, isSoulPalace }: { palace: ZiweiPalace; isSoulPalace: boolean }) {
   const pos = BRANCH_GRID[palace.earthlyBranch];
-  if (!pos) return null;
+  if (!pos) {
+    console.warn(`ChartGrid2D: 未知地支「${palace.earthlyBranch}」，宫位未渲染（chart_json 可能来自非 zh-CN 排盘）`);
+    return null;
+  }
   return (
     <div
       style={{ gridRow: pos.row, gridColumn: pos.col }}
@@ -891,8 +900,11 @@ function CenterCell({ chart }: { chart: ZiweiChart }) {
 
 export function ChartGrid2D({ chart }: { chart: ZiweiChart }) {
   return (
-    <div className="rounded-[28px] border border-violet-500/20 bg-[#0a0618] p-2 shadow-panel sm:p-3">
-      <div className="grid aspect-square grid-cols-4 grid-rows-4 gap-1">
+    <div
+      aria-label="紫微斗数命盘"
+      className="overflow-x-auto rounded-[28px] border border-violet-500/20 bg-[#0a0618] p-2 shadow-[0_20px_50px_rgba(91,33,182,0.25)] sm:p-3"
+    >
+      <div className="grid aspect-square min-w-[480px] grid-cols-4 grid-rows-4 gap-1">
         {chart.palaces.map((palace) => (
           <PalaceCell
             key={palace.earthlyBranch}

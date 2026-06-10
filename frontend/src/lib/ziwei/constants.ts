@@ -29,8 +29,9 @@ export const PERSONA_LABELS: Record<string, string> = {
 
 /** 四化徽标配色 */
 export const MUTAGEN_STYLES: Record<string, string> = {
-  禄: "bg-emerald-500/90 text-white",
-  权: "bg-amber-500/90 text-white",
-  科: "bg-sky-500/90 text-white",
-  忌: "bg-rose-500/90 text-white",
+  // 依赖 chart.ts 固定 zh-CN locale；amber 用 600 保证白字对比度
+  禄: "bg-emerald-600/90 text-white",
+  权: "bg-amber-600/90 text-white",
+  科: "bg-sky-600/90 text-white",
+  忌: "bg-rose-600/90 text-white",
 };
