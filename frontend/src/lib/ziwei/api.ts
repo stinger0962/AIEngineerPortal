@@ -55,6 +55,20 @@ export function hasChart(profile: ZiweiProfileOut): profile is ZiweiProfileOut &
   return "palaces" in profile.chart_json;
 }
 
+export type CameraCommand =
+  | { type: "focus_palace"; palace: string }
+  | { type: "overview" }
+  | { type: "explain_term"; term: string; explanation: string };
+
+export type OracleReply = {
+  conversation_id: number;
+  response: string;
+  camera_commands: CameraCommand[];
+  meta: { model?: string; total_tokens?: number; latency_ms?: number; rounds?: number };
+};
+
+export type OracleAsk = { scenario: string; message: string; conversation_id?: number };
+
 export const ziweiApi = {
   listProfiles: () => request<ZiweiProfileOut[]>("/ziwei/profiles"),
   createProfile: (payload: ZiweiProfileCreate) =>
@@ -63,4 +77,6 @@ export const ziweiApi = {
     request<ZiweiProfileOut>(`/ziwei/profiles/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteProfile: (id: number) =>
     request<{ deleted: number }>(`/ziwei/profiles/${id}`, { method: "DELETE" }),
+  askOracle: (profileId: number, body: OracleAsk) =>
+    request<OracleReply>(`/ziwei/profiles/${profileId}/oracle`, { method: "POST", body: JSON.stringify(body) }),
 };
