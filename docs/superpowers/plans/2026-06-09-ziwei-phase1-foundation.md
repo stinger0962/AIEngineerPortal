@@ -1003,17 +1003,23 @@ export function ProfileForm({ onCreated, onCancel }: { onCreated: (p: ZiweiProfi
   };
 
   return (
-    <div className="space-y-4 rounded-[28px] border border-violet-500/20 bg-[#0d0722] p-5">
+    <form
+      className="space-y-4 rounded-[28px] border border-violet-500/20 bg-[#0d0722] p-5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void handleSubmit();
+      }}
+    >
       <h3 className="text-sm font-semibold tracking-[0.2em] text-violet-200">新建命主档案</h3>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className={labelCls}>姓名 / 称呼</label>
-          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="如：妈妈" />
+          <label htmlFor="zw-name" className={labelCls}>姓名 / 称呼</label>
+          <input id="zw-name" className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="如：妈妈" />
         </div>
         <div>
-          <label className={labelCls}>关系</label>
-          <select className={inputCls} value={relation} onChange={(e) => setRelation(e.target.value)}>
+          <label htmlFor="zw-relation" className={labelCls}>关系</label>
+          <select id="zw-relation" className={inputCls} value={relation} onChange={(e) => setRelation(e.target.value)}>
             {Object.entries(RELATION_LABELS).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
@@ -1025,15 +1031,16 @@ export function ProfileForm({ onCreated, onCancel }: { onCreated: (p: ZiweiProfi
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className={labelCls}>性别</label>
-          <select className={inputCls} value={gender} onChange={(e) => setGender(e.target.value as "male" | "female")}>
+          <label htmlFor="zw-gender" className={labelCls}>性别</label>
+          <select id="zw-gender" className={inputCls} value={gender} onChange={(e) => setGender(e.target.value as "male" | "female")}>
             <option value="female">女</option>
             <option value="male">男</option>
           </select>
         </div>
         <div>
-          <label className={labelCls}>历法</label>
+          <label htmlFor="zw-calendar" className={labelCls}>历法</label>
           <select
+            id="zw-calendar"
             className={inputCls}
             value={isLunar ? "lunar" : "solar"}
             onChange={(e) => {
@@ -1049,12 +1056,12 @@ export function ProfileForm({ onCreated, onCancel }: { onCreated: (p: ZiweiProfi
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className={labelCls}>出生日期（{isLunar ? "农历" : "公历"} YYYY-M-D）</label>
-          <input className={inputCls} value={birthDate} onChange={(e) => setBirthDate(e.target.value)} placeholder="1990-8-16" />
+          <label htmlFor="zw-birth-date" className={labelCls}>出生日期（{isLunar ? "农历" : "公历"} YYYY-M-D）</label>
+          <input id="zw-birth-date" className={inputCls} value={birthDate} onChange={(e) => setBirthDate(e.target.value)} placeholder="1990-8-16" />
         </div>
         <div>
-          <label className={labelCls}>出生时辰</label>
-          <select className={inputCls} value={timeIndex} onChange={(e) => setTimeIndex(Number(e.target.value))}>
+          <label htmlFor="zw-time-index" className={labelCls}>出生时辰</label>
+          <select id="zw-time-index" className={inputCls} value={timeIndex} onChange={(e) => setTimeIndex(Number(e.target.value))}>
             {TIME_LABELS.map((label, index) => (
               <option key={label} value={index}>
                 {label}
@@ -1071,21 +1078,21 @@ export function ProfileForm({ onCreated, onCancel }: { onCreated: (p: ZiweiProfi
         </label>
       ) : null}
 
-      {error ? <p className="text-xs text-rose-400">{error}</p> : null}
+      {error ? <p role="alert" className="text-xs text-rose-400">{error}</p> : null}
 
       <div className="flex gap-2">
         <button
-          onClick={handleSubmit}
+          type="submit"
           disabled={submitting}
           className="flex-1 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 py-2.5 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(139,92,246,0.4)] transition-opacity hover:opacity-90 disabled:opacity-50"
         >
-          {submitting ? "排盘中……" : "排盘建档"}
+          {submitting ? "排盘建档中……" : "排盘建档"}
         </button>
-        <button onClick={onCancel} className="rounded-xl border border-violet-500/30 px-4 py-2.5 text-sm text-violet-300">
+        <button type="button" disabled={submitting} onClick={onCancel} className="rounded-xl border border-violet-500/30 px-4 py-2.5 text-sm text-violet-300">
           取消
         </button>
       </div>
-    </div>
+    </form>
   );
 }
 ```
