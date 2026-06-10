@@ -146,7 +146,7 @@ class OracleRequest(BaseModel):
 
 
 def _get_user_id(db: Session) -> int:
-    return db.scalar(select(User.id).limit(1))
+    return db.scalar(select(User.id).limit(1)) or 1
 
 
 @router.post("/profiles/{profile_id}/oracle")
@@ -177,15 +177,11 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
     else:
         conv = ZiweiConversation(profile_id=profile_id, scenario=payload.scenario, title=payload.message[:40])
         db.add(conv)
-        db.commit()
-        db.refresh(conv)
+        db.flush()  # assigns conv.id without committing; rolls back on failure
 
     history = db.scalars(select(ZiweiMessage).where(ZiweiMessage.conversation_id == conv.id).order_by(ZiweiMessage.id.asc())).all()
     messages = [{"role": m.role, "content": m.content} for m in history]
     messages.append({"role": "user", "content": payload.message})
-
-    db.add(ZiweiMessage(conversation_id=conv.id, role="user", content=payload.message, chart_context_json={}))
-    db.commit()
 
     oracle = ZiweiOracle(client=svc.client, model=svc.model)
     result = oracle.run(
@@ -196,6 +192,7 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
         raise HTTPException(502, "解盘师一时失神，请稍后再问。")
 
     meta = result["_meta"]
+    db.add(ZiweiMessage(conversation_id=conv.id, role="user", content=payload.message, chart_context_json={}))
     db.add(ZiweiMessage(
         conversation_id=conv.id, role="assistant", content=result["response"],
         chart_context_json={"camera_commands": result["camera_commands"], "scenario": payload.scenario},

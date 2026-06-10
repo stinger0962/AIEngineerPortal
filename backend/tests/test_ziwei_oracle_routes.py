@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 
 import app.api.v1.routes.ziwei as ziwei_routes
@@ -238,3 +238,65 @@ def test_budget_exceeded_429():
         db.close()
     r = client.post(f"/api/v1/ziwei/profiles/{pid}/oracle", json={"scenario": "natal", "message": "x"})
     assert r.status_code == 429
+
+
+def test_ask_oracle_rejects_cross_profile_conversation():
+    """POSTing with a conversation_id that belongs to a different profile must return 404."""
+    pid_a = _seed_profile()
+    # Create a second profile (profile B) with a valid chart.
+    db = TestingSessionLocal()
+    try:
+        profile_b = ZiweiProfile(
+            name="乙命主", relation="friend", gender="female",
+            birth_date="1992-03-15", birth_time_index=2,
+            chart_json=_valid_chart(), persona="sage",
+        )
+        db.add(profile_b)
+        db.commit()
+        db.refresh(profile_b)
+        pid_b = profile_b.id
+    finally:
+        db.close()
+
+    # Create a conversation under profile A via a normal oracle call.
+    r1 = client.post(f"/api/v1/ziwei/profiles/{pid_a}/oracle", json={"scenario": "natal", "message": "命运如何？"})
+    assert r1.status_code == 200
+    conv_id_a = r1.json()["conversation_id"]
+
+    # Now POST to profile B's oracle endpoint with profile A's conversation_id → 404.
+    r2 = client.post(
+        f"/api/v1/ziwei/profiles/{pid_b}/oracle",
+        json={"scenario": "natal", "message": "感情呢？", "conversation_id": conv_id_a},
+    )
+    assert r2.status_code == 404
+
+
+def test_ask_oracle_502_leaves_no_orphan_message(monkeypatch):
+    """On oracle failure (502), neither a user message nor the new conversation persists."""
+    pid = _seed_profile()
+
+    # Monkeypatch ZiweiOracle.run to return None (simulates backend LLM failure).
+    monkeypatch.setattr(ziwei_routes.ZiweiOracle, "run", lambda *args, **kwargs: None)
+
+    r = client.post(f"/api/v1/ziwei/profiles/{pid}/oracle", json={"scenario": "natal", "message": "大运如何？"})
+    assert r.status_code == 502
+
+    # No conversation should have been committed.
+    rc = client.get(f"/api/v1/ziwei/profiles/{pid}/conversations")
+    assert rc.status_code == 200
+    assert len(rc.json()) == 0, "Orphan conversation persisted after 502"
+
+    # Confirm no messages exist under any conversation for this profile.
+    db = TestingSessionLocal()
+    try:
+        convs = db.scalars(
+            select(ZiweiConversation).where(ZiweiConversation.profile_id == pid)
+        ).all()
+        assert len(convs) == 0, "Orphan conversation found in DB after 502"
+        for conv in convs:
+            msgs = db.scalars(
+                select(ZiweiMessage).where(ZiweiMessage.conversation_id == conv.id)
+            ).all()
+            assert len(msgs) == 0, f"Orphan messages found in conv {conv.id} after 502"
+    finally:
+        db.close()
