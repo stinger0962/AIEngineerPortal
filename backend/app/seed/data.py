@@ -34165,6 +34165,10 @@ Add diff views for prompt and retrieval changes so you can connect metric moveme
 """,
         "portfolio_score": 88,
     },
+]
+
+# ── Deployment & production knowledge articles ────────────────────────────────
+KNOWLEDGE_ARTICLES += [
     {
         "title": "Observability patterns for production LLM services",
         "slug": "observability-patterns-production-llm-services",
