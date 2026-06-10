@@ -795,7 +795,6 @@ git commit -m "feat(ziwei): 3D mystic board with palace plates and center info"
 - Create: `frontend/src/components/ziwei/scene3d/sihua-beams.tsx`
 - Modify: `frontend/src/components/ziwei/scene3d/palace-plate.tsx`（板上渲染光球）
 - Modify: `frontend/src/components/ziwei/scene3d/mystic-board.tsx`（挂光束）
-- Modify: `frontend/src/components/ziwei/scene3d/scene-3d.tsx`（传 quality 给 board 以控制光束动画）
 
 - [ ] **Step 1: 星曜光球组件**
 
@@ -821,14 +820,31 @@ export type StarOrbProps = {
 
 export function StarOrb({ star, major, position, dimmed }: StarOrbProps) {
   const groupRef = useRef<THREE.Group>(null);
-  const phase = useMemo(() => Math.random() * Math.PI * 2, []);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+  // 相位由星名哈希决定：渲染纯函数化（Math.random 在 remount/StrictMode 下会跳变）
+  const phase = useMemo(() => {
+    let h = 0;
+    for (const ch of star.name) h = (h * 31 + ch.charCodeAt(0)) % 997;
+    return (h / 997) * Math.PI * 2;
+  }, [star.name]);
   const radius = major ? 0.17 : 0.1;
   const orbColor = major ? "#ffd9a0" : "#b9a8ef";
   const mutagenColor = star.mutagen ? MUTAGEN_COLORS[star.mutagen] : undefined;
 
-  useFrame(({ clock }) => {
-    if (!groupRef.current) return;
-    groupRef.current.position.y = position[1] + Math.sin(clock.getElapsedTime() * 1.4 + phase) * 0.06;
+  useFrame(({ clock }, delta) => {
+    if (groupRef.current) {
+      groupRef.current.position.y = position[1] + Math.sin(clock.getElapsedTime() * 1.4 + phase) * 0.06;
+    }
+    // 光球体调光与殿板同节奏平滑过渡（光环/文字保持瞬时，控制范围）
+    if (matRef.current) {
+      const t = 1 - Math.exp(-6 * delta);
+      matRef.current.emissiveIntensity = THREE.MathUtils.lerp(
+        matRef.current.emissiveIntensity,
+        dimmed ? 0.1 : major ? 1.6 : 0.9,
+        t,
+      );
+      matRef.current.opacity = THREE.MathUtils.lerp(matRef.current.opacity, dimmed ? 0.3 : 1, t);
+    }
   });
 
   return (
@@ -836,11 +852,12 @@ export function StarOrb({ star, major, position, dimmed }: StarOrbProps) {
       <mesh>
         <sphereGeometry args={[radius, 20, 20]} />
         <meshStandardMaterial
+          ref={matRef}
           color={orbColor}
           emissive={mutagenColor ?? orbColor}
-          emissiveIntensity={dimmed ? 0.1 : major ? 1.6 : 0.9}
+          emissiveIntensity={major ? 1.6 : 0.9}
           transparent
-          opacity={dimmed ? 0.3 : 1}
+          opacity={1}
         />
       </mesh>
       {/* 四化光环 */}
@@ -883,7 +900,8 @@ export function StarOrb({ star, major, position, dimmed }: StarOrbProps) {
           position={[(i - (palace.majorStars.length - 1) / 2) * 0.78, 0.46, -CELL_D / 2 + 1.0]}
         />
       ))}
-      {palace.minorStars.slice(0, 8).map((star, i) => {
+      {/* 不截断：辅星可叠至 9-10 颗（昌曲/辅弼/火铃/空劫成对+禄存系），丢星会让四化光束指向无星之宫 */}
+      {palace.minorStars.map((star, i) => {
         const perRow = 4;
         const row = Math.floor(i / perRow);
         const indexInRow = i % perRow;
@@ -894,7 +912,7 @@ export function StarOrb({ star, major, position, dimmed }: StarOrbProps) {
             star={star}
             major={false}
             dimmed={dimmed}
-            position={[(indexInRow - (rowCount - 1) / 2) * 0.52, 0.32, -CELL_D / 2 + 1.78 + row * 0.5]}
+            position={[(indexInRow - (rowCount - 1) / 2) * 0.52, 0.4, -CELL_D / 2 + 1.78 + row * 0.5]}
           />
         );
       })}

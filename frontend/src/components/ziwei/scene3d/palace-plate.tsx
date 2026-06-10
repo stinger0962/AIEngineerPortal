@@ -102,7 +102,7 @@ export function PalacePlate({ palace, isSoulPalace, dimmed, onSelect }: PalacePl
         {`${palace.heavenlyStem}${palace.earthlyBranch} · ${palace.decadal.range[0]}-${palace.decadal.range[1]}`}
       </Text>
 
-      {/* 星曜光球：主星排后、辅星排前（杂曜不在总览渲染） */}
+      {/* 星曜光球：主星排后、辅星排前 */}
       {palace.majorStars.map((star, i) => (
         <StarOrb
           key={star.name}
@@ -112,7 +112,8 @@ export function PalacePlate({ palace, isSoulPalace, dimmed, onSelect }: PalacePl
           position={[(i - (palace.majorStars.length - 1) / 2) * 0.78, 0.46, -CELL_D / 2 + 1.0]}
         />
       ))}
-      {palace.minorStars.slice(0, 8).map((star, i) => {
+      {/* 不截断：辅星可叠至 9-10 颗（昌曲/辅弼/火铃/空劫成对+禄存系），丢星会让四化光束指向无星之宫 */}
+      {palace.minorStars.map((star, i) => {
         const perRow = 4;
         const row = Math.floor(i / perRow);
         const indexInRow = i % perRow;
@@ -123,7 +124,7 @@ export function PalacePlate({ palace, isSoulPalace, dimmed, onSelect }: PalacePl
             star={star}
             major={false}
             dimmed={dimmed}
-            position={[(indexInRow - (rowCount - 1) / 2) * 0.52, 0.32, -CELL_D / 2 + 1.78 + row * 0.5]}
+            position={[(indexInRow - (rowCount - 1) / 2) * 0.52, 0.4, -CELL_D / 2 + 1.78 + row * 0.5]}
           />
         );
       })}
