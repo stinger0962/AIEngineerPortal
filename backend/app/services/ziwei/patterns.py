@@ -645,14 +645,397 @@ def detect_shuang_lu_chao_yuan(chart: Chart, ming: Palace, out: list[Pattern]) -
     ))
 
 
-# 占位：Task 4 batch 2 追加其余检测器并填充 detect_patterns 的完整调用序列
+# ───────── 助力格 / 四化入命 ─────────
+
+def detect_hua_lu_ru_ming(chart: Chart, ming: Palace, out: list[Pattern]) -> None:
+    """X化禄入命"""
+    star = next((s for s in ming.stars if s.mutagen == "禄" and s.is_major), None)
+    if not star:
+        return
+    extra = {"武曲": "武曲化禄属正财，宜实业、金融。", "太阴": "太阴化禄属阴财、不动产。",
+             "贪狼": "贪狼化禄属人脉财、桃花财。"}.get(star.name, "")
+    out.append(Pattern(
+        name=f"{star.name}化禄入命", level="good",
+        description=f"{star.name}化禄坐命，主生财顺利、人缘佳、机缘多。{extra}",
+        palaces=["命宫"], source="《紫微斗数全书》",
+        required=[f"{star.name}化禄坐命宫"],
+    ))
+
+
+# ───────── 恶格 ─────────
+
+def detect_hua_ji_ru_ming_qian(chart: Chart, out: list[Pattern]) -> None:
+    """X化忌入命/迁"""
+    qian_branch = (chart.ming_branch + 6) % 12
+    for palace in chart.palaces:
+        if palace.branch != chart.ming_branch and palace.branch != qian_branch:
+            continue
+        ji_star = next((s for s in palace.stars if s.mutagen == "忌" and s.is_major), None)
+        if not ji_star:
+            continue
+        in_ming = palace.branch == chart.ming_branch
+        out.append(Pattern(
+            name=f"{ji_star.name}化忌入{'命' if in_ming else '迁'}",
+            level="caution",
+            description=(f"{ji_star.name}化忌坐命宫，需留意自身固执、心理障碍或健康隐患，凡事退一步思考。化忌不一定坏，代表此星能量需要特别关注。"
+                         if in_ming
+                         else f"{ji_star.name}化忌坐迁移宫，外出、远行、人际关系易有波折，宜守不宜动。"),
+            palaces=[palace.name], source="《紫微斗数全书》",
+            required=[f"{ji_star.name}化忌坐{'命' if in_ming else '迁'}宫"],
+        ))
+
+
+def detect_yang_tuo_jia_ji(chart: Chart, out: list[Pattern]) -> None:
+    """羊陀夹忌"""
+    for palace in chart.palaces:
+        if palace.branch != chart.ming_branch:
+            continue
+        if not any(s.mutagen == "忌" for s in palace.stars):
+            continue
+        prev, nxt = jia_palaces(chart, palace.branch)
+        if not prev or not nxt:
+            continue
+        a = has_star(prev, "擎羊") and has_star(nxt, "陀罗")
+        b = has_star(prev, "陀罗") and has_star(nxt, "擎羊")
+        if not a and not b:
+            continue
+        out.append(Pattern(
+            name="羊陀夹忌", level="caution",
+            description="化忌坐命，左右擎羊陀罗夹命，古书云“羊陀夹忌为败局”，主一生劳碌奔波、坎坷不顺、身心俱疲。需以德行修养与积极做事化解，凡事谨慎为上。",
+            palaces=["命宫", prev.name, nxt.name], source="《紫微斗数骨髓赋·羊陀夹忌》",
+            required=["化忌坐命", "擎羊陀罗分居命宫前后两宫"],
+        ))
+        return
+
+
+def detect_huo_ling_jia_ming(chart: Chart, out: list[Pattern]) -> None:
+    """火铃夹命"""
+    prev, nxt = jia_palaces(chart, chart.ming_branch)
+    if not prev or not nxt:
+        return
+    ok_a = has_star(prev, "火星") and has_star(nxt, "铃星")
+    ok_b = has_star(prev, "铃星") and has_star(nxt, "火星")
+    if not ok_a and not ok_b:
+        return
+    out.append(Pattern(
+        name="火铃夹命", level="caution",
+        description="火星铃星分居命宫前后两宫夹命，主性急、易冲动、突发意外或纠纷。需培养耐性、避免冲动决策。",
+        palaces=["命宫", prev.name, nxt.name], source="《紫微斗数全书》",
+        required=["火星铃星分居命宫前后两宫"],
+    ))
+
+
+def detect_kong_jie_jia_ming(chart: Chart, out: list[Pattern]) -> None:
+    """空劫夹命"""
+    prev, nxt = jia_palaces(chart, chart.ming_branch)
+    if not prev or not nxt:
+        return
+    ok_a = has_star(prev, "地空") and has_star(nxt, "地劫")
+    ok_b = has_star(prev, "地劫") and has_star(nxt, "地空")
+    if not ok_a and not ok_b:
+        return
+    out.append(Pattern(
+        name="空劫夹命", level="caution",
+        description="地空地劫夹命，主财来财去、思想脱俗、易遁入宗教哲学。古书云“空劫夹命，财不聚”。宜技艺、宗教、研究等不重物质之业。",
+        palaces=["命宫", prev.name, nxt.name], source="《紫微斗数全书》",
+        required=["地空地劫分居命宫前后两宫"],
+    ))
+
+
+def detect_lian_sha_yang(chart: Chart, out: list[Pattern]) -> None:
+    """廉杀羊：廉贞、七杀、擎羊三星会照"""
+    sf = san_fang_all_stars(chart)
+    if not ("廉贞" in sf and "七杀" in sf and "擎羊" in sf):
+        return
+    out.append(Pattern(
+        name="廉杀羊", level="caution",
+        description="廉贞、七杀、擎羊三星会照命宫三方，古书警示之凶格。主血光、官非、意外。本命有此格不必惊慌，但流年大限再触发时需特别谨慎驾驶、避免冲突、注意手术风险。",
+        palaces=["命宫"], source="《紫微斗数全书·廉杀羊》",
+        required=["廉贞、七杀、擎羊三星会照三方四正"],
+    ))
+
+
+def detect_ju_huo_yang(chart: Chart, out: list[Pattern]) -> None:
+    """巨火羊：巨门、火星、擎羊会照"""
+    sf = san_fang_all_stars(chart)
+    if not ("巨门" in sf and "火星" in sf and "擎羊" in sf):
+        return
+    out.append(Pattern(
+        name="巨火羊", level="caution",
+        description="巨门、火星、擎羊三星会照，古书云“巨火羊，终身缢死”——古时凶格。现代理解为：易因口舌、激烈冲突而招大祸。需修身养性、慎言慎行，避免极端情绪。",
+        palaces=["命宫"], source="《紫微斗数骨髓赋·巨火羊》",
+        required=["巨门、火星、擎羊三星会照三方四正"],
+    ))
+
+
+def detect_ling_chang_tuo_wu(chart: Chart, out: list[Pattern]) -> None:
+    """铃昌陀武：铃星、文昌、陀罗、武曲会照"""
+    sf = san_fang_all_stars(chart)
+    if not ("铃星" in sf and "文昌" in sf and "陀罗" in sf and "武曲" in sf):
+        return
+    out.append(Pattern(
+        name="铃昌陀武", level="caution",
+        description="铃星、文昌、陀罗、武曲四星齐会，古书云“铃昌陀武，限至投河”——古时大凶格。本命有此组合本身不必恐慌，但流年大限触发时需高度警觉重大决策、情绪起伏、水边活动。",
+        palaces=["命宫"], source="《紫微斗数骨髓赋·铃昌陀武》",
+        required=["铃星、文昌、陀罗、武曲四星会照三方四正"],
+    ))
+
+
+def detect_ma_tou_dai_jian(chart: Chart, ming: Palace, out: list[Pattern]) -> None:
+    """马头带箭：擎羊在午宫坐命"""
+    if ming.branch != 6:  # 必须午
+        return
+    if not has_star(ming, "擎羊"):
+        return
+    required = ["擎羊于午宫坐命"]
+    bonus: list[str] = []
+    sf = san_fang_all_stars(chart)
+    if "七杀" in sf or "破军" in sf:
+        bonus.append("再会七杀或破军（武职大贵）")
+    if "天魁" in sf or "天钺" in sf:
+        bonus.append("魁钺加照")
+    out.append(Pattern(
+        name="马头带箭",
+        level="good" if bonus else "caution",
+        description="擎羊于午宫坐命，号“马头带箭”。古书云“威镇边疆”——主刚毅果决、有冲杀之力，宜军警武职、运动员、外科医师。但同时主危险与意外，需配合杀破狼或贵人方为大格，否则反主血光。",
+        palaces=["命宫"], source="《紫微斗数骨髓赋·马头带箭》",
+        required=required, bonus=bonus,
+    ))
+
+
+# ───────── 基础格局（提升识别覆盖率）─────────
+
+def detect_lu_cun_shou_shen(chart: Chart, out: list[Pattern]) -> None:
+    """禄存守命/身：禄存入命宫或身宫"""
+    lu_cun_palace = find_star_palace(chart, "禄存")
+    if not lu_cun_palace:
+        return
+    in_ming = lu_cun_palace.branch == chart.ming_branch
+    in_shen = lu_cun_palace.branch == chart.shen_branch
+    if not in_ming and not in_shen:
+        return
+    out.append(Pattern(
+        name="禄存守命" if in_ming else "禄存守身",
+        level="good",
+        description=("禄存坐命，主一生衣食无忧、财禄稳定。性格保守，善积累，但羊陀夹禄须防小人。最宜配化禄、左辅右弼方为大格。"
+                     if in_ming
+                     else "禄存入身宫，主中年后财源稳定、得禄自享。倪师说「禄存入身，财气近身」——配偶或事业方向能带来稳定财禄。"),
+        palaces=["命宫" if in_ming else "身宫"], source="《紫微斗数全书·禄存星》",
+        required=["禄存入命宫" if in_ming else "禄存入身宫"],
+    ))
+
+
+def detect_tian_ma_ru_ming(chart: Chart, out: list[Pattern]) -> None:
+    """天马入命/迁：驿马星动"""
+    tian_ma_palace = find_star_palace(chart, "天马")
+    if not tian_ma_palace:
+        return
+    in_ming = tian_ma_palace.branch == chart.ming_branch
+    in_qian = tian_ma_palace.branch == ((chart.ming_branch + 6) % 12)
+    if not in_ming and not in_qian:
+        return
+    out.append(Pattern(
+        name="天马入命" if in_ming else "天马在迁",
+        level="neutral",
+        description=("天马坐命，主一生奔波、动中得财，宜走商旅、外勤、跨界发展。倪师说「天马入命，无禄不发」——若再会禄存或化禄即「禄马交驰」之富格。"
+                     if in_ming
+                     else "天马在迁移宫，主外出有利、远行得财，宜异乡发展。配化禄主异地生财，配煞星则旅途多波折。"),
+        palaces=[tian_ma_palace.name], source="《紫微斗数全书·天马星》",
+        required=["天马入命宫" if in_ming else "天马入迁移宫"],
+    ))
+
+
+def detect_hua_lu_ru_cai(chart: Chart, out: list[Pattern]) -> None:
+    """化禄入财：财帛宫主星化禄"""
+    cai = next((p for p in chart.palaces if p.name == "财帛"), None)
+    if not cai:
+        return
+    lu_star = next((s for s in cai.stars if s.is_major and s.mutagen == "禄"), None)
+    if not lu_star:
+        return
+    out.append(Pattern(
+        name="化禄入财", level="good",
+        description=f"{lu_star.name}化禄入财帛宫，主财源畅通、收入稳定。倪师讲化禄是「正财」象征——这个化禄星所代表的能力（{lu_star.name}的核心特质）是你赚钱的主轴。配禄存或天马则财源更广。",
+        palaces=["财帛"], source="《紫微斗数全书·四化论》",
+        required=[f"{lu_star.name}化禄入财帛宫"],
+    ))
+
+
+def detect_hua_quan_ru_guan(chart: Chart, out: list[Pattern]) -> None:
+    """化权入官：官禄宫主星化权"""
+    guan = next((p for p in chart.palaces if p.name == "官禄"), None)
+    if not guan:
+        return
+    quan_star = next((s for s in guan.stars if s.is_major and s.mutagen == "权"), None)
+    if not quan_star:
+        return
+    out.append(Pattern(
+        name="化权入官", level="good",
+        description=f"{quan_star.name}化权入官禄宫，主事业有掌控力、能担当独当一面的职位。化权代表权力与执行力——{quan_star.name}化权说明你在事业上能成为决策者或核心执行者，宜走管理或技术权威路线。",
+        palaces=["官禄"], source="《紫微斗数全书·四化论》",
+        required=[f"{quan_star.name}化权入官禄宫"],
+    ))
+
+
+def detect_hua_ke_ru_ming_shen(chart: Chart, out: list[Pattern]) -> None:
+    """化科入命/身：科名加身"""
+    ming = next((p for p in chart.palaces if p.branch == chart.ming_branch), None)
+    shen = next((p for p in chart.palaces if p.branch == chart.shen_branch), None)
+    targets = [p for p in (ming, shen) if p]
+    for p in targets:
+        ke_star = next((s for s in p.stars if s.is_major and s.mutagen == "科"), None)
+        if not ke_star:
+            continue
+        is_ming = p.branch == chart.ming_branch
+        out.append(Pattern(
+            name="化科入命" if is_ming else "化科入身", level="good",
+            description=f"{ke_star.name}化科入{'命' if is_ming else '身'}宫，主名声、文书、学术运。倪师讲化科是「贵人星」——{ke_star.name}化科带来的是被人看重的特质，宜从事文书、教育、研究、咨询、文创等“以名取利”的方向。",
+            palaces=["命宫" if is_ming else "身宫"], source="《紫微斗数全书·四化论》",
+            required=[f"{ke_star.name}化科入{'命' if is_ming else '身'}宫"],
+        ))
+        return  # 命和身重复时只识别一次
+
+
+def detect_ji_yue_tong_liang_partial(chart: Chart, ming: Palace, out: list[Pattern]) -> None:
+    """机月同梁三星会（降级版）：天机/太阴/天同/天梁 任 3 星齐入三方四正"""
+    sf = san_fang_all_stars(chart)
+    has = [s for s in ("天机", "太阴", "天同", "天梁") if s in sf]
+    if len(has) != 3:  # 4 星齐由 detect_ji_yue_tong_liang 处理
+        return
+    missing = [s for s in ("天机", "太阴", "天同", "天梁") if s not in sf]
+    out.append(Pattern(
+        name="机月同梁三星会", level="neutral",
+        description=f"三方四正会齐{'、'.join(has)}，差{'、'.join(missing)}未会。机月同梁不全格，文质带谋，但稳定度不如四星齐。仍宜公职、教研、医疗、服务等需要积累与稳定的行业，关键看缺位星与四化的配合。",
+        palaces=[p.name for p in san_fang_palaces(chart)
+                 if any(s in major_star_names(p) for s in has)],
+        source="《紫微斗数全书·机月同梁格》（降级版）",
+        required=[f"三方四正会{'、'.join(has)}（机月同梁缺{'、'.join(missing)}）"],
+    ))
+
+
+def detect_chang_qu_tong_hui(chart: Chart, out: list[Pattern]) -> None:
+    """昌曲同会：文昌+文曲都在命三方四正"""
+    sf = san_fang_all_stars(chart)
+    if "文昌" not in sf or "文曲" not in sf:
+        return
+    ming = next((p for p in chart.palaces if p.branch == chart.ming_branch), None)
+    if not ming:
+        return
+    in_ming = has_star(ming, "文昌") and has_star(ming, "文曲")
+    out.append(Pattern(
+        name="昌曲坐命" if in_ming else "昌曲同会", level="good",
+        description=("文昌文曲同入命宫，主聪明俊秀、文采斐然，宜文学、教育、写作、咨询。最忌化忌——昌曲化忌主文书契约暗亏。"
+                     if in_ming
+                     else "文昌文曲同会三方四正，主才华横溢、口才文笔俱佳。宜走需要表达与文采的行业，化科加持则名声大显。"),
+        palaces=["命宫"], source="《紫微斗数全书·文星论》",
+        required=["文昌、文曲同会命宫三方四正"],
+    ))
+
+
+def detect_fu_bi_tong_hui(chart: Chart, out: list[Pattern]) -> None:
+    """辅弼同会：左辅+右弼都在命三方四正"""
+    sf = san_fang_all_stars(chart)
+    if "左辅" not in sf or "右弼" not in sf:
+        return
+    out.append(Pattern(
+        name="辅弼同会", level="good",
+        description="左辅右弼同会命宫三方四正，主一生贵人不绝、人缘极佳。最宜领导岗位与团队合作型工作。倪师说「辅弼夹命，平生贵人多」——你不是单打独斗的命，要善用人际网络。",
+        palaces=["命宫"], source="《紫微斗数全书·辅弼论》",
+        required=["左辅、右弼同会命宫三方四正"],
+    ))
+
+
+def detect_kui_yue_tong_hui(chart: Chart, out: list[Pattern]) -> None:
+    """魁钺同会：天魁+天钺都在命三方四正"""
+    sf = san_fang_all_stars(chart)
+    if "天魁" not in sf or "天钺" not in sf:
+        return
+    out.append(Pattern(
+        name="魁钺同会", level="good",
+        description="天魁天钺同会命宫三方四正，主“天乙贵人”加持，关键时刻总有贵人提携。倪师说「魁钺夹命，必为贵人」——遇到困难时身边会出现得力相助者，宜主动维护人脉。",
+        palaces=["命宫"], source="《紫微斗数全书·魁钺论》",
+        required=["天魁、天钺同会命宫三方四正"],
+    ))
+
+
+def detect_ke_quan_shuang_hui(chart: Chart, out: list[Pattern]) -> None:
+    """科权双会：化科 + 化权 同会三方四正"""
+    sf_palaces = san_fang_palaces(chart)
+    has_ke = False
+    has_quan = False
+    for p in sf_palaces:
+        for s in p.stars:
+            if s.is_major and s.mutagen == "科":
+                has_ke = True
+            if s.is_major and s.mutagen == "权":
+                has_quan = True
+    if not has_ke or not has_quan:
+        return
+    out.append(Pattern(
+        name="科权双会", level="good",
+        description="化科 + 化权 同会三方四正，主名权双美——既有学识/名声（科），又有掌控力（权），宜走“专业权威”路线（如医生、律师、教授、技术骨干），名利双收且根基扎实。",
+        palaces=["命宫"], source="《紫微斗数全书·四化会照》",
+        required=["化科、化权同会命宫三方四正"],
+    ))
+
+
+# ───────── 编排：照 patterns.ts detectPatterns 主函数顺序 ─────────
+
 def detect_patterns(chart: Chart) -> list[Pattern]:
     ming = ming_palace(chart)
     if not ming:
         return []
     out: list[Pattern] = []
+
+    # 上格
     detect_jun_chen_qing_hui(chart, ming, out)
-    detect_sha_po_lang(chart, ming, out)
+    detect_zi_fu(chart, ming, out)
+    detect_fu_xiang_chao_yuan(chart, ming, out)
     detect_yang_liang_chang_lu(chart, ming, out)
+    detect_huo_tan_ling_tan(chart, ming, out)
+    detect_wu_tan(chart, ming, out)
+    detect_sha_po_lang(chart, ming, out)
+    detect_ji_yue_tong_liang(chart, ming, out)
+
+    # 中格
+    detect_lian_xiang(chart, out)
+    detect_wu_qi_sha(chart, out)
+    detect_tong_liang(chart, out)
+    detect_ri_yue_tong_gong(chart, out)
+    detect_ri_yue_jia_ming(chart, out)
+    detect_ju_ri_tong_gong(chart, out)
+    detect_shi_zhong_yin_yu(chart, ming, out)
+    detect_ming_zhu_chu_hai(chart, ming, out)
+    detect_zi_wei_in_ming(chart, ming, out)
+
+    # 助力格
+    detect_fu_bi_jia_ming(chart, out)
+    detect_chang_qu_jia_ming(chart, out)
+    detect_kui_yue_jia_ming(chart, out)
+    detect_shuang_lu_chao_yuan(chart, ming, out)
     detect_san_qi_jia_hui(chart, ming, out)
+    detect_hua_lu_ru_ming(chart, ming, out)
+
+    # 恶格
+    detect_hua_ji_ru_ming_qian(chart, out)
+    detect_yang_tuo_jia_ji(chart, out)
+    detect_huo_ling_jia_ming(chart, out)
+    detect_kong_jie_jia_ming(chart, out)
+    detect_lian_sha_yang(chart, out)
+    detect_ju_huo_yang(chart, out)
+    detect_ling_chang_tuo_wu(chart, out)
+    detect_ma_tou_dai_jian(chart, ming, out)
+
+    # 基础格局（提升识别覆盖率）
+    detect_lu_cun_shou_shen(chart, out)
+    detect_tian_ma_ru_ming(chart, out)
+    detect_hua_lu_ru_cai(chart, out)
+    detect_hua_quan_ru_guan(chart, out)
+    detect_hua_ke_ru_ming_shen(chart, out)
+    detect_ji_yue_tong_liang_partial(chart, ming, out)
+    detect_chang_qu_tong_hui(chart, out)
+    detect_fu_bi_tong_hui(chart, out)
+    detect_kui_yue_tong_hui(chart, out)
+    detect_ke_quan_shuang_hui(chart, out)
+
     return out
