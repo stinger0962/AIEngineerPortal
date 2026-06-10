@@ -601,8 +601,26 @@ function toStar(star: IztroStar): ZiweiStar {
   };
 }
 
+/** 校验输入并在非法时抛错（iztro 对不存在的公历日期会静默偏移排盘而非报错） */
+function assertValidBirthInput(input: BirthInput): void {
+  if (!Number.isInteger(input.timeIndex) || input.timeIndex < 0 || input.timeIndex > 12) {
+    throw new Error(`时辰序号无效: ${input.timeIndex}`);
+  }
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(input.dateStr);
+  if (!match) throw new Error(`日期格式应为 YYYY-M-D: ${input.dateStr}`);
+  if (!input.isLunar) {
+    const [y, m, d] = [Number(match[1]), Number(match[2]), Number(match[3])];
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) {
+      throw new Error(`公历日期不存在: ${input.dateStr}`);
+    }
+  }
+  // 农历路径无需在此校验日：iztro 对非法农历日期会自行抛错
+}
+
 /** 浏览器内排盘：iztro 星盘 → 归一化 ZiweiChart（可 JSON 序列化，存入档案） */
 export function computeChart(input: BirthInput): ZiweiChart {
+  assertValidBirthInput(input);
   const gender = input.gender === "female" ? "女" : "男";
   const astrolabe = input.isLunar
     ? astro.byLunar(input.dateStr, input.timeIndex, gender, input.isLeapMonth ?? false, true, "zh-CN")
@@ -1201,7 +1219,8 @@ Expected: 两者都无错误，build 输出包含 `/ziwei` 路由
    - sidebar 出现「紫微斗数」入口，点击进入
    - 新建档案：填「测试 / 自己 / 女 / 公历 2000-8-16 / 寅时」→ 排盘建档
    - 暗夜方盘渲染出 12 宫 + 中宫；命宫有金色高亮；身宫有「身」标；生年四化（禄权科忌彩色徽标）出现在对应星曜上
-   - 对照验证：iztro 文档示例此盘为水二局——中宫应显示「水二局」
+   - 对照验证：示例盘 2000-8-16 寅时女 → 中宫应显示「木三局」、命主破军、身主文昌（冒烟脚本实测值）
+   - 非法日期防护：尝试「2001-2-29」建档 → 应提示「排盘失败，请检查生辰是否正确」而非建档成功
    - 刷新页面档案仍在（已持久化）；删除档案后列表清空
 
 - [ ] **Step 5: Commit**
