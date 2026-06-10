@@ -21,3 +21,4 @@ frontend/.next/
 frontend/node_modules/
 *.log
 .worktrees/
+.superpowers/
