@@ -97,6 +97,8 @@ const CURATED = [
   "鼠牛虎兔蛇羊猴鸡狗猪白羊金牛双鱼巨蟹狮处女秤天蝎射手摩羯瓶座",
   // 3D UI 文案
   "返回总览点击进入宫位详情运限大限流飞入退出加载中切换视角长生沐浴冠带临帝衰病死墓绝胎养",
+  // 中宫/殿牌字面标签（Task 4/6 JSX 模板用字，缺失会渲染成隐形文字）
+  "公历农主化—",
   // ASCII（数字/标点/英文字母小写大写常用符号）
   "0123456789 ·.-~:()（）/",
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
@@ -143,6 +145,7 @@ async function getSourceFont() {
 
   const source = await getSourceFont();
   const woff = await subsetFont(source, text, { targetFormat: "woff" });
+  if (woff.length > 400 * 1024) throw new Error("子集异常偏大（>400KB），检查字形集是否混入大量无关字符");
 
   fs.mkdirSync(path.dirname(OUT_FONT), { recursive: true });
   fs.writeFileSync(OUT_FONT, woff);
@@ -158,8 +161,10 @@ async function getSourceFont() {
   );
 
   console.log(`OK: ${glyphSet.size} 字形 → ${OUT_FONT}（${(woff.length / 1024).toFixed(1)} KB）`);
-  if (woff.length > 400 * 1024) throw new Error("子集异常偏大（>400KB），检查字形集是否混入大量无关字符");
-})();
+})().catch((e) => {
+  console.error(e.message);
+  process.exit(1);
+});
 ```
 
 - [ ] **Step 3: 运行脚本生成字体**
