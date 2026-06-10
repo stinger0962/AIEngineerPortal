@@ -1,0 +1,95 @@
+"use client";
+
+import { useRef, useState } from "react";
+import { useFrame } from "@react-three/fiber";
+import { Text } from "@react-three/drei";
+import * as THREE from "three";
+import type { ZiweiPalace } from "@/lib/ziwei/types";
+import { CELL_W, CELL_D, PLATE_H, PLATE_EDGE, SOUL_EDGE, branchPosition } from "./layout";
+import { ZIWEI_FONT_URL, ZIWEI_GLYPHS } from "./glyphs";
+
+export type PalacePlateProps = {
+  palace: ZiweiPalace;
+  isSoulPalace: boolean;
+  dimmed: boolean;
+  onSelect: (branch: string) => void;
+};
+
+export function PalacePlate({ palace, isSoulPalace, dimmed, onSelect }: PalacePlateProps) {
+  const position = branchPosition(palace.earthlyBranch);
+  const [hovered, setHovered] = useState(false);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+
+  useFrame((_, delta) => {
+    if (!matRef.current) return;
+    const target = dimmed ? 0.04 : hovered ? 0.5 : isSoulPalace ? 0.3 : 0.16;
+    matRef.current.emissiveIntensity = THREE.MathUtils.lerp(matRef.current.emissiveIntensity, target, delta * 6);
+    const targetOpacity = dimmed ? 0.25 : 1;
+    matRef.current.opacity = THREE.MathUtils.lerp(matRef.current.opacity, targetOpacity, delta * 6);
+  });
+
+  if (!position) return null;
+  const edgeColor = isSoulPalace ? SOUL_EDGE : PLATE_EDGE;
+
+  return (
+    <group position={position}>
+      {/* 殿板 */}
+      <mesh
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect(palace.earthlyBranch);
+        }}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          setHovered(true);
+          document.body.style.cursor = "pointer";
+        }}
+        onPointerOut={() => {
+          setHovered(false);
+          document.body.style.cursor = "auto";
+        }}
+      >
+        <boxGeometry args={[CELL_W - 0.22, PLATE_H, CELL_D - 0.22]} />
+        <meshStandardMaterial
+          ref={matRef}
+          color="#1a1035"
+          emissive={edgeColor}
+          emissiveIntensity={0.16}
+          transparent
+          opacity={1}
+          roughness={0.55}
+          metalness={0.35}
+        />
+      </mesh>
+
+      {/* 宫名（板面前缘） */}
+      <Text
+        font={ZIWEI_FONT_URL}
+        characters={ZIWEI_GLYPHS}
+        fontSize={0.34}
+        color={dimmed ? "#4c3d77" : "#e9ddff"}
+        anchorX="right"
+        anchorY="bottom"
+        position={[CELL_W / 2 - 0.32, PLATE_H / 2 + 0.012, CELL_D / 2 - 0.34]}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        {palace.name}
+        {palace.isBodyPalace ? " ·身" : ""}
+      </Text>
+
+      {/* 干支 + 大限（板面前缘左侧小字） */}
+      <Text
+        font={ZIWEI_FONT_URL}
+        characters={ZIWEI_GLYPHS}
+        fontSize={0.2}
+        color={dimmed ? "#3c3060" : "#9d8bd6"}
+        anchorX="left"
+        anchorY="bottom"
+        position={[-CELL_W / 2 + 0.32, PLATE_H / 2 + 0.012, CELL_D / 2 - 0.34]}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        {`${palace.heavenlyStem}${palace.earthlyBranch} · ${palace.decadal.range[0]}-${palace.decadal.range[1]}`}
+      </Text>
+    </group>
+  );
+}

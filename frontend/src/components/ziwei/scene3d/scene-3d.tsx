@@ -2,11 +2,11 @@
 
 import { Suspense, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { CameraControls, PerformanceMonitor, Text } from "@react-three/drei";
+import { CameraControls, PerformanceMonitor } from "@react-three/drei";
 import type { ZiweiChart } from "@/lib/ziwei/types";
 import { Starfield } from "./starfield";
 import { SceneEffects } from "./effects";
-import { ZIWEI_FONT_URL, ZIWEI_GLYPHS } from "./glyphs";
+import { MysticBoard } from "./mystic-board";
 
 export type Scene3DProps = {
   chart: ZiweiChart;
@@ -14,7 +14,7 @@ export type Scene3DProps = {
   onSelectBranch: (branch: string | null) => void;
 };
 
-export default function Scene3D({ chart }: Scene3DProps) {
+export default function Scene3D({ chart, selectedBranch, onSelectBranch }: Scene3DProps) {
   const [quality, setQuality] = useState<"high" | "low">("high");
 
   return (
@@ -31,10 +31,7 @@ export default function Scene3D({ chart }: Scene3DProps) {
 
         <Suspense fallback={null}>
           <Starfield quality={quality} />
-          {/* 占位：Task 4 替换为 <MysticBoard /> */}
-          <Text font={ZIWEI_FONT_URL} characters={ZIWEI_GLYPHS} fontSize={1} color="#d8c8ff" position={[0, 0.5, 0]}>
-            {chart.fiveElementsClass}
-          </Text>
+          <MysticBoard chart={chart} selectedBranch={selectedBranch} onSelectBranch={onSelectBranch} />
           <SceneEffects quality={quality} />
         </Suspense>
 

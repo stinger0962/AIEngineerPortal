@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Sparkles, Stars } from "@react-three/drei";
 import * as THREE from "three";
@@ -24,6 +24,7 @@ function makeNebulaTexture(inner: string, outer: string): THREE.CanvasTexture {
 
 function Nebula({ position, scale, inner }: { position: [number, number, number]; scale: number; inner: string }) {
   const texture = useMemo(() => makeNebulaTexture(inner, "rgba(5,3,16,0)"), [inner]);
+  useEffect(() => () => texture.dispose(), [texture]); // GPU 纹理随组件卸载释放
   const ref = useRef<THREE.Sprite>(null);
   useFrame(({ clock }) => {
     if (!ref.current) return;
