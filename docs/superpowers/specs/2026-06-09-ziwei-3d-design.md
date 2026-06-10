@@ -106,17 +106,16 @@ backend/app/data/ziwei_knowledge/         ← patterns.json / stars.json / sihua
 
 **预算**：纳入门户现有每日 token 预算管控。
 
-## 7. 知识库构建（一次性离线脚本）
+## 7. 知识库构建（Phase 3a 勘误：移植而非提取）
 
-clone Renhuai123/ziwei-doushu → 提取脚本转换为 5 个 JSON：
+**侦察发现**：Renhuai123/ziwei-doushu 的「论断内容库」（逐星×逐宫解读）**不存在**（`STAR_DB={}` 空占位），README 宣称的「51.8万样本」**未随仓库发布**。仓库真实可用的是 `patterns.ts`（格局**检测函数**，非数据）、四化表、14 条主星简介、约 20KB 古籍选段。故实际做法为：
 
-- `patterns.json`：1100+ 行格局规则库 →（条件：星曜/宫位/四化组合，内容：释义+吉凶+建议）
-- `stars.json`：十四主星 + 辅星佐星释义（含各宫位表现）
-- `sihua.json`：四化飞星释义
-- `classics.json`：骨髓赋等古籍选段（按格局/星曜索引）
-- `personas.json`：三种人设 system prompt
+- **格局检测移植**（替代设想的 `patterns.json`）：把 `patterns.ts` 的 ~41 个格局检测器**移植为 Python**（`backend/app/services/ziwei/patterns.py`，适配 iztro chart_json），规则可判定、精确匹配、无需向量库。每个格局自带 `source` 古籍出处 → 免费获得引经据典能力。
+- **逐星逐宫论断**：仓库无此数据，由 **Claude 自身的紫微学养**承担解读 prose（现代 Claude 深谙紫微斗数）。
+- **人设**：`personas.py` 三种 system prompt（自撰）。
+- **四化/星曜基础**：iztro 排盘已含四化与星曜亮度，无需另提取。
 
-总量约几百 KB，进版本库；文件头与页面页脚标注数据来源（MIT 要求）。
+知识地基 = 命盘摘要（含 iztro 四化）+ 确定性格局检测（带出处）+ 人设 prompt + Claude 学养。署名「紫微研究」(MIT) 在移植文件头标注。
 
 ## 8. 四大场景
 

@@ -1,14 +1,23 @@
 """Ziwei Dou Shu (紫微斗数) profile endpoints."""
 import re
+from datetime import date, datetime
 from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.entities import ZiweiProfile
+from app.models.entities import (
+    AIFeedback,
+    User,
+    ZiweiConversation,
+    ZiweiMessage,
+    ZiweiProfile,
+)
+from app.services.ai_service import AIService
+from app.services.ziwei.oracle import ZiweiOracle
 
 router = APIRouter(prefix="/ziwei", tags=["ziwei"])
 
@@ -128,3 +137,88 @@ def delete_profile(profile_id: int, db: Session = Depends(get_db)):
     db.delete(profile)
     db.commit()
     return {"deleted": profile_id}
+
+
+class OracleRequest(BaseModel):
+    scenario: str = "natal"
+    message: str
+    conversation_id: Optional[int] = None
+
+
+def _get_user_id(db: Session) -> int:
+    return db.scalar(select(User.id).limit(1)) or 1
+
+
+@router.post("/profiles/{profile_id}/oracle")
+def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db)):
+    profile = db.get(ZiweiProfile, profile_id)
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+    if not (profile.chart_json or {}).get("palaces"):
+        raise HTTPException(400, "Profile has no chart data")
+
+    from app.core.config import get_settings
+    settings = get_settings()
+    svc = AIService()
+    if not svc.is_available:
+        raise HTTPException(503, "AI oracle is not available — no API key configured")
+
+    today_start = datetime.combine(date.today(), datetime.min.time())
+    used_today = db.scalar(
+        select(func.coalesce(func.sum(AIFeedback.input_tokens + AIFeedback.output_tokens), 0)).where(AIFeedback.created_at >= today_start)
+    ) or 0
+    if used_today >= settings.ai_daily_token_budget:
+        raise HTTPException(429, "Daily AI limit reached, try again tomorrow")
+
+    if payload.conversation_id:
+        conv = db.get(ZiweiConversation, payload.conversation_id)
+        if not conv or conv.profile_id != profile_id:
+            raise HTTPException(404, "Conversation not found")
+    else:
+        conv = ZiweiConversation(profile_id=profile_id, scenario=payload.scenario, title=payload.message[:40])
+        db.add(conv)
+        db.flush()  # assigns conv.id without committing; rolls back on failure
+
+    history = db.scalars(select(ZiweiMessage).where(ZiweiMessage.conversation_id == conv.id).order_by(ZiweiMessage.id.asc())).all()
+    messages = [{"role": m.role, "content": m.content} for m in history]
+    messages.append({"role": "user", "content": payload.message})
+
+    oracle = ZiweiOracle(client=svc.client, model=svc.model)
+    result = oracle.run(
+        chart_json=profile.chart_json, persona=profile.persona, scenario=payload.scenario,
+        portrait=profile.portrait_json or {}, messages=messages,
+    )
+    if result is None:
+        raise HTTPException(502, "解盘师一时失神，请稍后再问。")
+
+    meta = result["_meta"]
+    db.add(ZiweiMessage(conversation_id=conv.id, role="user", content=payload.message, chart_context_json={}))
+    db.add(ZiweiMessage(
+        conversation_id=conv.id, role="assistant", content=result["response"],
+        chart_context_json={"camera_commands": result["camera_commands"], "scenario": payload.scenario},
+    ))
+    db.add(AIFeedback(
+        user_id=_get_user_id(db), feature="ziwei_oracle", reference_id=profile_id,
+        user_input_hash="", prompt_template=None,
+        response_json={"response": result["response"], "camera_commands": result["camera_commands"]},
+        model=meta.get("model"), input_tokens=meta.get("input_tokens"),
+        output_tokens=meta.get("output_tokens"), latency_ms=meta.get("latency_ms"),
+    ))
+    db.commit()
+
+    return {
+        "conversation_id": conv.id, "response": result["response"],
+        "camera_commands": result["camera_commands"], "meta": meta,
+    }
+
+
+@router.get("/profiles/{profile_id}/conversations")
+def list_conversations(profile_id: int, db: Session = Depends(get_db)):
+    convs = db.scalars(select(ZiweiConversation).where(ZiweiConversation.profile_id == profile_id).order_by(ZiweiConversation.id.desc())).all()
+    return [{"id": c.id, "scenario": c.scenario, "title": c.title, "created_at": c.created_at.isoformat() if c.created_at else None} for c in convs]
+
+
+@router.get("/conversations/{conversation_id}/messages")
+def list_messages(conversation_id: int, db: Session = Depends(get_db)):
+    msgs = db.scalars(select(ZiweiMessage).where(ZiweiMessage.conversation_id == conversation_id).order_by(ZiweiMessage.id.asc())).all()
+    return [{"id": m.id, "role": m.role, "content": m.content, "chart_context_json": m.chart_context_json or {}, "created_at": m.created_at.isoformat() if m.created_at else None} for m in msgs]

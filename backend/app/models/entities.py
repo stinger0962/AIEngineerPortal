@@ -343,3 +343,27 @@ class ZiweiProfile(Base):
     portrait_json: Mapped[Dict] = mapped_column(JSON, default=dict)  # AI 蒸馏画像（Phase 4 使用）
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ZiweiConversation(Base):
+    __tablename__ = "ziwei_conversations"
+    __table_args__ = (Index("ix_ziwei_conv_profile", "profile_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(Integer, nullable=False)  # ZiweiProfile.id
+    scenario: Mapped[str] = mapped_column(String(20), default="natal")  # natal, horoscope, synastry, report
+    title: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ZiweiMessage(Base):
+    __tablename__ = "ziwei_messages"
+    __table_args__ = (Index("ix_ziwei_msg_conv", "conversation_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # user, assistant
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    chart_context_json: Mapped[Dict] = mapped_column(JSON, default=dict)  # 当时盘面上下文：focus宫位、流年年份等
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
