@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
-import { ChartGrid2D } from "@/components/ziwei/chart-grid-2d";
+import { ChartView } from "@/components/ziwei/chart-view";
 import { ProfileForm } from "@/components/ziwei/profile-form";
 import { hasChart, ziweiApi, type ZiweiProfileOut } from "@/lib/ziwei/api";
 import { RELATION_LABELS } from "@/lib/ziwei/constants";
@@ -118,7 +118,7 @@ export default function ZiweiPage() {
         {/* 命盘 */}
         <div>
           {chart ? (
-            <ChartGrid2D chart={chart} />
+            <ChartView chart={chart} />
           ) : (
             <div className="flex min-h-[400px] items-center justify-center rounded-[28px] border border-ink/10 bg-[#0a0618]">
               <p className="text-sm text-violet-300/50">
