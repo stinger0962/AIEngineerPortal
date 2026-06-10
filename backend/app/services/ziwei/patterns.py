@@ -99,7 +99,7 @@ def detect_yang_liang_chang_lu(chart: Chart, ming: Palace, out: list[Pattern]) -
     out.append(Pattern(
         name="阳梁昌禄",
         level="good" if breaking else "excellent",
-        description='太阳、天梁、文昌、禄存四星齐会命宫三方，号称"科举之星"，主清贵显达、考运极佳，宜走学术、文教、研究、专业认证之路，一生功名易就。',
+        description="太阳、天梁、文昌、禄存四星齐会命宫三方，号称“科举之星”，主清贵显达、考运极佳，宜走学术、文教、研究、专业认证之路，一生功名易就。",
         palaces=[p.name for p in (sun, liang) if p], source="《紫微斗数全书·阳梁昌禄格》",
         required=["太阳会命宫三方", "天梁会命宫三方", "文昌会命宫三方", "禄存会命宫三方"],
         bonus=bonus, breaking=breaking,
@@ -112,7 +112,7 @@ def detect_san_qi_jia_hui(chart: Chart, ming: Palace, out: list[Pattern]) -> Non
         return
     out.append(Pattern(
         name="三奇加会", level="excellent",
-        description='化禄、化权、化科三吉化齐会命宫三方四正，号称"三奇加会"。主一生功名、财富、贵人三全，是紫微斗数最高吉格之一。',
+        description="化禄、化权、化科三吉化齐会命宫三方四正，号称“三奇加会”。主一生功名、财富、贵人三全，是紫微斗数最高吉格之一。",
         palaces=[p.name for p in san_fang_palaces(chart)], source="《紫微斗数全书·三奇加会》",
         required=["化禄、化权、化科三吉化齐会命宫三方四正"],
     ))
