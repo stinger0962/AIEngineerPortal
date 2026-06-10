@@ -628,6 +628,7 @@ export function PalacePlate({ palace, isSoulPalace, dimmed, onSelect }: PalacePl
       {/* 殿板 */}
       <mesh
         onClick={(e) => {
+          if (e.delta > 2) return; // 拖拽旋转后松手不算点击（R3F 对象 onClick 没有自带位移过滤）
           e.stopPropagation();
           onSelect(palace.earthlyBranch);
         }}
@@ -1093,7 +1094,8 @@ function StarTablet({ star, major }: { star: ZiweiStar; major: boolean }) {
   const h = major ? 1.16 : 0.92;
   return (
     <Billboard>
-      <mesh>
+      {/* 注册 onClick 让殿牌成为命中目标——否则点殿牌会被当成 pointerMissed 弹回总览 */}
+      <mesh onClick={(e) => e.stopPropagation()}>
         <planeGeometry args={[w, h]} />
         <meshStandardMaterial
           color="#160b38"
@@ -1145,7 +1147,9 @@ export function PalaceInterior({ palace }: { palace: ZiweiPalace }) {
   });
 
   if (!center || stars.length === 0) return null;
-  const radius = Math.max(1.15, stars.length * 0.21);
+  // 半径封顶 2.1：飞入相机距宫心仅约 2.4-3.2，星多时环不能扫到相机后面；超出部分用上下错层吸收
+  const radius = Math.max(1.15, Math.min(2.1, stars.length * 0.21));
+  const staggered = stars.length > 10;
 
   return (
     <group position={[center[0], 1.05, center[2]]}>
@@ -1157,8 +1161,9 @@ export function PalaceInterior({ palace }: { palace: ZiweiPalace }) {
       <group ref={ringRef}>
         {stars.map(({ star, major }, i) => {
           const angle = (i / stars.length) * Math.PI * 2;
+          const y = staggered ? (i % 2 === 0 ? 0.25 : -0.25) : 0;
           return (
-            <group key={star.name} position={[Math.cos(angle) * radius, 0, Math.sin(angle) * radius]}>
+            <group key={star.name} position={[Math.cos(angle) * radius, y, Math.sin(angle) * radius]}>
               <StarTablet star={star} major={major} />
             </group>
           );

@@ -45,6 +45,7 @@ export function PalacePlate({ palace, isSoulPalace, dimmed, onSelect }: PalacePl
       {/* 殿板 */}
       <mesh
         onClick={(e) => {
+          if (e.delta > 2) return; // 拖拽旋转后松手不算点击（R3F 对象 onClick 没有自带位移过滤）
           e.stopPropagation();
           onSelect(palace.earthlyBranch);
         }}
