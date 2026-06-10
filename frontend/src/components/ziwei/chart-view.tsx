@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { ChartGrid2D } from "@/components/ziwei/chart-grid-2d";
 import type { ZiweiChart } from "@/lib/ziwei/types";
 
@@ -65,6 +65,14 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
 
   const show3d = mode === "3d" && webgl === true;
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedBranch(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <div className="relative overflow-hidden rounded-[28px] border border-violet-500/20 bg-[#050310] shadow-[0_20px_50px_rgba(91,33,182,0.25)]">
       {/* 模式切换（WebGL 不可用时隐藏 3D 选项） */}
@@ -89,6 +97,15 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
       {show3d ? (
         <div className="h-[72vh] min-h-[480px]">
           <Scene3D chart={chart} selectedBranch={selectedBranch} onSelectBranch={setSelectedBranch} />
+          {show3d && selectedBranch ? (
+            <button
+              type="button"
+              onClick={() => setSelectedBranch(null)}
+              className="absolute left-3 top-3 z-10 rounded-full border border-violet-500/40 bg-[#120a2e]/85 px-4 py-1.5 text-xs font-semibold text-violet-100 backdrop-blur transition-colors hover:bg-violet-600/40"
+            >
+              ← 返回总览
+            </button>
+          ) : null}
         </div>
       ) : (
         <div className="p-2 sm:p-3">

@@ -2,11 +2,13 @@
 
 import { Suspense, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { CameraControls, PerformanceMonitor } from "@react-three/drei";
+import { PerformanceMonitor } from "@react-three/drei";
 import type { ZiweiChart } from "@/lib/ziwei/types";
 import { Starfield } from "./starfield";
 import { SceneEffects } from "./effects";
 import { MysticBoard } from "./mystic-board";
+import { CameraRig } from "./camera-rig";
+import { PalaceInterior } from "./palace-interior";
 
 export type Scene3DProps = {
   chart: ZiweiChart;
@@ -16,12 +18,14 @@ export type Scene3DProps = {
 
 export default function Scene3D({ chart, selectedBranch, onSelectBranch }: Scene3DProps) {
   const [quality, setQuality] = useState<"high" | "low">("high");
+  const selectedPalace = chart.palaces.find((p) => p.earthlyBranch === selectedBranch) ?? null;
 
   return (
     <Canvas
       dpr={quality === "high" ? [1, 1.75] : 1}
       camera={{ position: [0, 12, 10.5], fov: 42 }}
       style={{ background: "#050310" }}
+      onPointerMissed={() => onSelectBranch(null)}
     >
       <PerformanceMonitor onDecline={() => setQuality("low")}>
         <color attach="background" args={["#050310"]} />
@@ -32,10 +36,11 @@ export default function Scene3D({ chart, selectedBranch, onSelectBranch }: Scene
         <Suspense fallback={null}>
           <Starfield quality={quality} />
           <MysticBoard chart={chart} selectedBranch={selectedBranch} onSelectBranch={onSelectBranch} />
+          {selectedPalace ? <PalaceInterior palace={selectedPalace} /> : null}
           <SceneEffects quality={quality} />
         </Suspense>
 
-        <CameraControls makeDefault minDistance={6} maxDistance={28} maxPolarAngle={Math.PI * 0.46} />
+        <CameraRig selectedBranch={selectedBranch} />
       </PerformanceMonitor>
     </Canvas>
   );
