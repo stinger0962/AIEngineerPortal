@@ -1,6 +1,16 @@
 import { API_BASE } from "@/lib/api";
 import type { ZiweiChart } from "./types";
 
+/** HTTP 层错误（区别于排盘错误），携带状态码与后端 detail */
+export class ZiweiApiError extends Error {
+  constructor(
+    public status: number,
+    detail?: string,
+  ) {
+    super(detail ?? `Request failed: ${status}`);
+  }
+}
+
 export type ZiweiProfileOut = {
   id: number;
   name: string;
@@ -34,9 +44,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    const err = await response.json().catch(() => null) as { detail?: unknown } | null;
+    throw new ZiweiApiError(response.status, typeof err?.detail === "string" ? err.detail : undefined);
   }
   return (await response.json()) as T;
+}
+
+/** chart_json 非空守卫（后端对缺失数据返回空对象） */
+export function hasChart(profile: ZiweiProfileOut): profile is ZiweiProfileOut & { chart_json: ZiweiChart } {
+  return "palaces" in profile.chart_json;
 }
 
 export const ziweiApi = {

@@ -691,6 +691,16 @@ git commit -m "feat(ziwei): iztro chart computation wrapper with normalized Ziwe
 import { API_BASE } from "@/lib/api";
 import type { ZiweiChart } from "./types";
 
+/** HTTP 层错误（区别于排盘错误），携带状态码与后端 detail */
+export class ZiweiApiError extends Error {
+  constructor(
+    public status: number,
+    detail?: string,
+  ) {
+    super(detail ?? `Request failed: ${status}`);
+  }
+}
+
 export type ZiweiProfileOut = {
   id: number;
   name: string;
@@ -724,9 +734,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     cache: "no-store",
   });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    const err = await response.json().catch(() => null);
+    throw new ZiweiApiError(response.status, typeof err?.detail === "string" ? err.detail : undefined);
   }
   return (await response.json()) as T;
+}
+
+/** chart_json 非空守卫（后端对缺失数据返回空对象） */
+export function hasChart(profile: ZiweiProfileOut): profile is ZiweiProfileOut & { chart_json: ZiweiChart } {
+  return "palaces" in profile.chart_json;
 }
 
 export const ziweiApi = {
@@ -920,7 +936,8 @@ git commit -m "feat(ziwei): 2D dark-cosmos natal chart grid component"
 import { useState } from "react";
 import { computeChart } from "@/lib/ziwei/chart";
 import { TIME_LABELS, RELATION_LABELS } from "@/lib/ziwei/constants";
-import { ziweiApi, type ZiweiProfileOut } from "@/lib/ziwei/api";
+import { ziweiApi, ZiweiApiError, type ZiweiProfileOut } from "@/lib/ziwei/api";
+import type { ZiweiChart } from "@/lib/ziwei/types";
 
 const inputCls =
   "w-full rounded-xl border border-violet-500/30 bg-[#120a2e] px-3 py-2 text-sm text-violet-100 placeholder:text-violet-300/30 focus:border-violet-400 focus:outline-none";
@@ -942,9 +959,19 @@ export function ProfileForm({ onCreated, onCancel }: { onCreated: (p: ZiweiProfi
     if (!name.trim()) return setError("请填写姓名/称呼");
     if (!/^\d{4}-\d{1,2}-\d{1,2}$/.test(birthDate)) return setError("生日格式应为 YYYY-M-D，例如 1990-8-16");
     setSubmitting(true);
+
+    // 第一段：浏览器内排盘——任何 throw 都是排盘/生辰问题
+    let chart: ZiweiChart;
     try {
-      // 浏览器内排盘——失败（极端生辰）会 throw，在此兜住
-      const chart = computeChart({ dateStr: birthDate, timeIndex, gender, isLunar, isLeapMonth });
+      chart = computeChart({ dateStr: birthDate, timeIndex, gender, isLunar, isLeapMonth });
+    } catch {
+      setError("排盘失败，请检查生辰是否正确");
+      setSubmitting(false);
+      return;
+    }
+
+    // 第二段：保存到后端——任何 throw（HTTP 错误或网络断连）都是保存问题
+    try {
       const profile = await ziweiApi.createProfile({
         name: name.trim(),
         relation,
@@ -957,7 +984,7 @@ export function ProfileForm({ onCreated, onCancel }: { onCreated: (p: ZiweiProfi
       });
       onCreated(profile);
     } catch (e) {
-      setError(e instanceof Error && e.message.startsWith("Request failed") ? "保存失败，请稍后重试" : "排盘失败，请检查生辰是否正确");
+      setError(e instanceof ZiweiApiError && e.status === 400 ? `保存被拒绝：${e.message}` : "保存失败，请稍后重试");
     } finally {
       setSubmitting(false);
     }
@@ -1082,9 +1109,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { ChartGrid2D } from "@/components/ziwei/chart-grid-2d";
 import { ProfileForm } from "@/components/ziwei/profile-form";
-import { ziweiApi, type ZiweiProfileOut } from "@/lib/ziwei/api";
+import { hasChart, ziweiApi, type ZiweiProfileOut } from "@/lib/ziwei/api";
 import { RELATION_LABELS } from "@/lib/ziwei/constants";
-import type { ZiweiChart } from "@/lib/ziwei/types";
 
 export default function ZiweiPage() {
   const [profiles, setProfiles] = useState<ZiweiProfileOut[]>([]);
@@ -1104,7 +1130,7 @@ export default function ZiweiPage() {
   }, []);
 
   const selected = useMemo(() => profiles.find((p) => p.id === selectedId) ?? null, [profiles, selectedId]);
-  const chart = selected && "palaces" in selected.chart_json ? (selected.chart_json as ZiweiChart) : null;
+  const chart = selected && hasChart(selected) ? selected.chart_json : null;
 
   const handleCreated = (profile: ZiweiProfileOut) => {
     setProfiles((prev) => [...prev, profile]);
