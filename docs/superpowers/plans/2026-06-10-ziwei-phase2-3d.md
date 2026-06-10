@@ -259,12 +259,16 @@ const Scene3D = dynamic(() => import("./scene3d/scene-3d"), {
 const VIEW_KEY = "ziwei-view-mode";
 
 function detectWebGL(): boolean {
-  try {
-    const canvas = document.createElement("canvas");
-    return Boolean(canvas.getContext("webgl2") ?? canvas.getContext("webgl"));
-  } catch {
-    return false;
-  }
+  // 每次探测用全新 canvas：getContext("webgl2") 失败也会锁定该 canvas 的 context 模式，
+  // 复用同一个 canvas 会让后续 "webgl" 探测恒为 null（老设备被误判为不支持）
+  const probe = (type: "webgl2" | "webgl") => {
+    try {
+      return Boolean(document.createElement("canvas").getContext(type));
+    } catch {
+      return false;
+    }
+  };
+  return probe("webgl2") || probe("webgl");
 }
 
 export function ChartView({ chart }: { chart: ZiweiChart }) {
@@ -273,15 +277,32 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
   const [mode, setMode] = useState<"3d" | "2d">("3d");
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
 
-  useEffect(() => {
+  // 档案切换时重置选宫（不能用 key 重挂——那会销毁 WebGL 上下文重跑检测）
+  const [prevChart, setPrevChart] = useState(chart);
+  if (prevChart !== chart) {
+    setPrevChart(chart);
+    setSelectedBranch(null);
+  }
+
+  // useLayoutEffect：在首帧绘制前定下 webgl/mode，避免 2D 盘闪现一帧再切 3D
+  useLayoutEffect(() => {
     setWebgl(detectWebGL());
-    const saved = window.localStorage.getItem(VIEW_KEY);
-    if (saved === "2d" || saved === "3d") setMode(saved);
+    try {
+      const saved = window.localStorage.getItem(VIEW_KEY);
+      if (saved === "2d" || saved === "3d") setMode(saved);
+    } catch {
+      // 隐私模式下 localStorage 可能直接 throw——持久化本就尽力而为
+    }
   }, []);
 
   const switchMode = (next: "3d" | "2d") => {
     setMode(next);
-    window.localStorage.setItem(VIEW_KEY, next);
+    setSelectedBranch(null); // 模式往返不保留选宫（约定：3D→2D→3D 回到总览）
+    try {
+      window.localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // 同上
+    }
   };
 
   const show3d = mode === "3d" && webgl === true;
@@ -295,6 +316,7 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
             <button
               key={m}
               type="button"
+              aria-pressed={mode === m}
               onClick={() => switchMode(m)}
               className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
                 mode === m ? "bg-violet-600 text-white" : "text-violet-300/70 hover:text-violet-100"
@@ -1161,7 +1183,7 @@ useEffect(() => {
 }, []);
 ```
 
-切换到 2D 模式时清空选宫：`switchMode` 里加 `setSelectedBranch(null)`。
+（`switchMode` 清空选宫已在 Task 2 的修复轮实现，无需重复。）
 
 - [ ] **Step 5: 验证 + Commit**
 
