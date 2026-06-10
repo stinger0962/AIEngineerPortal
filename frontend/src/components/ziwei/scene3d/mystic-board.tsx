@@ -25,7 +25,7 @@ function CenterPlate({ chart }: { chart: ZiweiChart }) {
       </mesh>
       {lines.map((line, i) => (
         <Text
-          key={line}
+          key={i}
           font={ZIWEI_FONT_URL}
           characters={ZIWEI_GLYPHS}
           fontSize={i === 0 ? 0.5 : 0.26}

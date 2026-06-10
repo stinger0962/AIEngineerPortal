@@ -384,7 +384,7 @@ git commit -m "feat(ziwei): ChartView container with WebGL detection, 3D/2D togg
 ```tsx
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Sparkles, Stars } from "@react-three/drei";
 import * as THREE from "three";
@@ -408,6 +408,7 @@ function makeNebulaTexture(inner: string, outer: string): THREE.CanvasTexture {
 
 function Nebula({ position, scale, inner }: { position: [number, number, number]; scale: number; inner: string }) {
   const texture = useMemo(() => makeNebulaTexture(inner, "rgba(5,3,16,0)"), [inner]);
+  useEffect(() => () => texture.dispose(), [texture]); // GPU 纹理随组件卸载释放
   const ref = useRef<THREE.Sprite>(null);
   useFrame(({ clock }) => {
     if (!ref.current) return;
@@ -583,7 +584,7 @@ export const PLATE_EDGE = "#8b5cf6";
 ```tsx
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import * as THREE from "three";
@@ -601,14 +602,22 @@ export type PalacePlateProps = {
 export function PalacePlate({ palace, isSoulPalace, dimmed, onSelect }: PalacePlateProps) {
   const position = branchPosition(palace.earthlyBranch);
   const [hovered, setHovered] = useState(false);
+  const hoveredRef = useRef(false);
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
+
+  // 悬停中卸载（如 webglcontextlost 回退）时恢复指针——onPointerOut 不会再触发
+  useEffect(() => () => {
+    if (hoveredRef.current) document.body.style.cursor = "auto";
+  }, []);
 
   useFrame((_, delta) => {
     if (!matRef.current) return;
-    const target = dimmed ? 0.04 : hovered ? 0.5 : isSoulPalace ? 0.3 : 0.16;
-    matRef.current.emissiveIntensity = THREE.MathUtils.lerp(matRef.current.emissiveIntensity, target, delta * 6);
+    // 1-exp(-k·dt)：帧率无关、且 t 恒在 (0,1)——裸 delta*6 在后台标签页恢复时会 >1 导致过冲闪烁
+    const t = 1 - Math.exp(-6 * delta);
+    const target = dimmed ? (hovered ? 0.12 : 0.04) : hovered ? 0.5 : isSoulPalace ? 0.3 : 0.16;
+    matRef.current.emissiveIntensity = THREE.MathUtils.lerp(matRef.current.emissiveIntensity, target, t);
     const targetOpacity = dimmed ? 0.25 : 1;
-    matRef.current.opacity = THREE.MathUtils.lerp(matRef.current.opacity, targetOpacity, delta * 6);
+    matRef.current.opacity = THREE.MathUtils.lerp(matRef.current.opacity, targetOpacity, t);
   });
 
   if (!position) return null;
@@ -625,10 +634,12 @@ export function PalacePlate({ palace, isSoulPalace, dimmed, onSelect }: PalacePl
         onPointerOver={(e) => {
           e.stopPropagation();
           setHovered(true);
+          hoveredRef.current = true;
           document.body.style.cursor = "pointer";
         }}
         onPointerOut={() => {
           setHovered(false);
+          hoveredRef.current = false;
           document.body.style.cursor = "auto";
         }}
       >
@@ -712,7 +723,7 @@ function CenterPlate({ chart }: { chart: ZiweiChart }) {
       </mesh>
       {lines.map((line, i) => (
         <Text
-          key={line}
+          key={i}
           font={ZIWEI_FONT_URL}
           characters={ZIWEI_GLYPHS}
           fontSize={i === 0 ? 0.5 : 0.26}
