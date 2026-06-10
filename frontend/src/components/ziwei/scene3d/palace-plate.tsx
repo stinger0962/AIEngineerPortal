@@ -7,6 +7,7 @@ import * as THREE from "three";
 import type { ZiweiPalace } from "@/lib/ziwei/types";
 import { CELL_W, CELL_D, PLATE_H, PLATE_EDGE, SOUL_EDGE, branchPosition } from "./layout";
 import { ZIWEI_FONT_URL, ZIWEI_GLYPHS } from "./glyphs";
+import { StarOrb } from "./star-orb";
 
 export type PalacePlateProps = {
   palace: ZiweiPalace;
@@ -100,6 +101,32 @@ export function PalacePlate({ palace, isSoulPalace, dimmed, onSelect }: PalacePl
       >
         {`${palace.heavenlyStem}${palace.earthlyBranch} · ${palace.decadal.range[0]}-${palace.decadal.range[1]}`}
       </Text>
+
+      {/* 星曜光球：主星排后、辅星排前（杂曜不在总览渲染） */}
+      {palace.majorStars.map((star, i) => (
+        <StarOrb
+          key={star.name}
+          star={star}
+          major
+          dimmed={dimmed}
+          position={[(i - (palace.majorStars.length - 1) / 2) * 0.78, 0.46, -CELL_D / 2 + 1.0]}
+        />
+      ))}
+      {palace.minorStars.slice(0, 8).map((star, i) => {
+        const perRow = 4;
+        const row = Math.floor(i / perRow);
+        const indexInRow = i % perRow;
+        const rowCount = Math.min(palace.minorStars.length - row * perRow, perRow);
+        return (
+          <StarOrb
+            key={star.name}
+            star={star}
+            major={false}
+            dimmed={dimmed}
+            position={[(indexInRow - (rowCount - 1) / 2) * 0.52, 0.32, -CELL_D / 2 + 1.78 + row * 0.5]}
+          />
+        );
+      })}
     </group>
   );
 }

@@ -5,6 +5,7 @@ import { Text } from "@react-three/drei";
 import type { ZiweiChart } from "@/lib/ziwei/types";
 import { CELL_W, CELL_D, PLATE_H } from "./layout";
 import { PalacePlate } from "./palace-plate";
+import { SihuaBeams } from "./sihua-beams";
 import { ZIWEI_FONT_URL, ZIWEI_GLYPHS } from "./glyphs";
 
 function CenterPlate({ chart }: { chart: ZiweiChart }) {
@@ -62,6 +63,7 @@ export function MysticBoard({ chart, selectedBranch, onSelectBranch, children }:
         />
       ))}
       <CenterPlate chart={chart} />
+      <SihuaBeams chart={chart} visible={selectedBranch === null} />
       {children}
     </group>
   );
