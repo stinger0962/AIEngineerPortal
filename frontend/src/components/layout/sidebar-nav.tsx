@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Brain, Briefcase, FileText, Gauge, GraduationCap, Menu, MessageSquare, Search, Settings, SquareTerminal, BookOpen, Wrench, X } from "lucide-react";
+import { Brain, Briefcase, FileText, Gauge, GraduationCap, Menu, MessageSquare, Search, Settings, Sparkles, SquareTerminal, BookOpen, Wrench, X } from "lucide-react";
 
 const items = [
   { href: "/", label: "Dashboard", icon: Gauge },
@@ -14,6 +14,7 @@ const items = [
   { href: "/projects", label: "Portfolio", icon: Briefcase },
   { href: "/resume", label: "Resume", icon: FileText },
   { href: "/toolkits", label: "蒸馏所", icon: Wrench },
+  { href: "/ziwei", label: "紫微斗数", icon: Sparkles },
   { href: "/jobs/live", label: "Jobs", icon: Search },
   { href: "/copilot", label: "Copilot", icon: MessageSquare },
   { href: "/settings", label: "Settings", icon: Settings },
