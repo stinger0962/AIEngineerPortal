@@ -325,3 +325,21 @@ class Summary(Base):
     mindmap_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ZiweiProfile(Base):
+    __tablename__ = "ziwei_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    relation: Mapped[str] = mapped_column(String(20), default="self")  # self, family, friend
+    gender: Mapped[str] = mapped_column(String(10), nullable=False)  # male, female
+    birth_date: Mapped[str] = mapped_column(String(10), nullable=False)  # YYYY-MM-DD（农历输入时为农历 Y-M-D）
+    birth_time_index: Mapped[int] = mapped_column(Integer, nullable=False)  # 时辰 0-12（0=早子时, 12=晚子时）
+    is_lunar_input: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_leap_month: Mapped[bool] = mapped_column(Boolean, default=False)
+    chart_json: Mapped[Dict] = mapped_column(JSON, default=dict)  # 归一化 ZiweiChart（前端 iztro 排盘结果）
+    persona: Mapped[str] = mapped_column(String(20), default="sage")  # sage, taoist, analyst
+    portrait_json: Mapped[Dict] = mapped_column(JSON, default=dict)  # AI 蒸馏画像（Phase 4 使用）
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
