@@ -101,7 +101,7 @@ def update_profile(profile_id: int, payload: ProfileUpdate, db: Session = Depend
     if not profile:
         raise HTTPException(404, "Profile not found")
 
-    updates = payload.model_dump(exclude_unset=True)
+    updates = payload.model_dump(exclude_unset=True, exclude_none=True)  # 列均非空，显式 null 视为无操作
     if "relation" in updates:
         _validate("relation", updates["relation"], VALID_RELATIONS)
     if "gender" in updates:

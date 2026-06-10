@@ -260,6 +260,17 @@ def test_get_update_delete_profile():
     deleted = client.delete(f"/api/v1/ziwei/profiles/{pid}")
     assert deleted.status_code == 200
     assert client.get(f"/api/v1/ziwei/profiles/{pid}").status_code == 404
+
+
+def test_update_profile_ignores_explicit_nulls():
+    created = client.post("/api/v1/ziwei/profiles", json=VALID_PAYLOAD).json()
+    pid = created["id"]
+
+    # 显式 null 不应导致 500：列均非空，null 视为无操作
+    response = client.put(f"/api/v1/ziwei/profiles/{pid}", json={"birth_date": None, "name": None})
+    assert response.status_code == 200
+    assert response.json()["birth_date"] == VALID_PAYLOAD["birth_date"]
+    assert response.json()["name"] == VALID_PAYLOAD["name"]
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -375,7 +386,7 @@ def update_profile(profile_id: int, payload: ProfileUpdate, db: Session = Depend
     if not profile:
         raise HTTPException(404, "Profile not found")
 
-    updates = payload.model_dump(exclude_unset=True)
+    updates = payload.model_dump(exclude_unset=True, exclude_none=True)  # 列均非空，显式 null 视为无操作
     if "relation" in updates:
         _validate("relation", updates["relation"], VALID_RELATIONS)
     if "gender" in updates:
@@ -413,7 +424,7 @@ api_router.include_router(ziwei.router)
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cd backend; python -m pytest tests/test_ziwei_routes.py -v`
-Expected: PASS (6 passed)
+Expected: PASS (7 passed)
 
 - [ ] **Step 5: 跑全量后端测试防回归**
 

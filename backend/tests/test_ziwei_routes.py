@@ -102,3 +102,14 @@ def test_get_update_delete_profile():
     deleted = client.delete(f"/api/v1/ziwei/profiles/{pid}")
     assert deleted.status_code == 200
     assert client.get(f"/api/v1/ziwei/profiles/{pid}").status_code == 404
+
+
+def test_update_profile_ignores_explicit_nulls():
+    created = client.post("/api/v1/ziwei/profiles", json=VALID_PAYLOAD).json()
+    pid = created["id"]
+
+    # 显式 null 不应导致 500：列均非空，null 视为无操作
+    response = client.put(f"/api/v1/ziwei/profiles/{pid}", json={"birth_date": None, "name": None})
+    assert response.status_code == 200
+    assert response.json()["birth_date"] == VALID_PAYLOAD["birth_date"]
+    assert response.json()["name"] == VALID_PAYLOAD["name"]
