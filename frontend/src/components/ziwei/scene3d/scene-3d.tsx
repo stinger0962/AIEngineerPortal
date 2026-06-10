@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import { PerformanceMonitor } from "@react-three/drei";
 import type { ZiweiChart } from "@/lib/ziwei/types";
@@ -19,6 +19,8 @@ export type Scene3DProps = {
 
 export default function Scene3D({ chart, selectedBranch, onSelectBranch, onRenderError }: Scene3DProps) {
   const [quality, setQuality] = useState<"high" | "low">("high");
+  const disposedRef = useRef(false);
+  useEffect(() => () => void (disposedRef.current = true), []);
   const selectedPalace = chart.palaces.find((p) => p.earthlyBranch === selectedBranch) ?? null;
 
   return (
@@ -28,7 +30,14 @@ export default function Scene3D({ chart, selectedBranch, onSelectBranch, onRende
       style={{ background: "#050310" }}
       onPointerMissed={() => onSelectBranch(null)}
       onCreated={({ gl }) => {
-        gl.domElement.addEventListener("webglcontextlost", () => onRenderError?.(), { once: true });
+        if (gl.getContext().isContextLost()) onRenderError?.();
+        gl.domElement.addEventListener(
+          "webglcontextlost",
+          () => {
+            if (!disposedRef.current) onRenderError?.(); // 卸载善后的 forceContextLoss 不算故障
+          },
+          { once: true },
+        );
       }}
     >
       <PerformanceMonitor onDecline={() => setQuality("low")}>

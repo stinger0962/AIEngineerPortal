@@ -62,6 +62,7 @@ export function MysticBoard({ chart, selectedBranch, onSelectBranch, children }:
   useFrame((_, delta) => {
     if (!groupRef.current) return;
     if (reducedMotion) progressRef.current = 1;
+    if (progressRef.current >= 1) return; // 动画完成后不再每帧写位置
     progressRef.current = Math.min(1, progressRef.current + delta / 1.2);
     const eased = 1 - Math.pow(1 - progressRef.current, 3);
     groupRef.current.position.y = -1.2 * (1 - eased);

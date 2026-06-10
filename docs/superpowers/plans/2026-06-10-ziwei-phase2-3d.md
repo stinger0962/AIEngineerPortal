@@ -1250,6 +1250,7 @@ const reducedMotion = useReducedMotion();
 useFrame((_, delta) => {
   if (!groupRef.current) return;
   if (reducedMotion) progressRef.current = 1;
+  if (progressRef.current >= 1) return; // 动画完成后不再每帧写位置
   progressRef.current = Math.min(1, progressRef.current + delta / 1.2);
   const eased = 1 - Math.pow(1 - progressRef.current, 3);
   groupRef.current.position.y = -1.2 * (1 - eased);
@@ -1260,11 +1261,22 @@ useFrame((_, delta) => {
 
 - [ ] **Step 2: 渲染异常回退 2D**
 
-`chart-view.tsx`：加 `renderFailed` state；传给 3D 容器一个 `onRenderError` 回调。`scene-3d.tsx` 的 `<Canvas onCreated={...}>` 用 `gl.getContext().isContextLost()` 初检，并监听 `webglcontextlost`：
+`chart-view.tsx`：加 `renderFailed` state；传给 3D 容器一个 `onRenderError` 回调。`scene-3d.tsx` 的 `<Canvas onCreated={...}>` 用 `gl.getContext().isContextLost()` 初检，并监听 `webglcontextlost`。
+**关键防误报**：R3F 在 Canvas 卸载后约 500ms 会 `forceContextLoss()`（fiber 源码已核实）——正常切 2D 也会触发该事件，必须用卸载标记过滤，否则每次切换模式都误报「渲染中断」：
 
 ```tsx
+const disposedRef = useRef(false);
+useEffect(() => () => void (disposedRef.current = true), []);
+// ...
 onCreated={({ gl }) => {
-  gl.domElement.addEventListener("webglcontextlost", () => onRenderError?.(), { once: true });
+  if (gl.getContext().isContextLost()) onRenderError?.();
+  gl.domElement.addEventListener(
+    "webglcontextlost",
+    () => {
+      if (!disposedRef.current) onRenderError?.(); // 卸载善后的 forceContextLoss 不算故障
+    },
+    { once: true },
+  );
 }}
 ```
 
