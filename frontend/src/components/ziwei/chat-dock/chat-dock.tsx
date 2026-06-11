@@ -5,7 +5,7 @@ import { ziweiApi, ZiweiApiError } from "@/lib/ziwei/api";
 import type { ZiweiChart } from "@/lib/ziwei/types";
 import type { TermInfo } from "@/components/ziwei/term-card";
 import type { ChatMessage, DockState } from "./types";
-import { fireCamera } from "./camera";
+import { useOracleTour } from "./use-oracle-tour";
 import { PersonaSwitch } from "./persona-switch";
 import { HistoryPanel } from "./history-panel";
 
@@ -13,12 +13,13 @@ type ChatDockProps = {
   profileId: number;
   persona: string;
   chart: ZiweiChart;
-  onFocusBranch: (branch: string | null) => void; // Task 5 回放镜头用
-  onTerm: (t: TermInfo | null) => void; // Task 5 回放术语卡用
-  onPersonaChange: (next: string) => void; // Task 6 persona 切换冒泡
+  onFocusBranch: (branch: string | null) => void;
+  onTerm: (t: TermInfo | null) => void;
+  onPersonaChange: (next: string) => void;
+  onTourActiveChange: (active: boolean) => void;
 };
 
-export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onPersonaChange }: ChatDockProps) {
+export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onPersonaChange, onTourActiveChange }: ChatDockProps) {
   const [dock, setDock] = useState<DockState>("normal");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -29,6 +30,32 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null); // 中止进行中的流式解盘
+
+  const tour = useOracleTour();
+  const [caption, setCaption] = useState<string | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [audioHintSeen, setAudioHintSeen] = useState(true); // 默认不显，挂载后读 localStorage 决定
+
+  useEffect(() => {
+    try {
+      setAudioHintSeen(window.localStorage.getItem("ziwei-audio-hint") === "1");
+    } catch {
+      setAudioHintSeen(true);
+    }
+  }, []);
+
+  const dismissAudioHint = () => {
+    setAudioHintSeen(true);
+    try { window.localStorage.setItem("ziwei-audio-hint", "1"); } catch { /* 隐私模式忽略 */ }
+  };
+
+  const toggleMuted = () => {
+    setMuted((m) => {
+      const next = !m;
+      tour.setMuted(next);
+      return next;
+    });
+  };
 
   const handlePersonaChanged = (next: string) => {
     onPersonaChange(next);
@@ -41,16 +68,20 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
   if (prevId !== profileId) {
     setPrevId(profileId);
     abortRef.current?.abort(); // 切档案时中止上一条流，避免镜头/文本串台
+    tour.cancel();
     setMessages([]);
     setConversationId(null);
     setError(null);
     setInput("");
+    setCaption(null);
     setShowHistory(false);
   }
 
   // 载入历史会话：直接展示（不回放），并以该会话 id 续聊
   const handleLoadConversation = (loadedConversationId: number, mapped: ChatMessage[]) => {
     abortRef.current?.abort();
+    tour.cancel();
+    setCaption(null);
     setMessages(mapped);
     setConversationId(loadedConversationId);
     setShowHistory(false);
@@ -65,7 +96,8 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     const message = input.trim();
     if (!message || loading) return;
 
-    abortRef.current?.abort(); // 新提问时中止仍在流的上一条
+    abortRef.current?.abort();
+    tour.cancel();
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -76,56 +108,37 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
       userMsg,
       { id: assistantId, role: "assistant", content: "", pending: true },
     ]);
-    setLoading(true); // 首段文字到达前显示「凝神观盘」
+    setLoading(true);
     setError(null);
     setInput("");
+    setCaption(null);
 
     const reqProfileId = profileId;
-    const stale = () => reqProfileId !== profileId || controller.signal.aborted;
-    let acc = "";
-    let gotText = false;
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    const { queue, handlers } = tour.begin();
+    tour.setMuted(muted);
+
+    const setAssistant = (content: string, pending: boolean) =>
+      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content, pending } : m)));
+
+    const playPromise = tour.play(queue, {
+      chart,
+      onFocusBranch,
+      onTerm,
+      onCaption: (c) => { if (reqProfileId === profileId) setCaption(c); },
+      onReveal: (full) => { if (reqProfileId === profileId) { setLoading(false); setAssistant(full, false); } },
+      onTourActiveChange,
+      reducedMotion: reduced,
+    });
 
     try {
-      await ziweiApi.streamOracle(
-        profileId,
-        { scenario: "natal", message, conversation_id: conversationId ?? undefined },
-        {
-          onText: (delta) => {
-            if (stale()) return;
-            gotText = true;
-            setLoading(false);
-            acc += delta;
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: acc } : m)),
-            );
-          },
-          onCamera: (cmd) => {
-            if (stale()) return;
-            fireCamera(cmd, { chart, onFocusBranch, onTerm });
-          },
-          onDone: (cid) => {
-            if (stale()) return;
-            setConversationId(cid);
-            setLoading(false);
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, pending: false } : m)),
-            );
-          },
-          onError: () => {
-            if (controller.signal.aborted) return;
-            // 后端已尽力保住半截；保留已铺文本、停笔；全空则提示失败
-            setLoading(false);
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, pending: false } : m)),
-            );
-            if (!gotText) setError("解盘暂不可用，请稍后再试");
-          },
-        },
-        controller.signal,
-      );
+      await ziweiApi.streamOracle(profileId, { scenario: "natal", message, conversation_id: conversationId ?? undefined }, handlers, controller.signal);
     } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return; // 主动中止，静默
-      // 开流前的校验错误：移除空的助手气泡并本地化提示
+      tour.cancel(); // 关队列让 play 退出（校验错误或 abort）
+      if (e instanceof DOMException && e.name === "AbortError") { await playPromise; return; }
       setMessages((prev) => prev.filter((m) => !(m.id === assistantId && m.content === "")));
       if (e instanceof ZiweiApiError) {
         if (e.status === 503) setError("解盘师未启用（缺少 API Key）");
@@ -135,7 +148,14 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
         setError("解盘暂不可用，请稍后再试");
       }
       setLoading(false);
+      setCaption(null);
+      await playPromise;
+      return;
     }
+
+    await playPromise;
+    if (reqProfileId === profileId && queue.convId !== null) setConversationId(queue.convId);
+    setLoading(false);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -227,6 +247,12 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
         <>
       {/* 消息区 */}
       <div ref={scrollRef} className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
+        {!audioHintSeen ? (
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-violet-500/30 bg-violet-600/10 px-3 py-2 text-xs text-violet-200">
+            <span>🔊 解读将有声朗读，可随时静音</span>
+            <button type="button" onClick={dismissAudioHint} className="text-violet-300/70 hover:text-violet-100">知道了</button>
+          </div>
+        ) : null}
         {messages.length === 0 && !loading ? (
           <p className="text-xs leading-relaxed text-violet-300/60">
             向解盘师提问，例如「我今年的事业运如何？」
@@ -242,10 +268,22 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
             </div>
           ) : (
             <div key={m.id} className="whitespace-pre-wrap text-sm leading-relaxed text-violet-100">
-              {m.content}
-              {m.pending ? (
-                <span className="animate-pulse text-violet-300/70">▌</span>
-              ) : null}
+              {m.pending && !m.content ? (
+                <div className="flex items-center gap-2 text-violet-300/80">
+                  <span className="animate-pulse">✦ 解盘师正在解读{caption ?? ""}</span>
+                  <button type="button" onClick={toggleMuted} aria-label={muted ? "取消静音" : "静音"} className="rounded px-1.5 py-0.5 text-xs text-violet-300/70 hover:text-violet-100">
+                    {muted ? "🔇" : "🔊"}
+                  </button>
+                  <button type="button" onClick={tour.skip} className="rounded px-1.5 py-0.5 text-xs text-violet-300/70 hover:text-violet-100">
+                    直接看文字
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {m.content}
+                  {m.pending ? <span className="animate-pulse text-violet-300/70">▌</span> : null}
+                </>
+              )}
             </div>
           ),
         )}
