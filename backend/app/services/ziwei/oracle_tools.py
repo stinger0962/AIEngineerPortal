@@ -42,6 +42,9 @@ def parse_markers(text: str) -> tuple[str, list[dict], list[dict]]:
         pos = m.end()
         if cmd is None:
             continue  # 非法标记（如未知宫位）→ 丢弃指令，文字继续累积
+        # 去重：与上一条镜头指令完全相同（如连飞同一宫）则并入文字、不重复触发
+        if camera_commands and camera_commands[-1] == cmd:
+            continue
         camera_commands.append(cmd)
         segments.append({"text": buf.strip(), "commands": [cmd]})
         buf = ""

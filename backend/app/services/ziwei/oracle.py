@@ -40,9 +40,10 @@ class ZiweiOracle:
             "命宫/兄弟/夫妻/子女/财帛/疾厄/迁移/仆役/官禄/田宅/福德/父母。\n"
             "- 回到整体视角时插入 [[overview]]。\n"
             "- 解释生僻术语时插入 [[term:术语|一句话白话解释]]。\n"
-            "整段解读自然地飞 2-4 次镜头即可，标记紧跟在相关句子之后。\n"
+            "整段解读只在最关键的 2-4 处飞镜头，标记紧跟在相关句子之后，不要每宫都飞、不要重复飞同一宫。\n"
             "例如：「你命宫紫微坐守，气象不凡。[[focus:命宫]] 再看财帛，武曲化禄，财源稳健。[[focus:财帛]]」\n"
-            "## 输出\n用清晰中文解读，可读性优先。除上述内联标记外正常说话，不要输出 JSON 或代码块。"
+            "## 输出\n解读简洁有重点、直击要害，控制在约 350-550 字（用户明确要求详尽时才展开）。"
+            "可读性优先，除上述内联标记外正常说话，不要输出 JSON 或代码块。"
         )
         return "".join(parts)
 
@@ -60,7 +61,7 @@ class ZiweiOracle:
         start = time.time()
         try:
             response = self.client.messages.create(
-                model=self.model, max_tokens=2600, system=system_prompt,
+                model=self.model, max_tokens=1200, system=system_prompt,
                 messages=claude_messages, timeout=60.0,
             )
         except Exception:

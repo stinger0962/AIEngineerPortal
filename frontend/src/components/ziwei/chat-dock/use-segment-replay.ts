@@ -53,15 +53,18 @@ export function useSegmentReplay() {
       if (cancelRef.current) break;
       const text = seg.text ?? "";
       if (deps.reducedMotion || text.length === 0) {
-        acc += (acc ? "\n\n" : "") + text;
-        deps.onText(acc);
+        // 空文本段（如纯镜头指令）不追加分隔符，避免瞬时多空行
+        if (text.length > 0) {
+          acc += (acc ? "\n\n" : "") + text;
+          deps.onText(acc);
+        }
       } else {
         acc += acc ? "\n\n" : "";
-        for (let i = 0; i < text.length; i += 2) {
+        for (let i = 0; i < text.length; i += 4) {
           if (cancelRef.current) break;
-          acc += text.slice(i, i + 2);
+          acc += text.slice(i, i + 4);
           deps.onText(acc);
-          await sleep(18);
+          await sleep(12);
         }
       }
       if (cancelRef.current) break;
