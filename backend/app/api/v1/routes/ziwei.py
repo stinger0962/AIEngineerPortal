@@ -195,7 +195,7 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
     db.add(ZiweiMessage(conversation_id=conv.id, role="user", content=payload.message, chart_context_json={}))
     db.add(ZiweiMessage(
         conversation_id=conv.id, role="assistant", content=result["response"],
-        chart_context_json={"camera_commands": result["camera_commands"], "scenario": payload.scenario},
+        chart_context_json={"camera_commands": result["camera_commands"], "segments": result.get("segments", []), "scenario": payload.scenario},
     ))
     db.add(AIFeedback(
         user_id=_get_user_id(db), feature="ziwei_oracle", reference_id=profile_id,
@@ -208,7 +208,7 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
 
     return {
         "conversation_id": conv.id, "response": result["response"],
-        "camera_commands": result["camera_commands"], "meta": meta,
+        "camera_commands": result["camera_commands"], "segments": result.get("segments", []), "meta": meta,
     }
 
 

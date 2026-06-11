@@ -176,6 +176,10 @@ def test_ask_oracle_creates_conversation_and_persists():
     assert body["response"] == CANNED_TEXT
     assert isinstance(body["camera_commands"], list)
     assert isinstance(body["meta"], dict)
+    # segments: the canned response has one text block → one segment
+    assert isinstance(body["segments"], list)
+    assert len(body["segments"]) >= 1
+    assert body["segments"][0]["text"] == CANNED_TEXT
     conv_id = body["conversation_id"]
 
     rc = client.get(f"/api/v1/ziwei/profiles/{pid}/conversations")
@@ -191,6 +195,12 @@ def test_ask_oracle_creates_conversation_and_persists():
     assert msgs[0]["role"] == "user"
     assert msgs[1]["role"] == "assistant"
     assert msgs[1]["content"] == CANNED_TEXT
+    # segments persisted in chart_context_json of assistant message
+    ctx = msgs[1]["chart_context_json"]
+    assert "segments" in ctx
+    assert isinstance(ctx["segments"], list)
+    assert len(ctx["segments"]) >= 1
+    assert ctx["segments"][0]["text"] == CANNED_TEXT
 
 
 def test_ask_oracle_404_unknown_profile():

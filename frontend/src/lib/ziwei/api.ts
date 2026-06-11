@@ -60,11 +60,23 @@ export type CameraCommand =
   | { type: "overview" }
   | { type: "explain_term"; term: string; explanation: string };
 
+export type OracleSegment = { text: string; commands: CameraCommand[] };
+
 export type OracleReply = {
   conversation_id: number;
   response: string;
   camera_commands: CameraCommand[];
+  segments: OracleSegment[];
   meta: { model?: string; total_tokens?: number; latency_ms?: number; rounds?: number };
+};
+
+export type ConversationOut = { id: number; scenario: string; title: string; created_at: string | null };
+export type MessageOut = {
+  id: number;
+  role: string;
+  content: string;
+  chart_context_json: { camera_commands?: CameraCommand[]; segments?: OracleSegment[]; scenario?: string };
+  created_at: string | null;
 };
 
 export type OracleAsk = { scenario: string; message: string; conversation_id?: number };
@@ -79,4 +91,8 @@ export const ziweiApi = {
     request<{ deleted: number }>(`/ziwei/profiles/${id}`, { method: "DELETE" }),
   askOracle: (profileId: number, body: OracleAsk) =>
     request<OracleReply>(`/ziwei/profiles/${profileId}/oracle`, { method: "POST", body: JSON.stringify(body) }),
+  listConversations: (profileId: number) =>
+    request<ConversationOut[]>(`/ziwei/profiles/${profileId}/conversations`),
+  listMessages: (conversationId: number) =>
+    request<MessageOut[]>(`/ziwei/conversations/${conversationId}/messages`),
 };
