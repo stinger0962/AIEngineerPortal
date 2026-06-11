@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ziweiApi, ZiweiApiError } from "@/lib/ziwei/api";
 import type { ZiweiChart } from "@/lib/ziwei/types";
 import type { TermInfo } from "@/components/ziwei/term-card";
 import type { ChatMessage, DockState } from "./types";
+import { useSegmentReplay } from "./use-segment-replay";
 
 type ChatDockProps = {
   profileId: number;
@@ -23,26 +24,32 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm }: C
   const [conversationId, setConversationId] = useState<number | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const replay = useSegmentReplay();
+
+  // persona 将在 Task 6 中使用；此处先保持引用。
+  void persona;
 
   // 档案切换时重置对话——渲染期重置（避免 effect 滞后一帧）
   const [prevId, setPrevId] = useState(profileId);
   if (prevId !== profileId) {
     setPrevId(profileId);
+    replay.cancel(); // 切档案时中止上一条回放，避免镜头/文本串台
     setMessages([]);
     setConversationId(null);
     setError(null);
     setInput("");
   }
 
-  // onFocusBranch / onTerm / chart 将在 Task 5（分段回放）中使用；此处先接入并保持引用。
-  void onFocusBranch;
-  void onTerm;
-  void chart;
-  void persona;
+  // 自动滚动到最新消息
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages, loading]);
 
   const handleSend = async () => {
     const message = input.trim();
     if (!message || loading) return;
+
+    replay.cancel(); // 新提问时中止仍在播放的上一条回放
 
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content: message };
     setMessages((prev) => [...prev, userMsg]);
@@ -50,21 +57,55 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm }: C
     setError(null);
     setInput("");
 
+    const reqProfileId = profileId;
     try {
       const reply = await ziweiApi.askOracle(profileId, {
         scenario: "natal",
         message,
         conversation_id: conversationId ?? undefined,
       });
+      // 网络等待期间若切换了档案，丢弃这条过期回复
+      if (reqProfileId !== profileId) return;
+
       setConversationId(reply.conversation_id);
-      const assistantMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: reply.response,
-        segments: reply.segments,
-        cameras: reply.camera_commands,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
+      const segs =
+        reply.segments && reply.segments.length
+          ? reply.segments
+          : [{ text: reply.response, commands: reply.camera_commands }];
+
+      const assistantId = crypto.randomUUID();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: assistantId,
+          role: "assistant",
+          content: "",
+          segments: reply.segments,
+          cameras: reply.camera_commands,
+          pending: true,
+        },
+      ]);
+      // 回复已到达：停掉加载态，转入逐段回放（打字 + 镜头）
+      setLoading(false);
+
+      const reduced =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+      await replay.play(segs, {
+        chart,
+        onText: (full) =>
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, content: full } : m)),
+          ),
+        onFocusBranch,
+        onTerm,
+        reducedMotion: reduced,
+      });
+
+      setMessages((prev) =>
+        prev.map((m) => (m.id === assistantId ? { ...m, pending: false } : m)),
+      );
     } catch (e) {
       if (e instanceof ZiweiApiError) {
         if (e.status === 503) setError("解盘师未启用（缺少 API Key）");
@@ -73,7 +114,6 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm }: C
       } else {
         setError("解盘暂不可用，请稍后再试");
       }
-    } finally {
       setLoading(false);
     }
   };
