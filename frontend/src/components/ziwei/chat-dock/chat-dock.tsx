@@ -78,6 +78,28 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     setShowHistory(false);
   }
 
+  // 历史「重新解读」：用已存 segments 重跑编排（不调 AI、不入库）。
+  const replayMessage = (m: ChatMessage) => {
+    if (!m.segments || m.segments.length === 0) return;
+    abortRef.current?.abort();
+    tour.cancel();
+    setCaption(null);
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const queue = tour.beginFromSegments(m.segments);
+    tour.setMuted(muted);
+    void tour.play(queue, {
+      chart,
+      onFocusBranch,
+      onTerm,
+      onCaption: setCaption,
+      onReveal: () => { /* 历史正文已在气泡，无需改写 */ },
+      onTourActiveChange,
+      reducedMotion: reduced,
+    });
+  };
+
   // 载入历史会话：直接展示（不回放），并以该会话 id 续聊
   const handleLoadConversation = (loadedConversationId: number, mapped: ChatMessage[]) => {
     abortRef.current?.abort();
@@ -284,6 +306,13 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
                 <>
                   {m.content}
                   {m.pending ? <span className="animate-pulse text-violet-300/70">▌</span> : null}
+                  {!m.pending && m.segments && m.segments.length > 0 ? (
+                    <div className="mt-1">
+                      <button type="button" onClick={() => replayMessage(m)} className="text-xs text-violet-300/60 hover:text-violet-100">
+                        ▶ 重新解读
+                      </button>
+                    </div>
+                  ) : null}
                 </>
               )}
             </div>
