@@ -291,3 +291,39 @@ def test_oracle_forces_text_on_final_round_when_tools_exhausted():
     assert "tools" not in client.calls[-1]
     assert result["camera_commands"]  # focus_palace commands collected along the way
     assert result["_meta"]["rounds"] == 6
+
+
+# ────────────────────────────────────────────────────────────────
+# Test 6: narration interleaved with tool_use across rounds must all be preserved
+# (the prod bug: only the final round's text was kept, so multi-palace guided
+# readings came back nearly empty even though the camera flew everywhere).
+# ────────────────────────────────────────────────────────────────
+
+def test_oracle_accumulates_interleaved_text_across_rounds():
+    r1 = _fake_response(
+        stop_reason="tool_use",
+        content=[_fake_text_block("先看官禄宫，武曲坐守。"), _fake_tool_use_block("focus_palace", {"palace": "官禄"}, "t1")],
+    )
+    r2 = _fake_response(
+        stop_reason="tool_use",
+        content=[_fake_text_block("再看财帛宫，太阴化禄。"), _fake_tool_use_block("focus_palace", {"palace": "财帛"}, "t2")],
+    )
+    r3 = _fake_response(stop_reason="end_turn", content=[_fake_text_block("综上，事业财运俱佳。")])
+    client = FakeClient([r1, r2, r3])
+    oracle = ZiweiOracle(client=client, model="claude-test")
+
+    result = oracle.run(
+        chart_json=SIMPLE_CHART,
+        persona="sage",
+        scenario="natal",
+        portrait={},
+        messages=SIMPLE_MESSAGES,
+    )
+
+    assert result is not None
+    # every round's narration is preserved, not just the final one
+    assert "先看官禄宫，武曲坐守。" in result["response"]
+    assert "再看财帛宫，太阴化禄。" in result["response"]
+    assert "综上，事业财运俱佳。" in result["response"]
+    assert len(result["camera_commands"]) == 2
+    assert result["_meta"]["rounds"] == 3

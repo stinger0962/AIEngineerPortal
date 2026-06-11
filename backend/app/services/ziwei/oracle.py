@@ -52,12 +52,24 @@ class ZiweiOracle:
         system_prompt = self._system_prompt(chart_json, persona, scenario, portrait)
         claude_messages = messages[-10:] if len(messages) > 10 else list(messages)
         camera_commands: list[dict] = []
+        text_parts: list[str] = []  # 累积每一轮的讲解文字（模型常「边讲边 focus」，文字与工具同 response）
         in_tok = out_tok = 0
         start = time.time()
 
+        def _result(rounds: int) -> dict:
+            return {
+                "response": "\n\n".join(t for t in (p.strip() for p in text_parts) if t),
+                "camera_commands": camera_commands,
+                "_meta": {
+                    "model": self.model, "input_tokens": in_tok, "output_tokens": out_tok,
+                    "total_tokens": in_tok + out_tok, "latency_ms": int((time.time() - start) * 1000),
+                    "rounds": rounds,
+                },
+            }
+
         for round_num in range(1, max_rounds + 1):
             # 最后一轮去掉工具，逼模型必出文字——否则多宫位问题（如「事业方向」会连续 focus
-            # 官禄/财帛/迁移…）可能把 tool_use 轮数耗尽却始终没给最终解读，导致返回 None。
+            # 官禄/财帛/迁移…）可能把 tool_use 轮数耗尽却始终没给最终解读。
             create_kwargs: dict = dict(
                 model=self.model, max_tokens=2200, system=system_prompt,
                 messages=claude_messages, timeout=40.0,
@@ -67,9 +79,14 @@ class ZiweiOracle:
             try:
                 response = self.client.messages.create(**create_kwargs)
             except Exception:
-                return None
+                return _result(round_num) if text_parts else None
             in_tok += response.usage.input_tokens
             out_tok += response.usage.output_tokens
+
+            # 收集本轮的讲解文字（无论是否还要继续 tool_use）
+            for block in response.content:
+                if block.type == "text" and block.text.strip():
+                    text_parts.append(block.text)
 
             if response.stop_reason == "tool_use":
                 tool_results = []
@@ -83,14 +100,5 @@ class ZiweiOracle:
                 claude_messages.append({"role": "user", "content": tool_results})
                 continue
 
-            text = "".join(b.text for b in response.content if b.type == "text").strip()
-            return {
-                "response": text,
-                "camera_commands": camera_commands,
-                "_meta": {
-                    "model": self.model, "input_tokens": in_tok, "output_tokens": out_tok,
-                    "total_tokens": in_tok + out_tok, "latency_ms": int((time.time() - start) * 1000),
-                    "rounds": round_num,
-                },
-            }
-        return None
+            return _result(round_num)
+        return _result(max_rounds) if text_parts else None
