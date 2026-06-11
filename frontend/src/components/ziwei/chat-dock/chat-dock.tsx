@@ -7,6 +7,7 @@ import type { TermInfo } from "@/components/ziwei/term-card";
 import type { ChatMessage, DockState } from "./types";
 import { useSegmentReplay } from "./use-segment-replay";
 import { PersonaSwitch } from "./persona-switch";
+import { HistoryPanel } from "./history-panel";
 
 type ChatDockProps = {
   profileId: number;
@@ -24,6 +25,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<number | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const replay = useSegmentReplay();
@@ -43,7 +45,16 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     setConversationId(null);
     setError(null);
     setInput("");
+    setShowHistory(false);
   }
+
+  // 载入历史会话：直接展示（不回放），并以该会话 id 续聊
+  const handleLoadConversation = (loadedConversationId: number, mapped: ChatMessage[]) => {
+    replay.cancel();
+    setMessages(mapped);
+    setConversationId(loadedConversationId);
+    setShowHistory(false);
+  };
 
   // 自动滚动到最新消息
   useEffect(() => {
@@ -178,20 +189,38 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
                 </button>
               </>
             ) : (
-              <button
-                type="button"
-                aria-label="缩小对话"
-                onClick={() => setDock("normal")}
-                className="rounded-md px-1.5 py-0.5 text-violet-300/70 transition-colors hover:text-violet-100"
-              >
-                ⤡
-              </button>
+              <>
+                <button
+                  type="button"
+                  aria-label="历史会话"
+                  onClick={() => setShowHistory(true)}
+                  className="rounded-md px-1.5 py-0.5 text-violet-300/70 transition-colors hover:text-violet-100"
+                >
+                  历史
+                </button>
+                <button
+                  type="button"
+                  aria-label="缩小对话"
+                  onClick={() => setDock("normal")}
+                  className="rounded-md px-1.5 py-0.5 text-violet-300/70 transition-colors hover:text-violet-100"
+                >
+                  ⤡
+                </button>
+              </>
             )}
           </div>
         </div>
         <PersonaSwitch profileId={profileId} persona={persona} onChanged={handlePersonaChanged} />
       </div>
 
+      {showHistory && dock === "expanded" ? (
+        <HistoryPanel
+          profileId={profileId}
+          onClose={() => setShowHistory(false)}
+          onLoad={handleLoadConversation}
+        />
+      ) : (
+        <>
       {/* 消息区 */}
       <div ref={scrollRef} className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
         {messages.length === 0 && !loading ? (
@@ -242,6 +271,8 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
           {loading ? "解盘中…" : "问"}
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }
