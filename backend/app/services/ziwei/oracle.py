@@ -47,7 +47,7 @@ class ZiweiOracle:
         scenario: str,
         portrait: dict,
         messages: list[dict],
-        max_rounds: int = 4,
+        max_rounds: int = 6,
     ) -> Optional[dict]:
         system_prompt = self._system_prompt(chart_json, persona, scenario, portrait)
         claude_messages = messages[-10:] if len(messages) > 10 else list(messages)
@@ -56,11 +56,16 @@ class ZiweiOracle:
         start = time.time()
 
         for round_num in range(1, max_rounds + 1):
+            # 最后一轮去掉工具，逼模型必出文字——否则多宫位问题（如「事业方向」会连续 focus
+            # 官禄/财帛/迁移…）可能把 tool_use 轮数耗尽却始终没给最终解读，导致返回 None。
+            create_kwargs: dict = dict(
+                model=self.model, max_tokens=2200, system=system_prompt,
+                messages=claude_messages, timeout=40.0,
+            )
+            if round_num < max_rounds:
+                create_kwargs["tools"] = TOOL_SCHEMAS
             try:
-                response = self.client.messages.create(
-                    model=self.model, max_tokens=2200, system=system_prompt,
-                    messages=claude_messages, tools=TOOL_SCHEMAS, timeout=40.0,
-                )
+                response = self.client.messages.create(**create_kwargs)
             except Exception:
                 return None
             in_tok += response.usage.input_tokens

@@ -240,3 +240,54 @@ def test_oracle_invalid_palace_not_collected():
     # Loop continued and returned the text
     assert result["response"] == "综合论断如下……"
     assert result["_meta"]["rounds"] == 2
+
+
+# ────────────────────────────────────────────────────────────────
+# Test 5: a question that keeps calling focus_palace must still return text —
+# the final round drops tools, forcing a text answer instead of None (the prod
+# 502 bug: multi-palace questions exhausted the tool_use rounds before answering).
+# ────────────────────────────────────────────────────────────────
+
+def test_oracle_forces_text_on_final_round_when_tools_exhausted():
+    class GreedyToolClient:
+        """Returns tool_use whenever tools are offered; text once tools are withheld."""
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        class _Messages:
+            def __init__(self, outer: "GreedyToolClient") -> None:
+                self._outer = outer
+
+            def create(self, **kwargs: Any) -> Any:
+                self._outer.calls.append(kwargs)
+                if "tools" in kwargs:
+                    return _fake_response(
+                        stop_reason="tool_use",
+                        content=[_fake_tool_use_block("focus_palace", {"palace": "官禄"}, f"t{len(self._outer.calls)}")],
+                    )
+                return _fake_response(stop_reason="end_turn", content=[_fake_text_block("综合来看，事业宜……")])
+
+        @property
+        def messages(self) -> "_Messages":
+            return self._Messages(self)
+
+    client = GreedyToolClient()
+    oracle = ZiweiOracle(client=client, model="claude-test")
+
+    result = oracle.run(
+        chart_json=SIMPLE_CHART,
+        persona="sage",
+        scenario="natal",
+        portrait={},
+        messages=[{"role": "user", "content": "事业方向？"}],
+    )
+
+    assert result is not None  # must NOT return None despite greedy tool calls
+    assert result["response"] == "综合来看，事业宜……"
+    # default max_rounds=6: rounds 1-5 offer tools, round 6 drops tools → forced text
+    assert len(client.calls) == 6
+    assert "tools" in client.calls[0]
+    assert "tools" not in client.calls[-1]
+    assert result["camera_commands"]  # focus_palace commands collected along the way
+    assert result["_meta"]["rounds"] == 6
