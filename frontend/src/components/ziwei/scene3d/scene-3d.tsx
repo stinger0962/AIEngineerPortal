@@ -15,9 +15,10 @@ export type Scene3DProps = {
   selectedBranch: string | null;
   onSelectBranch: (branch: string | null) => void;
   onRenderError?: () => void;
+  tourActive?: boolean;
 };
 
-export default function Scene3D({ chart, selectedBranch, onSelectBranch, onRenderError }: Scene3DProps) {
+export default function Scene3D({ chart, selectedBranch, onSelectBranch, onRenderError, tourActive }: Scene3DProps) {
   const [quality, setQuality] = useState<"high" | "low">("high");
   const disposedRef = useRef(false);
   useEffect(() => () => void (disposedRef.current = true), []);
@@ -53,7 +54,7 @@ export default function Scene3D({ chart, selectedBranch, onSelectBranch, onRende
           <SceneEffects quality={quality} />
         </Suspense>
 
-        <CameraRig selectedBranch={selectedBranch} />
+        <CameraRig selectedBranch={selectedBranch} smoothTime={tourActive ? 1.5 : 0.45} />
       </PerformanceMonitor>
     </Canvas>
   );

@@ -33,10 +33,12 @@ export function ChartView({
   chart,
   selectedBranch,
   onSelectBranch,
+  tourActive,
 }: {
   chart: ZiweiChart;
   selectedBranch: string | null;
   onSelectBranch: (b: string | null) => void;
+  tourActive?: boolean;
 }) {
   // null = 检测中（SSR 安全：首帧渲染 2D，挂载后决定）
   const [webgl, setWebgl] = useState<boolean | null>(null);
@@ -103,6 +105,7 @@ export function ChartView({
             selectedBranch={selectedBranch}
             onSelectBranch={onSelectBranch}
             onRenderError={() => setRenderFailed(true)}
+            tourActive={tourActive}
           />
           {show3d && selectedBranch ? (
             <button

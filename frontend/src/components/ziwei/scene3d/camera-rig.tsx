@@ -14,7 +14,7 @@ export function useReducedMotion(): boolean {
 }
 
 /** selectedBranch 变化时执行一镜到底运镜；用户拖拽随时可打断（CameraControls 原生支持） */
-export function CameraRig({ selectedBranch }: { selectedBranch: string | null }) {
+export function CameraRig({ selectedBranch, smoothTime = 0.45 }: { selectedBranch: string | null; smoothTime?: number }) {
   const controlsRef = useRef<CameraControlsImpl>(null);
   const reducedMotion = useReducedMotion();
 
@@ -46,7 +46,7 @@ export function CameraRig({ selectedBranch }: { selectedBranch: string | null })
       minDistance={3}
       maxDistance={28}
       maxPolarAngle={Math.PI * 0.46}
-      smoothTime={0.45}
+      smoothTime={smoothTime}
     />
   );
 }
