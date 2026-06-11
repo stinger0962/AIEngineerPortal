@@ -29,19 +29,19 @@ function detectWebGL(): boolean {
   return probe("webgl2") || probe("webgl");
 }
 
-export function ChartView({ chart }: { chart: ZiweiChart }) {
+export function ChartView({
+  chart,
+  selectedBranch,
+  onSelectBranch,
+}: {
+  chart: ZiweiChart;
+  selectedBranch: string | null;
+  onSelectBranch: (b: string | null) => void;
+}) {
   // null = 检测中（SSR 安全：首帧渲染 2D，挂载后决定）
   const [webgl, setWebgl] = useState<boolean | null>(null);
   const [mode, setMode] = useState<"3d" | "2d">("3d");
-  const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
   const [renderFailed, setRenderFailed] = useState(false);
-
-  // 档案切换时重置选宫（不能用 key 重挂——那会销毁 WebGL 上下文重跑检测）
-  const [prevChart, setPrevChart] = useState(chart);
-  if (prevChart !== chart) {
-    setPrevChart(chart);
-    setSelectedBranch(null);
-  }
 
   // useLayoutEffect：在首帧绘制前定下 webgl/mode，避免 2D 盘闪现一帧再切 3D
   useLayoutEffect(() => {
@@ -56,7 +56,7 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
 
   const switchMode = (next: "3d" | "2d") => {
     setMode(next);
-    setSelectedBranch(null); // 模式往返不保留选宫（约定：3D→2D→3D 回到总览）
+    onSelectBranch(null); // 模式往返不保留选宫（约定：3D→2D→3D 回到总览）
     if (next === "3d") setRenderFailed(false); // 用户主动重试 3D 时清除渲染失败标记
     try {
       window.localStorage.setItem(VIEW_KEY, next);
@@ -69,7 +69,7 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelectedBranch(null);
+      if (e.key === "Escape") onSelectBranch(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -101,13 +101,13 @@ export function ChartView({ chart }: { chart: ZiweiChart }) {
           <Scene3D
             chart={chart}
             selectedBranch={selectedBranch}
-            onSelectBranch={setSelectedBranch}
+            onSelectBranch={onSelectBranch}
             onRenderError={() => setRenderFailed(true)}
           />
           {show3d && selectedBranch ? (
             <button
               type="button"
-              onClick={() => setSelectedBranch(null)}
+              onClick={() => onSelectBranch(null)}
               className="absolute left-3 top-3 z-10 rounded-full border border-violet-500/40 bg-[#120a2e]/85 px-4 py-2 text-xs font-semibold text-violet-100 backdrop-blur transition-colors hover:bg-violet-600/40"
             >
               ← 返回总览
