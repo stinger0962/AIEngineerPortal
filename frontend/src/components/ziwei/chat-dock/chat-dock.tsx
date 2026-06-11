@@ -74,6 +74,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     setError(null);
     setInput("");
     setCaption(null);
+    setLoading(false); // 中止进行中的解读后解锁输入（abort 走 AbortError 分支不复位 loading）
     setShowHistory(false);
   }
 
@@ -82,6 +83,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     abortRef.current?.abort();
     tour.cancel();
     setCaption(null);
+    setLoading(false); // 中止进行中的解读后解锁输入
     setMessages(mapped);
     setConversationId(loadedConversationId);
     setShowHistory(false);
@@ -287,7 +289,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
             </div>
           ),
         )}
-        {loading ? (
+        {loading && !messages.some((m) => m.role === "assistant" && m.pending) ? (
           <p className="animate-pulse text-sm text-violet-300/70">解盘师凝神观盘……</p>
         ) : null}
         {error ? (
