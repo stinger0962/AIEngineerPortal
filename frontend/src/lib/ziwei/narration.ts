@@ -1,5 +1,4 @@
 // frontend/src/lib/ziwei/narration.ts
-"use client";
 
 /** 一段解说的播放源：speak 在朗读结束（或定时结束）时 resolve；cancel 立即停止。
  * V1 用浏览器 SpeechSynthesis；V2 只需新增 CloudNarration，指挥器与 UI 不变。 */
@@ -17,6 +16,7 @@ export function estimateDuration(text: string): number {
 /** 浏览器内置语音（默认方案）。挑 zh-CN 嗓音，语速略慢契合解盘调性。 */
 export class BrowserNarration implements NarrationSource {
   private current: SpeechSynthesisUtterance | null = null;
+  private resolveFn: (() => void) | null = null;
 
   static isSupported(): boolean {
     return typeof window !== "undefined" && "speechSynthesis" in window;
@@ -33,23 +33,29 @@ export class BrowserNarration implements NarrationSource {
 
   speak(text: string): Promise<void> {
     if (!BrowserNarration.isSupported() || !text.trim()) return Promise.resolve();
+    this.cancel(); // 掐断任何上一句，避免排队叠播
     return new Promise<void>((resolve) => {
       const u = new SpeechSynthesisUtterance(text);
       u.lang = "zh-CN";
       u.rate = 0.92;
       const voice = this.pickVoice();
       if (voice) u.voice = voice;
-      // onend 与 onerror 都 resolve：朗读失败时降级为静默继续，绝不卡死指挥器
-      u.onend = () => { this.current = null; resolve(); };
-      u.onerror = () => { this.current = null; resolve(); };
+      // onend 与 onerror 都收尾 resolve：朗读失败时降级为静默继续，绝不卡死调用方
+      const settle = () => { this.current = null; this.resolveFn = null; resolve(); };
+      u.onend = settle;
+      u.onerror = settle;
       this.current = u;
+      this.resolveFn = resolve;
       window.speechSynthesis.speak(u);
     });
   }
 
   cancel(): void {
+    const r = this.resolveFn;
     this.current = null;
+    this.resolveFn = null;
     if (BrowserNarration.isSupported()) window.speechSynthesis.cancel();
+    r?.(); // 主动 resolve 在途 Promise——不依赖浏览器是否补发 onend/onerror（Safari 可能都不发）
   }
 }
 
