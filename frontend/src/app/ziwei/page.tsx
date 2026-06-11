@@ -117,7 +117,14 @@ export default function ZiweiPage() {
         {/* 命盘 */}
         <div>
           {selected && hasChart(selected) ? (
-            <ZiweiWorkspace profile={selected} />
+            <ZiweiWorkspace
+              profile={selected}
+              onPersonaChange={(next) =>
+                setProfiles((prev) =>
+                  prev.map((p) => (p.id === selected.id ? { ...p, persona: next } : p)),
+                )
+              }
+            />
           ) : (
             <div className="flex min-h-[400px] items-center justify-center rounded-[28px] border border-ink/10 bg-[#0a0618]">
               <p className="text-sm text-violet-300/50">

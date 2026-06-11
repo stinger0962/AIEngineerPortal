@@ -6,6 +6,7 @@ import type { ZiweiChart } from "@/lib/ziwei/types";
 import type { TermInfo } from "@/components/ziwei/term-card";
 import type { ChatMessage, DockState } from "./types";
 import { useSegmentReplay } from "./use-segment-replay";
+import { PersonaSwitch } from "./persona-switch";
 
 type ChatDockProps = {
   profileId: number;
@@ -13,9 +14,10 @@ type ChatDockProps = {
   chart: ZiweiChart;
   onFocusBranch: (branch: string | null) => void; // Task 5 回放镜头用
   onTerm: (t: TermInfo | null) => void; // Task 5 回放术语卡用
+  onPersonaChange: (next: string) => void; // Task 6 persona 切换冒泡
 };
 
-export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm }: ChatDockProps) {
+export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onPersonaChange }: ChatDockProps) {
   const [dock, setDock] = useState<DockState>("normal");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,8 +28,11 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm }: C
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const replay = useSegmentReplay();
 
-  // persona 将在 Task 6 中使用；此处先保持引用。
-  void persona;
+  const handlePersonaChanged = (next: string) => {
+    onPersonaChange(next);
+    // Persona change requires a fresh conversation context (new system prompt voice)
+    setConversationId(null);
+  };
 
   // 档案切换时重置对话——渲染期重置（避免 effect 滞后一帧）
   const [prevId, setPrevId] = useState(profileId);
@@ -149,39 +154,42 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm }: C
   return (
     <div className={containerClass}>
       {/* 顶栏 */}
-      <div className="flex items-center justify-between gap-2 border-b border-violet-500/20 px-4 py-2.5">
-        <span className="text-sm font-semibold tracking-wide text-violet-100">✦ 解盘师</span>
-        <div className="flex items-center gap-1">
-          {dock === "normal" ? (
-            <>
+      <div className="flex flex-col gap-1.5 border-b border-violet-500/20 px-4 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold tracking-wide text-violet-100">✦ 解盘师</span>
+          <div className="flex items-center gap-1">
+            {dock === "normal" ? (
+              <>
+                <button
+                  type="button"
+                  aria-label="全屏对话"
+                  onClick={() => setDock("expanded")}
+                  className="rounded-md px-1.5 py-0.5 text-violet-300/70 transition-colors hover:text-violet-100"
+                >
+                  ⤢
+                </button>
+                <button
+                  type="button"
+                  aria-label="收起解盘师"
+                  onClick={() => setDock("collapsed")}
+                  className="rounded-md px-1.5 py-0.5 text-violet-300/70 transition-colors hover:text-violet-100"
+                >
+                  ﹣
+                </button>
+              </>
+            ) : (
               <button
                 type="button"
-                aria-label="全屏对话"
-                onClick={() => setDock("expanded")}
+                aria-label="缩小对话"
+                onClick={() => setDock("normal")}
                 className="rounded-md px-1.5 py-0.5 text-violet-300/70 transition-colors hover:text-violet-100"
               >
-                ⤢
+                ⤡
               </button>
-              <button
-                type="button"
-                aria-label="收起解盘师"
-                onClick={() => setDock("collapsed")}
-                className="rounded-md px-1.5 py-0.5 text-violet-300/70 transition-colors hover:text-violet-100"
-              >
-                ﹣
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              aria-label="缩小对话"
-              onClick={() => setDock("normal")}
-              className="rounded-md px-1.5 py-0.5 text-violet-300/70 transition-colors hover:text-violet-100"
-            >
-              ⤡
-            </button>
-          )}
+            )}
+          </div>
         </div>
+        <PersonaSwitch profileId={profileId} persona={persona} onChanged={handlePersonaChanged} />
       </div>
 
       {/* 消息区 */}

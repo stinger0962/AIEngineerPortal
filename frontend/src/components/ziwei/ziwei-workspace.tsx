@@ -6,7 +6,13 @@ import { ChatDock } from "./chat-dock/chat-dock";
 import { TermCard, type TermInfo } from "./term-card";
 import { hasChart, type ZiweiProfileOut } from "@/lib/ziwei/api";
 
-export function ZiweiWorkspace({ profile }: { profile: ZiweiProfileOut }) {
+export function ZiweiWorkspace({
+  profile,
+  onPersonaChange,
+}: {
+  profile: ZiweiProfileOut;
+  onPersonaChange?: (next: string) => void;
+}) {
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
   const [term, setTerm] = useState<TermInfo | null>(null);
 
@@ -31,6 +37,7 @@ export function ZiweiWorkspace({ profile }: { profile: ZiweiProfileOut }) {
         chart={chart}
         onFocusBranch={setSelectedBranch}
         onTerm={setTerm}
+        onPersonaChange={onPersonaChange ?? (() => {})}
       />
     </div>
   );
