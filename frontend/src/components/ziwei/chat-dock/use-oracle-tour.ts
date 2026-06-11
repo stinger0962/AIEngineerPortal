@@ -74,19 +74,24 @@ export function useOracleTour() {
   const silentRef = useRef<NarrationSource>(new SilentNarration());
   const mutedRef = useRef(false);
   const skippedRef = useRef(false);
-  const cancelledRef = useRef(false);
+  // 每次解读一枚身份令牌：play 进入时捕获，runRef 一旦被换（cancel 或新解读 begin）即视为作废，
+  // 避免「快速再问」时旧的 play 循环复活、把镜头/文字泼到新解读上。
+  const runRef = useRef<object>({});
 
+  // 仅依据 mute 选源；作废与否由 play 的令牌检查负责（作废的循环根本走不到 speak）。
   const getNarration = (): NarrationSource => {
-    if (mutedRef.current || cancelledRef.current) return silentRef.current;
+    if (mutedRef.current) return silentRef.current;
     if (!browserRef.current) browserRef.current = new BrowserNarration();
     return browserRef.current;
   };
 
   const begin = useCallback((): { queue: BeatQueue; handlers: OracleStreamHandlers } => {
+    const token = {};
+    runRef.current = token;
+    queueRef.current = null;
+    skippedRef.current = false;
     const queue = new BeatQueue();
     queueRef.current = queue;
-    skippedRef.current = false;
-    cancelledRef.current = false;
     let buf = "";
     const handlers: OracleStreamHandlers = {
       onText: (delta) => { buf += delta; },
@@ -106,6 +111,8 @@ export function useOracleTour() {
   }, []);
 
   const play = useCallback(async (queue: BeatQueue, deps: TourDeps): Promise<void> => {
+    const myToken = runRef.current;
+    const isStale = () => runRef.current !== myToken;
     deps.onTourActiveChange(true);
     let full = "";
     try {
@@ -114,27 +121,28 @@ export function useOracleTour() {
         if (beat === null) break;
         full += beat.text;
 
-        if (cancelledRef.current) continue;
+        if (isStale()) continue;                       // 被取消/被新解读取代 → 静默排空，不表演不揭晓
         if (skippedRef.current || deps.reducedMotion) {
-          deps.onReveal(full.trim());
+          deps.onReveal(full.trim());                  // 跳过/降级：直出已得全文
           continue;
         }
         deps.onCaption(captionFor(beat.command));
         if (beat.command) fireCamera(beat.command, { chart: deps.chart, onFocusBranch: deps.onFocusBranch, onTerm: deps.onTerm });
         await sleep(SETTLE_MS);
-        if (cancelledRef.current) continue;
+        if (isStale()) continue;
         if (beat.text.trim()) await getNarration().speak(beat.text.trim());
         else await sleep(EMPTY_DWELL_MS);
         await sleep(GAP_MS);
+      }
+      if (!isStale()) {                                // 正常收尾：tourActive 仍为 true，镜头以解读速度缓缓回总览
+        deps.onReveal(full.trim());
+        deps.onTerm(null);
+        deps.onFocusBranch(null);
       }
     } finally {
       deps.onCaption(null);
       deps.onTourActiveChange(false);
     }
-    if (cancelledRef.current) return;
-    deps.onReveal(full.trim());
-    deps.onTerm(null);
-    deps.onFocusBranch(null);
   }, []);
 
   const skip = useCallback(() => {
@@ -144,7 +152,7 @@ export function useOracleTour() {
   }, []);
 
   const cancel = useCallback(() => {
-    cancelledRef.current = true;
+    runRef.current = {};                               // 换令牌作废所有在跑的循环
     browserRef.current?.cancel();
     silentRef.current.cancel();
     queueRef.current?.close(null, false);
@@ -156,10 +164,11 @@ export function useOracleTour() {
   }, []);
 
   const beginFromSegments = useCallback((segments: OracleSegment[]): BeatQueue => {
+    const token = {};
+    runRef.current = token;
+    skippedRef.current = false;
     const queue = new BeatQueue();
     queueRef.current = queue;
-    skippedRef.current = false;
-    cancelledRef.current = false;
     for (const seg of segments) {
       const cmd = seg.commands[0] ?? null;
       queue.push({ text: seg.text ?? "", command: cmd });
