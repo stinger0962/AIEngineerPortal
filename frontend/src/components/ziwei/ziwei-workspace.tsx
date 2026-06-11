@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChartView } from "./chart-view";
 import { OracleProbe } from "./oracle-probe"; // Task 4 替换为 ChatDock
 import { TermCard, type TermInfo } from "./term-card";
@@ -10,11 +10,13 @@ export function ZiweiWorkspace({ profile }: { profile: ZiweiProfileOut }) {
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
   const [term, setTerm] = useState<TermInfo | null>(null);
 
-  // 档案切换时回到总览、清术语卡
-  useEffect(() => {
+  // 档案切换时回到总览、清术语卡——渲染期重置（避免 effect 滞后一帧把上个档案的选宫带过来）
+  const [prevId, setPrevId] = useState(profile.id);
+  if (prevId !== profile.id) {
+    setPrevId(profile.id);
     setSelectedBranch(null);
     setTerm(null);
-  }, [profile.id]);
+  }
 
   if (!hasChart(profile)) return null;
   const chart = profile.chart_json;
