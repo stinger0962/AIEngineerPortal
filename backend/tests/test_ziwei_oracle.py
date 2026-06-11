@@ -327,3 +327,33 @@ def test_oracle_accumulates_interleaved_text_across_rounds():
     assert "综上，事业财运俱佳。" in result["response"]
     assert len(result["camera_commands"]) == 2
     assert result["_meta"]["rounds"] == 3
+
+
+# ────────────────────────────────────────────────────────────────
+# Test 7: segments group text and commands per round for frontend replay
+# ────────────────────────────────────────────────────────────────
+
+def test_oracle_segments_group_text_and_commands_per_round():
+    r1 = _fake_response(
+        stop_reason="tool_use",
+        content=[_fake_text_block("先看官禄宫。"), _fake_tool_use_block("focus_palace", {"palace": "官禄"}, "t1")],
+    )
+    r2 = _fake_response(
+        stop_reason="tool_use",
+        content=[_fake_text_block("再看财帛宫。"), _fake_tool_use_block("focus_palace", {"palace": "财帛"}, "t2")],
+    )
+    r3 = _fake_response(stop_reason="end_turn", content=[_fake_text_block("综上，事业财运俱佳。")])
+    client = FakeClient([r1, r2, r3])
+    oracle = ZiweiOracle(client=client, model="claude-test")
+    result = oracle.run(chart_json=SIMPLE_CHART, persona="sage", scenario="natal", portrait={}, messages=SIMPLE_MESSAGES)
+
+    assert result is not None
+    segs = result["segments"]
+    assert len(segs) == 3
+    assert segs[0]["text"] == "先看官禄宫。"
+    assert segs[0]["commands"] == [{"type": "focus_palace", "palace": "官禄"}]
+    assert segs[1]["text"] == "再看财帛宫。"
+    assert segs[1]["commands"] == [{"type": "focus_palace", "palace": "财帛"}]
+    assert segs[2]["text"] == "综上，事业财运俱佳。"
+    assert segs[2]["commands"] == []
+    assert "先看官禄宫" in result["response"] and "综上" in result["response"]

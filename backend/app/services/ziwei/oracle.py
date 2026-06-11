@@ -52,7 +52,8 @@ class ZiweiOracle:
         system_prompt = self._system_prompt(chart_json, persona, scenario, portrait)
         claude_messages = messages[-10:] if len(messages) > 10 else list(messages)
         camera_commands: list[dict] = []
-        text_parts: list[str] = []  # 累积每一轮的讲解文字（模型常「边讲边 focus」，文字与工具同 response）
+        text_parts: list[str] = []  # 累积每一轮讲解（模型常「边讲边 focus」，文字与工具同 response）
+        segments: list[dict] = []   # 按轮分组：{text, commands}，供前端「段落回放」逐段打字+同步飞镜头
         in_tok = out_tok = 0
         start = time.time()
 
@@ -60,6 +61,7 @@ class ZiweiOracle:
             return {
                 "response": "\n\n".join(t for t in (p.strip() for p in text_parts) if t),
                 "camera_commands": camera_commands,
+                "segments": segments,
                 "_meta": {
                     "model": self.model, "input_tokens": in_tok, "output_tokens": out_tok,
                     "total_tokens": in_tok + out_tok, "latency_ms": int((time.time() - start) * 1000),
@@ -83,10 +85,10 @@ class ZiweiOracle:
             in_tok += response.usage.input_tokens
             out_tok += response.usage.output_tokens
 
-            # 收集本轮的讲解文字（无论是否还要继续 tool_use）
-            for block in response.content:
-                if block.type == "text" and block.text.strip():
-                    text_parts.append(block.text)
+            round_text = "".join(b.text for b in response.content if b.type == "text" and b.text.strip()).strip()
+            if round_text:
+                text_parts.append(round_text)
+            round_commands: list[dict] = []
 
             if response.stop_reason == "tool_use":
                 tool_results = []
@@ -95,10 +97,15 @@ class ZiweiOracle:
                         out = execute_tool(block.name, block.input)
                         if out.get("ok") and "command" in out:
                             camera_commands.append(out["command"])
+                            round_commands.append(out["command"])
                         tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(out, ensure_ascii=False)})
+                if round_text or round_commands:
+                    segments.append({"text": round_text, "commands": round_commands})
                 claude_messages.append({"role": "assistant", "content": response.content})
                 claude_messages.append({"role": "user", "content": tool_results})
                 continue
 
+            if round_text or round_commands:
+                segments.append({"text": round_text, "commands": round_commands})
             return _result(round_num)
         return _result(max_rounds) if text_parts else None
