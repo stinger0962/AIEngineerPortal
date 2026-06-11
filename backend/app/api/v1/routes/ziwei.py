@@ -1,5 +1,7 @@
 """Ziwei Dou Shu (紫微斗数) profile endpoints."""
+import json
 import re
+import time
 from datetime import date, datetime
 from typing import Dict, Optional
 
@@ -7,8 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse
 
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models.entities import (
     AIFeedback,
     User,
@@ -18,6 +21,7 @@ from app.models.entities import (
 )
 from app.services.ai_service import AIService
 from app.services.ziwei.oracle import ZiweiOracle
+from app.services.ziwei.oracle_tools import StreamMarkerParser
 
 router = APIRouter(prefix="/ziwei", tags=["ziwei"])
 
@@ -210,6 +214,95 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
         "conversation_id": conv.id, "response": result["response"],
         "camera_commands": result["camera_commands"], "segments": result.get("segments", []), "meta": meta,
     }
+
+
+@router.post("/profiles/{profile_id}/oracle/stream")
+def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db)):
+    profile = db.get(ZiweiProfile, profile_id)
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+    if not (profile.chart_json or {}).get("palaces"):
+        raise HTTPException(400, "Profile has no chart data")
+
+    from app.core.config import get_settings
+    settings = get_settings()
+    svc = AIService()
+    if not svc.is_available:
+        raise HTTPException(503, "AI oracle is not available — no API key configured")
+
+    today_start = datetime.combine(date.today(), datetime.min.time())
+    used_today = db.scalar(
+        select(func.coalesce(func.sum(AIFeedback.input_tokens + AIFeedback.output_tokens), 0)).where(AIFeedback.created_at >= today_start)
+    ) or 0
+    if used_today >= settings.ai_daily_token_budget:
+        raise HTTPException(429, "Daily AI limit reached, try again tomorrow")
+
+    if payload.conversation_id:
+        conv = db.get(ZiweiConversation, payload.conversation_id)
+        if not conv or conv.profile_id != profile_id:
+            raise HTTPException(404, "Conversation not found")
+    else:
+        conv = ZiweiConversation(profile_id=profile_id, scenario=payload.scenario, title=payload.message[:40])
+        db.add(conv)
+        db.commit()  # 提交以拿稳 conv.id（流式生成器用新 session 持久化消息）
+        db.refresh(conv)
+
+    history = db.scalars(select(ZiweiMessage).where(ZiweiMessage.conversation_id == conv.id).order_by(ZiweiMessage.id.asc())).all()
+    messages = [{"role": m.role, "content": m.content} for m in history]
+    messages.append({"role": "user", "content": payload.message})
+    claude_messages = messages[-10:] if len(messages) > 10 else messages
+
+    oracle = ZiweiOracle(client=svc.client, model=svc.model)
+    system_prompt = oracle._system_prompt(profile.chart_json, profile.persona, payload.scenario, profile.portrait_json or {})
+
+    conv_id = conv.id
+    client = svc.client
+    model = svc.model
+    user_message = payload.message
+    scenario = payload.scenario
+    uid = _get_user_id(db)
+
+    def event_stream():
+        parser = StreamMarkerParser()
+        in_tok = out_tok = 0
+        start = time.time()
+        try:
+            with client.messages.stream(model=model, max_tokens=1200, system=system_prompt, messages=claude_messages) as stream:
+                for delta in stream.text_stream:
+                    for kind, val in parser.feed(delta):
+                        if kind == "text":
+                            yield {"data": json.dumps({"type": "text", "delta": val}, ensure_ascii=False)}
+                        else:
+                            yield {"data": json.dumps({"type": "camera", "command": val}, ensure_ascii=False)}
+                final = stream.get_final_message()
+                in_tok = final.usage.input_tokens
+                out_tok = final.usage.output_tokens
+            trailing, clean, segments, cameras = parser.finish()
+            if trailing:
+                yield {"data": json.dumps({"type": "text", "delta": trailing}, ensure_ascii=False)}
+            if clean:
+                _db = SessionLocal()
+                try:
+                    _db.add(ZiweiMessage(conversation_id=conv_id, role="user", content=user_message, chart_context_json={}))
+                    _db.add(ZiweiMessage(
+                        conversation_id=conv_id, role="assistant", content=clean,
+                        chart_context_json={"camera_commands": cameras, "segments": segments, "scenario": scenario},
+                    ))
+                    _db.add(AIFeedback(
+                        user_id=uid, feature="ziwei_oracle", reference_id=profile_id,
+                        user_input_hash="", prompt_template=None,
+                        response_json={"response": clean, "camera_commands": cameras},
+                        model=model, input_tokens=in_tok, output_tokens=out_tok,
+                        latency_ms=int((time.time() - start) * 1000),
+                    ))
+                    _db.commit()
+                finally:
+                    _db.close()
+            yield {"data": json.dumps({"type": "done", "conversation_id": conv_id, "meta": {"model": model, "total_tokens": in_tok + out_tok, "latency_ms": int((time.time() - start) * 1000)}}, ensure_ascii=False)}
+        except Exception:
+            yield {"data": json.dumps({"type": "error"}, ensure_ascii=False)}
+
+    return EventSourceResponse(event_stream())
 
 
 @router.get("/profiles/{profile_id}/conversations")

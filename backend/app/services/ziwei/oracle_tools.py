@@ -55,3 +55,69 @@ def parse_markers(text: str) -> tuple[str, list[dict], list[dict]]:
     if not segments and response:
         segments = [{"text": response, "commands": []}]
     return response, segments, camera_commands
+
+
+class StreamMarkerParser:
+    """增量解析流式文本里的 [[...]] 标记：feed(delta) 吐出 ('text', 干净文本) / ('camera', 指令) 事件，
+    并累积干净全文 + segments + camera_commands 供结束时持久化。处理跨 delta 切断的半个标记。"""
+
+    def __init__(self) -> None:
+        self.pending = ""
+        self._clean_parts: list[str] = []
+        self._seg_text = ""
+        self.segments: list[dict] = []
+        self.camera_commands: list[dict] = []
+
+    def _emit_text(self, s: str) -> None:
+        self._clean_parts.append(s)
+        self._seg_text += s
+
+    def feed(self, delta: str) -> list[tuple[str, object]]:
+        out: list[tuple[str, object]] = []
+        self.pending += delta
+        while True:
+            i = self.pending.find("[[")
+            if i == -1:
+                # 没有标记起始；末尾若是半个 "[" 则保留（可能是 "[[" 的前半）
+                if self.pending.endswith("["):
+                    emit, self.pending = self.pending[:-1], "["
+                else:
+                    emit, self.pending = self.pending, ""
+                if emit:
+                    self._emit_text(emit)
+                    out.append(("text", emit))
+                break
+            if i > 0:
+                emit = self.pending[:i]
+                self._emit_text(emit)
+                out.append(("text", emit))
+                self.pending = self.pending[i:]
+            # pending 现以 "[[" 开头
+            j = self.pending.find("]]")
+            if j == -1:
+                break  # 标记未闭合，等更多 delta
+            marker = self.pending[2:j]
+            cmd = _to_command(marker)
+            self.pending = self.pending[j + 2:]
+            if cmd is None:
+                continue  # 非法标记丢弃
+            if self.camera_commands and self.camera_commands[-1] == cmd:
+                continue  # 连续同指令去重
+            self.camera_commands.append(cmd)
+            self.segments.append({"text": self._seg_text.strip(), "commands": [cmd]})
+            self._seg_text = ""
+            out.append(("camera", cmd))
+        return out
+
+    def finish(self) -> tuple[str, str, list[dict], list[dict]]:
+        """结束：把剩余 pending（非半截标记）作为文字补吐。返回 (trailing_text, clean_response, segments, camera_commands)。"""
+        trailing = ""
+        if self.pending and not self.pending.lstrip().startswith("[["):
+            trailing = self.pending
+            self._emit_text(self.pending)
+        self.pending = ""
+        if self._seg_text.strip():
+            self.segments.append({"text": self._seg_text.strip(), "commands": []})
+            self._seg_text = ""
+        clean = "".join(self._clean_parts).strip()
+        return trailing, clean, self.segments, self.camera_commands
