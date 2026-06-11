@@ -38,7 +38,11 @@ TEST_DATABASE_URL = f"sqlite:///{TEST_DB_PATH.as_posix()}"
 engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
 TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
-CANNED_TEXT = "命宫紫微，主尊贵……"
+# What the model emits (with inline camera marker) vs. the clean prose the parser returns.
+from app.services.ziwei.oracle_tools import parse_markers as _parse_markers
+
+CANNED_RAW = "命宫紫微，主尊贵。[[focus:命宫]] 福泽深厚。"
+CANNED_TEXT = _parse_markers(CANNED_RAW)[0]  # markers stripped from response/persisted prose
 
 
 def override_get_db():
@@ -54,7 +58,7 @@ class _FakeMessages:
     def create(self, *args, **kwargs):
         return SimpleNamespace(
             stop_reason="end_turn",
-            content=[SimpleNamespace(type="text", text=CANNED_TEXT)],
+            content=[SimpleNamespace(type="text", text=CANNED_RAW)],
             usage=SimpleNamespace(input_tokens=120, output_tokens=80),
         )
 
@@ -175,11 +179,13 @@ def test_ask_oracle_creates_conversation_and_persists():
     assert "conversation_id" in body
     assert body["response"] == CANNED_TEXT
     assert isinstance(body["camera_commands"], list)
+    # inline marker parsed into a focus_palace camera command
+    assert any(c["type"] == "focus_palace" for c in body["camera_commands"])
     assert isinstance(body["meta"], dict)
-    # segments: the canned response has one text block → one segment
+    # segments: the marker splits prose into segments; the first carries the focus command
     assert isinstance(body["segments"], list)
     assert len(body["segments"]) >= 1
-    assert body["segments"][0]["text"] == CANNED_TEXT
+    assert body["segments"][0]["commands"][0]["type"] == "focus_palace"
     conv_id = body["conversation_id"]
 
     rc = client.get(f"/api/v1/ziwei/profiles/{pid}/conversations")
@@ -200,7 +206,7 @@ def test_ask_oracle_creates_conversation_and_persists():
     assert "segments" in ctx
     assert isinstance(ctx["segments"], list)
     assert len(ctx["segments"]) >= 1
-    assert ctx["segments"][0]["text"] == CANNED_TEXT
+    assert ctx["segments"][0]["commands"][0]["type"] == "focus_palace"
 
 
 def test_ask_oracle_404_unknown_profile():

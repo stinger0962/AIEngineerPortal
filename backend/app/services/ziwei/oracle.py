@@ -1,5 +1,5 @@
-"""紫微 AI 解盘循环：仿 copilot_loop 的非流式 tool_use 编排。
-组装 人设 + 命盘摘要(含命中格局) + 画像 + 近期事件 → Claude，收集镜头指令。"""
+"""紫微 AI 解盘：单次 Claude 调用 + 内联镜头标记解析（替代多轮 tool_use 编排）。
+组装 人设 + 命盘摘要(含命中格局) + 画像 → Claude 一次成文，解析标记得镜头指令。"""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ import time
 from typing import Any, Optional
 
 from .chart_summary import format_chart_summary
-from .oracle_tools import TOOL_SCHEMAS, execute_tool
+from .oracle_tools import parse_markers
 from .personas import persona_prompt
 
 SCENARIO_FRAMES = {
@@ -34,9 +34,15 @@ class ZiweiOracle:
         if portrait:
             parts.append("\n\n【命主画像】（往次解读沉淀，供延续语境）\n" + json.dumps(portrait, ensure_ascii=False))
         parts.append(
-            "\n\n## 镜头联动\n讲到某一宫时调用 focus_palace(该宫) 让 3D 画面飞入；回到全局时 overview()；"
-            "遇到生僻术语可用 explain_term 给白话卡。镜头服务于叙述，不必频繁。\n"
-            "## 输出\n用清晰中文解读，可读性优先。不要输出 JSON 或代码块，正常说话即可。"
+            "\n\n## 镜头联动（重要）\n"
+            "在解读中用内联标记驱动 3D 画面，标记会被前端解析、不会显示给用户：\n"
+            "- 讲到某一宫时，在那句话后紧跟 [[focus:宫名]]，画面飞入该宫。宫名用十二宫标准名："
+            "命宫/兄弟/夫妻/子女/财帛/疾厄/迁移/仆役/官禄/田宅/福德/父母。\n"
+            "- 回到整体视角时插入 [[overview]]。\n"
+            "- 解释生僻术语时插入 [[term:术语|一句话白话解释]]。\n"
+            "整段解读自然地飞 2-4 次镜头即可，标记紧跟在相关句子之后。\n"
+            "例如：「你命宫紫微坐守，气象不凡。[[focus:命宫]] 再看财帛，武曲化禄，财源稳健。[[focus:财帛]]」\n"
+            "## 输出\n用清晰中文解读，可读性优先。除上述内联标记外正常说话，不要输出 JSON 或代码块。"
         )
         return "".join(parts)
 
@@ -51,61 +57,28 @@ class ZiweiOracle:
     ) -> Optional[dict]:
         system_prompt = self._system_prompt(chart_json, persona, scenario, portrait)
         claude_messages = messages[-10:] if len(messages) > 10 else list(messages)
-        camera_commands: list[dict] = []
-        text_parts: list[str] = []  # 累积每一轮讲解（模型常「边讲边 focus」，文字与工具同 response）
-        segments: list[dict] = []   # 按轮分组：{text, commands}，供前端「段落回放」逐段打字+同步飞镜头
-        in_tok = out_tok = 0
         start = time.time()
-
-        def _result(rounds: int) -> dict:
-            return {
-                "response": "\n\n".join(t for t in (p.strip() for p in text_parts) if t),
-                "camera_commands": camera_commands,
-                "segments": segments,
-                "_meta": {
-                    "model": self.model, "input_tokens": in_tok, "output_tokens": out_tok,
-                    "total_tokens": in_tok + out_tok, "latency_ms": int((time.time() - start) * 1000),
-                    "rounds": rounds,
-                },
-            }
-
-        for round_num in range(1, max_rounds + 1):
-            # 最后一轮去掉工具，逼模型必出文字——否则多宫位问题（如「事业方向」会连续 focus
-            # 官禄/财帛/迁移…）可能把 tool_use 轮数耗尽却始终没给最终解读。
-            create_kwargs: dict = dict(
-                model=self.model, max_tokens=2200, system=system_prompt,
-                messages=claude_messages, timeout=40.0,
+        try:
+            response = self.client.messages.create(
+                model=self.model, max_tokens=2600, system=system_prompt,
+                messages=claude_messages, timeout=60.0,
             )
-            if round_num < max_rounds:
-                create_kwargs["tools"] = TOOL_SCHEMAS
-            try:
-                response = self.client.messages.create(**create_kwargs)
-            except Exception:
-                return _result(round_num) if text_parts else None
-            in_tok += response.usage.input_tokens
-            out_tok += response.usage.output_tokens
-
-            round_text = "".join(b.text for b in response.content if b.type == "text" and b.text.strip()).strip()
-            if round_text:
-                text_parts.append(round_text)
-            round_commands: list[dict] = []
-
-            if response.stop_reason == "tool_use":
-                tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        out = execute_tool(block.name, block.input)
-                        if out.get("ok") and "command" in out:
-                            camera_commands.append(out["command"])
-                            round_commands.append(out["command"])
-                        tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": json.dumps(out, ensure_ascii=False)})
-                if round_text or round_commands:
-                    segments.append({"text": round_text, "commands": round_commands})
-                claude_messages.append({"role": "assistant", "content": response.content})
-                claude_messages.append({"role": "user", "content": tool_results})
-                continue
-
-            if round_text or round_commands:
-                segments.append({"text": round_text, "commands": round_commands})
-            return _result(round_num)
-        return _result(max_rounds) if text_parts else None
+        except Exception:
+            return None
+        text = "".join(b.text for b in response.content if getattr(b, "type", None) == "text")
+        clean, segments, camera_commands = parse_markers(text)
+        if not clean:
+            return None
+        return {
+            "response": clean,
+            "camera_commands": camera_commands,
+            "segments": segments,
+            "_meta": {
+                "model": self.model,
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                "latency_ms": int((time.time() - start) * 1000),
+                "rounds": 1,
+            },
+        }

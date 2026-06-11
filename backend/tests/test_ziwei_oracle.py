@@ -1,13 +1,11 @@
-"""Tests for ZiweiOracle tool_use loop (fake Anthropic client, no real API)."""
+"""Tests for ZiweiOracle single-call inline-marker pipeline (fake Anthropic client)."""
 from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
 
-import pytest
-
 from app.services.ziwei.oracle import ZiweiOracle
-from app.services.ziwei.oracle_tools import execute_tool
+from app.services.ziwei.oracle_tools import parse_markers
 
 
 # ────────────────────────────────────────────────────────────────
@@ -54,325 +52,96 @@ def _mk(palaces_spec: dict, ming: str = "子", shen: str = "午") -> dict:
 
 
 # ────────────────────────────────────────────────────────────────
-# Fake Anthropic SDK objects
+# Fake Anthropic SDK objects (single-call)
 # ────────────────────────────────────────────────────────────────
 
-def _fake_usage(input_tokens: int = 100, output_tokens: int = 50) -> Any:
-    return SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens)
-
-
-def _fake_tool_use_block(name: str, tool_input: dict, block_id: str = "t1") -> Any:
-    return SimpleNamespace(type="tool_use", name=name, input=tool_input, id=block_id)
-
-
-def _fake_text_block(text: str) -> Any:
-    return SimpleNamespace(type="text", text=text)
-
-
-def _fake_response(stop_reason: str, content: list, in_tok: int = 100, out_tok: int = 50) -> Any:
+def _fake_response(text: str, in_tok: int = 200, out_tok: int = 120) -> Any:
     return SimpleNamespace(
-        stop_reason=stop_reason,
-        content=content,
-        usage=_fake_usage(in_tok, out_tok),
+        content=[SimpleNamespace(type="text", text=text)],
+        usage=SimpleNamespace(input_tokens=in_tok, output_tokens=out_tok),
     )
 
 
 class FakeClient:
-    """Fake Anthropic client that returns pre-configured responses in sequence."""
-
-    def __init__(self, responses: list):
-        self._responses = list(responses)
-        self._call_index = 0
-        self.calls: list[dict] = []  # record kwargs for each call
+    def __init__(self, response: Any):
+        self._response = response
+        self.calls: list[dict] = []
 
     class _Messages:
         def __init__(self, outer: "FakeClient"):
-            self._outer = outer
+            self._o = outer
 
-        def create(self, **kwargs) -> Any:
-            self._outer.calls.append(kwargs)
-            idx = self._outer._call_index
-            self._outer._call_index += 1
-            resp = self._outer._responses[idx]
-            if isinstance(resp, Exception):
-                raise resp
-            return resp
+        def create(self, **kwargs: Any) -> Any:
+            self._o.calls.append(kwargs)
+            r = self._o._response
+            if isinstance(r, Exception):
+                raise r
+            return r
 
     @property
     def messages(self) -> "_Messages":
         return self._Messages(self)
 
 
-# ────────────────────────────────────────────────────────────────
-# Minimal valid inputs
-# ────────────────────────────────────────────────────────────────
-
 SIMPLE_CHART = _mk({"子": ([("紫微", None, "庙")], [])})
 SIMPLE_MESSAGES = [{"role": "user", "content": "帮我解盘"}]
 
 
-# ────────────────────────────────────────────────────────────────
-# Test 1: tool_use round → text round, camera command collected
-# ────────────────────────────────────────────────────────────────
-
-def test_oracle_collects_camera_command_and_returns_text():
-    tool_resp = _fake_response(
-        stop_reason="tool_use",
-        content=[_fake_tool_use_block("focus_palace", {"palace": "官禄"}, "t1")],
-        in_tok=120, out_tok=30,
-    )
-    text_resp = _fake_response(
-        stop_reason="end_turn",
-        content=[_fake_text_block("官禄宫武曲……")],
-        in_tok=150, out_tok=80,
-    )
-    client = FakeClient([tool_resp, text_resp])
-    oracle = ZiweiOracle(client=client, model="claude-test")
-
-    result = oracle.run(
-        chart_json=SIMPLE_CHART,
-        persona="sage",
-        scenario="natal",
-        portrait={},
-        messages=SIMPLE_MESSAGES,
-    )
-
-    assert result is not None
-    assert result["response"] == "官禄宫武曲……"
-    assert result["camera_commands"] == [{"type": "focus_palace", "palace": "官禄"}]
-    assert result["_meta"]["rounds"] == 2
-    # tokens summed across both calls: 120+150=270 in, 30+80=110 out
-    assert result["_meta"]["input_tokens"] == 270
-    assert result["_meta"]["output_tokens"] == 110
-    assert result["_meta"]["total_tokens"] == 380
+def test_parse_markers_focus_overview_term():
+    text = "开场。[[overview]] 你命宫紫微。[[focus:命宫]] 这是机月同梁格[[term:机月同梁格|稳健务实之格]]，宜稳。"
+    response, segments, cams = parse_markers(text)
+    assert "[[" not in response  # markers stripped from prose
+    assert cams == [
+        {"type": "overview"},
+        {"type": "focus_palace", "palace": "命宫"},
+        {"type": "explain_term", "term": "机月同梁格", "explanation": "稳健务实之格"},
+    ]
+    # segments group text-before-marker with that marker's command
+    assert segments[0]["commands"] == [{"type": "overview"}]
+    assert "命宫紫微" in segments[1]["text"] and segments[1]["commands"][0]["type"] == "focus_palace"
 
 
-# ────────────────────────────────────────────────────────────────
-# Test 2: system prompt includes chart summary, pattern name, and persona phrase
-# ────────────────────────────────────────────────────────────────
-
-def test_oracle_system_prompt_includes_summary_and_persona():
-    # 君臣庆会: 紫微 in 命宫(子), 左辅 in 辰(三方), 右弼 in 申(三方)
-    chart = _mk({
-        "子": ([("紫微", None, "庙")], []),
-        "辰": ([], ["左辅"]),
-        "申": ([], ["右弼"]),
-    })
-    # We only need one text response; system prompt is built before the call
-    text_resp = _fake_response(
-        stop_reason="end_turn",
-        content=[_fake_text_block("解读完毕")],
-    )
-    client = FakeClient([text_resp])
-    oracle = ZiweiOracle(client=client, model="claude-test")
-
-    oracle.run(
-        chart_json=chart,
-        persona="taoist",
-        scenario="natal",
-        portrait={},
-        messages=SIMPLE_MESSAGES,
-    )
-
-    assert len(client.calls) == 1
-    system = client.calls[0]["system"]
-
-    # Chart summary includes the 五行局 value
-    assert "水二局" in system
-
-    # Pattern section includes 君臣庆会
-    assert "君臣庆会" in system
-
-    # Taoist persona uses "命主"
-    assert "命主" in system
+def test_parse_markers_friends_palace_alias_and_invalid_dropped():
+    text = "看交友。[[focus:交友]] 乱写[[focus:火星宫]] 结束。"
+    _, _, cams = parse_markers("看交友。[[focus:交友]] 结束。")
+    assert cams == [{"type": "focus_palace", "palace": "仆役"}]  # 交友→仆役
+    _, _, cams2 = parse_markers(text)
+    assert cams2 == [{"type": "focus_palace", "palace": "仆役"}]  # 火星宫 invalid → dropped
 
 
-# ────────────────────────────────────────────────────────────────
-# Test 3: exception from client → run returns None
-# ────────────────────────────────────────────────────────────────
-
-def test_oracle_returns_none_on_exception():
-    client = FakeClient([Exception("connection error")])
-    oracle = ZiweiOracle(client=client, model="claude-test")
-
-    result = oracle.run(
-        chart_json=SIMPLE_CHART,
-        persona="sage",
-        scenario="natal",
-        portrait={},
-        messages=SIMPLE_MESSAGES,
-    )
-
-    assert result is None
+def test_parse_markers_no_markers():
+    response, segments, cams = parse_markers("纯文字没有标记。")
+    assert response == "纯文字没有标记。"
+    assert segments == [{"text": "纯文字没有标记。", "commands": []}]
+    assert cams == []
 
 
-# ────────────────────────────────────────────────────────────────
-# Test 4: invalid palace not added to camera_commands, loop continues to text
-# ────────────────────────────────────────────────────────────────
-
-def test_oracle_invalid_palace_not_collected():
-    # First call: tool_use with invalid palace "火星宫"
-    tool_resp = _fake_response(
-        stop_reason="tool_use",
-        content=[_fake_tool_use_block("focus_palace", {"palace": "火星宫"}, "t_bad")],
-        in_tok=100, out_tok=20,
-    )
-    # Second call: text response
-    text_resp = _fake_response(
-        stop_reason="end_turn",
-        content=[_fake_text_block("综合论断如下……")],
-        in_tok=110, out_tok=60,
-    )
-    client = FakeClient([tool_resp, text_resp])
-    oracle = ZiweiOracle(client=client, model="claude-test")
-
-    result = oracle.run(
-        chart_json=SIMPLE_CHART,
-        persona="sage",
-        scenario="natal",
-        portrait={},
-        messages=SIMPLE_MESSAGES,
-    )
-
-    assert result is not None
-    # Invalid palace must NOT be in camera_commands
-    assert result["camera_commands"] == []
-    # Loop continued and returned the text
-    assert result["response"] == "综合论断如下……"
-    assert result["_meta"]["rounds"] == 2
-
-
-# ────────────────────────────────────────────────────────────────
-# Test 5: a question that keeps calling focus_palace must still return text —
-# the final round drops tools, forcing a text answer instead of None (the prod
-# 502 bug: multi-palace questions exhausted the tool_use rounds before answering).
-# ────────────────────────────────────────────────────────────────
-
-def test_oracle_forces_text_on_final_round_when_tools_exhausted():
-    class GreedyToolClient:
-        """Returns tool_use whenever tools are offered; text once tools are withheld."""
-
-        def __init__(self) -> None:
-            self.calls: list[dict] = []
-
-        class _Messages:
-            def __init__(self, outer: "GreedyToolClient") -> None:
-                self._outer = outer
-
-            def create(self, **kwargs: Any) -> Any:
-                self._outer.calls.append(kwargs)
-                if "tools" in kwargs:
-                    return _fake_response(
-                        stop_reason="tool_use",
-                        content=[_fake_tool_use_block("focus_palace", {"palace": "官禄"}, f"t{len(self._outer.calls)}")],
-                    )
-                return _fake_response(stop_reason="end_turn", content=[_fake_text_block("综合来看，事业宜……")])
-
-        @property
-        def messages(self) -> "_Messages":
-            return self._Messages(self)
-
-    client = GreedyToolClient()
-    oracle = ZiweiOracle(client=client, model="claude-test")
-
-    result = oracle.run(
-        chart_json=SIMPLE_CHART,
-        persona="sage",
-        scenario="natal",
-        portrait={},
-        messages=[{"role": "user", "content": "事业方向？"}],
-    )
-
-    assert result is not None  # must NOT return None despite greedy tool calls
-    assert result["response"] == "综合来看，事业宜……"
-    # default max_rounds=6: rounds 1-5 offer tools, round 6 drops tools → forced text
-    assert len(client.calls) == 6
-    assert "tools" in client.calls[0]
-    assert "tools" not in client.calls[-1]
-    assert result["camera_commands"]  # focus_palace commands collected along the way
-    assert result["_meta"]["rounds"] == 6
-
-
-# ────────────────────────────────────────────────────────────────
-# Test 6: narration interleaved with tool_use across rounds must all be preserved
-# (the prod bug: only the final round's text was kept, so multi-palace guided
-# readings came back nearly empty even though the camera flew everywhere).
-# ────────────────────────────────────────────────────────────────
-
-def test_oracle_accumulates_interleaved_text_across_rounds():
-    r1 = _fake_response(
-        stop_reason="tool_use",
-        content=[_fake_text_block("先看官禄宫，武曲坐守。"), _fake_tool_use_block("focus_palace", {"palace": "官禄"}, "t1")],
-    )
-    r2 = _fake_response(
-        stop_reason="tool_use",
-        content=[_fake_text_block("再看财帛宫，太阴化禄。"), _fake_tool_use_block("focus_palace", {"palace": "财帛"}, "t2")],
-    )
-    r3 = _fake_response(stop_reason="end_turn", content=[_fake_text_block("综上，事业财运俱佳。")])
-    client = FakeClient([r1, r2, r3])
-    oracle = ZiweiOracle(client=client, model="claude-test")
-
-    result = oracle.run(
-        chart_json=SIMPLE_CHART,
-        persona="sage",
-        scenario="natal",
-        portrait={},
-        messages=SIMPLE_MESSAGES,
-    )
-
-    assert result is not None
-    # every round's narration is preserved, not just the final one
-    assert "先看官禄宫，武曲坐守。" in result["response"]
-    assert "再看财帛宫，太阴化禄。" in result["response"]
-    assert "综上，事业财运俱佳。" in result["response"]
-    assert len(result["camera_commands"]) == 2
-    assert result["_meta"]["rounds"] == 3
-
-
-# ────────────────────────────────────────────────────────────────
-# Test 7: segments group text and commands per round for frontend replay
-# ────────────────────────────────────────────────────────────────
-
-def test_oracle_segments_group_text_and_commands_per_round():
-    r1 = _fake_response(
-        stop_reason="tool_use",
-        content=[_fake_text_block("先看官禄宫。"), _fake_tool_use_block("focus_palace", {"palace": "官禄"}, "t1")],
-    )
-    r2 = _fake_response(
-        stop_reason="tool_use",
-        content=[_fake_text_block("再看财帛宫。"), _fake_tool_use_block("focus_palace", {"palace": "财帛"}, "t2")],
-    )
-    r3 = _fake_response(stop_reason="end_turn", content=[_fake_text_block("综上，事业财运俱佳。")])
-    client = FakeClient([r1, r2, r3])
+def test_oracle_single_call_returns_segments_and_commands():
+    client = FakeClient(_fake_response("命宫紫微，气象不凡。[[focus:命宫]] 宜走高位。", in_tok=300, out_tok=150))
     oracle = ZiweiOracle(client=client, model="claude-test")
     result = oracle.run(chart_json=SIMPLE_CHART, persona="sage", scenario="natal", portrait={}, messages=SIMPLE_MESSAGES)
-
     assert result is not None
-    segs = result["segments"]
-    assert len(segs) == 3
-    assert segs[0]["text"] == "先看官禄宫。"
-    assert segs[0]["commands"] == [{"type": "focus_palace", "palace": "官禄"}]
-    assert segs[1]["text"] == "再看财帛宫。"
-    assert segs[1]["commands"] == [{"type": "focus_palace", "palace": "财帛"}]
-    assert segs[2]["text"] == "综上，事业财运俱佳。"
-    assert segs[2]["commands"] == []
-    assert "先看官禄宫" in result["response"] and "综上" in result["response"]
+    assert len(client.calls) == 1  # SINGLE call
+    assert "tools" not in client.calls[0]  # no tools
+    assert "[[" not in result["response"]
+    assert result["camera_commands"] == [{"type": "focus_palace", "palace": "命宫"}]
+    assert len(result["segments"]) == 2
+    assert result["_meta"]["input_tokens"] == 300 and result["_meta"]["rounds"] == 1
 
 
-# ────────────────────────────────────────────────────────────────
-# Test 8: focus_palace accepts and normalizes 交友/仆役 palace name
-# ────────────────────────────────────────────────────────────────
+def test_oracle_system_prompt_includes_summary_persona_and_markers():
+    chart = _mk({"子": ([("紫微", None, "庙")], []), "辰": ([], ["左辅"]), "申": ([], ["右弼"])})
+    client = FakeClient(_fake_response("解读完毕。"))
+    oracle = ZiweiOracle(client=client, model="claude-test")
+    oracle.run(chart_json=chart, persona="taoist", scenario="natal", portrait={}, messages=SIMPLE_MESSAGES)
+    system = client.calls[0]["system"]
+    assert "水二局" in system  # chart summary
+    assert "君臣庆会" in system  # detected pattern
+    assert "命主" in system  # taoist persona
+    assert "[[focus:" in system  # marker instructions
 
-def test_focus_palace_accepts_and_normalizes_friends_palace():
-    # 模型用「交友」→ 归一化为命盘实际名「仆役」
-    out = execute_tool("focus_palace", {"palace": "交友"})
-    assert out["ok"] and out["command"] == {"type": "focus_palace", "palace": "仆役"}
-    # 模型直接用「仆役」也接受
-    out2 = execute_tool("focus_palace", {"palace": "仆役"})
-    assert out2["ok"] and out2["command"]["palace"] == "仆役"
-    # 其他宫名原样
-    out3 = execute_tool("focus_palace", {"palace": "官禄"})
-    assert out3["ok"] and out3["command"]["palace"] == "官禄"
-    # 未知宫位仍拒绝
-    out4 = execute_tool("focus_palace", {"palace": "火星宫"})
-    assert out4["ok"] is False
+
+def test_oracle_returns_none_on_exception():
+    client = FakeClient(Exception("boom"))
+    oracle = ZiweiOracle(client=client, model="claude-test")
+    assert oracle.run(chart_json=SIMPLE_CHART, persona="sage", scenario="natal", portrait={}, messages=SIMPLE_MESSAGES) is None
