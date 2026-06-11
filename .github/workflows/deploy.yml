@@ -87,6 +87,7 @@ jobs:
               fi
             }
             upsert_env ANTHROPIC_API_KEY "${{ secrets.ANTHROPIC_API_KEY }}"
+            upsert_env AI_DAILY_TOKEN_BUDGET "2000000"
             upsert_env WEBSHARE_PROXY_USERNAME "${{ secrets.WEBSHARE_PROXY_USERNAME }}"
             upsert_env WEBSHARE_PROXY_PASSWORD "${{ secrets.WEBSHARE_PROXY_PASSWORD }}"
             upsert_env MINIMAX_API_KEY "${{ secrets.MINIMAX_API_KEY }}"
