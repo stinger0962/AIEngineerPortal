@@ -1,5 +1,6 @@
 """Ziwei Dou Shu (紫微斗数) profile endpoints."""
 import json
+import logging
 import re
 import time
 from datetime import date, datetime
@@ -23,6 +24,7 @@ from app.services.ai_service import AIService
 from app.services.ziwei.oracle import ZiweiOracle
 from app.services.ziwei.oracle_tools import StreamMarkerParser
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ziwei", tags=["ziwei"])
 
 VALID_RELATIONS = {"self", "family", "friend"}
@@ -262,6 +264,30 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
     scenario = payload.scenario
     uid = _get_user_id(db)
 
+    def _persist(clean: str, cameras: list, segments: list, in_tok: int, out_tok: int, start: float) -> None:
+        """用新 session 持久化本轮对话 + token 计量。
+        即便 clean 为空也记 AIFeedback（只要花了 token），否则每日额度计量会漏算。"""
+        if not clean and not (in_tok or out_tok):
+            return
+        _db = SessionLocal()
+        try:
+            if clean:
+                _db.add(ZiweiMessage(conversation_id=conv_id, role="user", content=user_message, chart_context_json={}))
+                _db.add(ZiweiMessage(
+                    conversation_id=conv_id, role="assistant", content=clean,
+                    chart_context_json={"camera_commands": cameras, "segments": segments, "scenario": scenario},
+                ))
+            _db.add(AIFeedback(
+                user_id=uid, feature="ziwei_oracle", reference_id=profile_id,
+                user_input_hash="", prompt_template=None,
+                response_json={"response": clean, "camera_commands": cameras},
+                model=model, input_tokens=in_tok, output_tokens=out_tok,
+                latency_ms=int((time.time() - start) * 1000),
+            ))
+            _db.commit()
+        finally:
+            _db.close()
+
     def event_stream():
         parser = StreamMarkerParser()
         in_tok = out_tok = 0
@@ -280,26 +306,16 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
             trailing, clean, segments, cameras = parser.finish()
             if trailing:
                 yield {"data": json.dumps({"type": "text", "delta": trailing}, ensure_ascii=False)}
-            if clean:
-                _db = SessionLocal()
-                try:
-                    _db.add(ZiweiMessage(conversation_id=conv_id, role="user", content=user_message, chart_context_json={}))
-                    _db.add(ZiweiMessage(
-                        conversation_id=conv_id, role="assistant", content=clean,
-                        chart_context_json={"camera_commands": cameras, "segments": segments, "scenario": scenario},
-                    ))
-                    _db.add(AIFeedback(
-                        user_id=uid, feature="ziwei_oracle", reference_id=profile_id,
-                        user_input_hash="", prompt_template=None,
-                        response_json={"response": clean, "camera_commands": cameras},
-                        model=model, input_tokens=in_tok, output_tokens=out_tok,
-                        latency_ms=int((time.time() - start) * 1000),
-                    ))
-                    _db.commit()
-                finally:
-                    _db.close()
+            _persist(clean, cameras, segments, in_tok, out_tok, start)
             yield {"data": json.dumps({"type": "done", "conversation_id": conv_id, "meta": {"model": model, "total_tokens": in_tok + out_tok, "latency_ms": int((time.time() - start) * 1000)}}, ensure_ascii=False)}
         except Exception:
+            # 流中途失败：尽力保住已生成的文字 + 计量（非原子；前端收到 error 应清掉屏幕上的半截文本）
+            logger.exception("ziwei oracle stream failed (profile=%s conv=%s)", profile_id, conv_id)
+            try:
+                _, clean, segments, cameras = parser.finish()
+                _persist(clean, cameras, segments, in_tok, out_tok, start)
+            except Exception:
+                logger.exception("ziwei oracle stream salvage-persist failed")
             yield {"data": json.dumps({"type": "error"}, ensure_ascii=False)}
 
     return EventSourceResponse(event_stream())

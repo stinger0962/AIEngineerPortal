@@ -81,6 +81,68 @@ export type MessageOut = {
 
 export type OracleAsk = { scenario: string; message: string; conversation_id?: number };
 
+/** 流式解盘的 SSE 事件 */
+export type OracleStreamEvent =
+  | { type: "text"; delta: string }
+  | { type: "camera"; command: CameraCommand }
+  | { type: "done"; conversation_id: number; meta: OracleReply["meta"] }
+  | { type: "error" };
+
+export type OracleStreamHandlers = {
+  onText: (delta: string) => void;
+  onCamera: (command: CameraCommand) => void;
+  onDone: (conversationId: number, meta: OracleReply["meta"]) => void;
+  onError: () => void;
+};
+
+/** 流式解盘：text 增量逐字铺、camera 即时触发镜头/术语、done 落定会话、error 标记失败。
+ * 校验类错误（404/400/429/503）在开流前以 ZiweiApiError 抛出，由调用方本地化提示。 */
+async function streamOracle(
+  profileId: number,
+  body: OracleAsk,
+  handlers: OracleStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/ziwei/profiles/${profileId}/oracle/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    const err = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+    throw new ZiweiApiError(response.status, typeof err?.detail === "string" ? err.detail : undefined);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done || signal?.aborted) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? ""; // 末行可能是半截，留到下次
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue; // 跳过 ping 注释行 (": ...") 与空行
+      const raw = trimmed.slice(5).trim();
+      if (!raw) continue;
+      let ev: OracleStreamEvent;
+      try {
+        ev = JSON.parse(raw) as OracleStreamEvent;
+      } catch {
+        continue; // 半截/畸形 SSE 行，忽略
+      }
+      if (ev.type === "text") handlers.onText(ev.delta);
+      else if (ev.type === "camera") handlers.onCamera(ev.command);
+      else if (ev.type === "done") handlers.onDone(ev.conversation_id, ev.meta);
+      else if (ev.type === "error") handlers.onError();
+    }
+  }
+}
+
 export const ziweiApi = {
   listProfiles: () => request<ZiweiProfileOut[]>("/ziwei/profiles"),
   createProfile: (payload: ZiweiProfileCreate) =>
@@ -91,6 +153,7 @@ export const ziweiApi = {
     request<{ deleted: number }>(`/ziwei/profiles/${id}`, { method: "DELETE" }),
   askOracle: (profileId: number, body: OracleAsk) =>
     request<OracleReply>(`/ziwei/profiles/${profileId}/oracle`, { method: "POST", body: JSON.stringify(body) }),
+  streamOracle,
   listConversations: (profileId: number) =>
     request<ConversationOut[]>(`/ziwei/profiles/${profileId}/conversations`),
   listMessages: (conversationId: number) =>

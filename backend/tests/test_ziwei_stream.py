@@ -288,6 +288,42 @@ def test_oracle_stream_emits_events_and_persists():
         db.close()
 
 
+class _RaisingStream(_FakeStream):
+    @property
+    def text_stream(self):
+        yield "命宫紫微，主尊贵。"  # 半截文本已发给客户端
+        raise RuntimeError("upstream boom")  # 流中途炸
+
+
+class _RaisingMessages:
+    def stream(self, *args, **kwargs):
+        return _RaisingStream([])
+
+
+class _RaisingAIService(_FakeAIService):
+    def __init__(self, *args, **kwargs):
+        self.client = SimpleNamespace(messages=_RaisingMessages())
+
+
+def test_oracle_stream_emits_error_and_salvages_partial(monkeypatch):
+    monkeypatch.setattr(ziwei_routes, "AIService", _RaisingAIService)
+    pid = _seed_profile()
+    r = client.post(f"/api/v1/ziwei/profiles/{pid}/oracle/stream", json={"scenario": "natal", "message": "事业如何？"})
+    assert r.status_code == 200, r.text
+    events = _parse_sse(r.text)
+    types = [e["type"] for e in events]
+    # 中途失败：先有已发的文字，最后是 error，且没有 done
+    assert "error" in types and "done" not in types
+    assert any(e["type"] == "text" and "命宫紫微" in e["delta"] for e in events)
+    # 已生成的半截被尽力保住（salvage-persist）
+    db = TestingSessionLocal()
+    try:
+        msgs = db.scalars(select(ZiweiMessage).order_by(ZiweiMessage.id.asc())).all()
+        assert any(m.role == "assistant" and "命宫紫微" in m.content for m in msgs)
+    finally:
+        db.close()
+
+
 def test_oracle_stream_404_unknown_profile():
     r = client.post("/api/v1/ziwei/profiles/999999/oracle/stream", json={"scenario": "natal", "message": "x"})
     assert r.status_code == 404

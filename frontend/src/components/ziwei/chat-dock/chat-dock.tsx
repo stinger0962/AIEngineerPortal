@@ -5,7 +5,7 @@ import { ziweiApi, ZiweiApiError } from "@/lib/ziwei/api";
 import type { ZiweiChart } from "@/lib/ziwei/types";
 import type { TermInfo } from "@/components/ziwei/term-card";
 import type { ChatMessage, DockState } from "./types";
-import { useSegmentReplay } from "./use-segment-replay";
+import { fireCamera } from "./camera";
 import { PersonaSwitch } from "./persona-switch";
 import { HistoryPanel } from "./history-panel";
 
@@ -28,7 +28,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
   const [showHistory, setShowHistory] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const replay = useSegmentReplay();
+  const abortRef = useRef<AbortController | null>(null); // 中止进行中的流式解盘
 
   const handlePersonaChanged = (next: string) => {
     onPersonaChange(next);
@@ -40,7 +40,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
   const [prevId, setPrevId] = useState(profileId);
   if (prevId !== profileId) {
     setPrevId(profileId);
-    replay.cancel(); // 切档案时中止上一条回放，避免镜头/文本串台
+    abortRef.current?.abort(); // 切档案时中止上一条流，避免镜头/文本串台
     setMessages([]);
     setConversationId(null);
     setError(null);
@@ -50,7 +50,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
 
   // 载入历史会话：直接展示（不回放），并以该会话 id 续聊
   const handleLoadConversation = (loadedConversationId: number, mapped: ChatMessage[]) => {
-    replay.cancel();
+    abortRef.current?.abort();
     setMessages(mapped);
     setConversationId(loadedConversationId);
     setShowHistory(false);
@@ -65,64 +65,68 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     const message = input.trim();
     if (!message || loading) return;
 
-    replay.cancel(); // 新提问时中止仍在播放的上一条回放
+    abortRef.current?.abort(); // 新提问时中止仍在流的上一条
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", content: message };
-    setMessages((prev) => [...prev, userMsg]);
-    setLoading(true);
+    const assistantId = crypto.randomUUID();
+    setMessages((prev) => [
+      ...prev,
+      userMsg,
+      { id: assistantId, role: "assistant", content: "", pending: true },
+    ]);
+    setLoading(true); // 首段文字到达前显示「凝神观盘」
     setError(null);
     setInput("");
 
     const reqProfileId = profileId;
+    const stale = () => reqProfileId !== profileId || controller.signal.aborted;
+    let acc = "";
+    let gotText = false;
+
     try {
-      const reply = await ziweiApi.askOracle(profileId, {
-        scenario: "natal",
-        message,
-        conversation_id: conversationId ?? undefined,
-      });
-      // 网络等待期间若切换了档案，丢弃这条过期回复
-      if (reqProfileId !== profileId) return;
-
-      setConversationId(reply.conversation_id);
-      const segs =
-        reply.segments && reply.segments.length
-          ? reply.segments
-          : [{ text: reply.response, commands: reply.camera_commands }];
-
-      const assistantId = crypto.randomUUID();
-      setMessages((prev) => [
-        ...prev,
+      await ziweiApi.streamOracle(
+        profileId,
+        { scenario: "natal", message, conversation_id: conversationId ?? undefined },
         {
-          id: assistantId,
-          role: "assistant",
-          content: "",
-          segments: reply.segments,
-          cameras: reply.camera_commands,
-          pending: true,
+          onText: (delta) => {
+            if (stale()) return;
+            gotText = true;
+            setLoading(false);
+            acc += delta;
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content: acc } : m)),
+            );
+          },
+          onCamera: (cmd) => {
+            if (stale()) return;
+            fireCamera(cmd, { chart, onFocusBranch, onTerm });
+          },
+          onDone: (cid) => {
+            if (stale()) return;
+            setConversationId(cid);
+            setLoading(false);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, pending: false } : m)),
+            );
+          },
+          onError: () => {
+            if (controller.signal.aborted) return;
+            // 后端已尽力保住半截；保留已铺文本、停笔；全空则提示失败
+            setLoading(false);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, pending: false } : m)),
+            );
+            if (!gotText) setError("解盘暂不可用，请稍后再试");
+          },
         },
-      ]);
-      // 回复已到达：停掉加载态，转入逐段回放（打字 + 镜头）
-      setLoading(false);
-
-      const reduced =
-        typeof window !== "undefined" &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-      await replay.play(segs, {
-        chart,
-        onText: (full) =>
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, content: full } : m)),
-          ),
-        onFocusBranch,
-        onTerm,
-        reducedMotion: reduced,
-      });
-
-      setMessages((prev) =>
-        prev.map((m) => (m.id === assistantId ? { ...m, pending: false } : m)),
+        controller.signal,
       );
     } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return; // 主动中止，静默
+      // 开流前的校验错误：移除空的助手气泡并本地化提示
+      setMessages((prev) => prev.filter((m) => !(m.id === assistantId && m.content === "")));
       if (e instanceof ZiweiApiError) {
         if (e.status === 503) setError("解盘师未启用（缺少 API Key）");
         else if (e.status === 429) setError("今日额度已用尽，请明日再来");
