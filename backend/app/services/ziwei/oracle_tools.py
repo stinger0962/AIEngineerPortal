@@ -22,7 +22,10 @@ def _to_command(raw: str) -> dict | None:
     if raw.startswith("term:"):
         body = raw[len("term:"):]
         term, _, expl = body.partition("|")
-        return {"type": "explain_term", "term": term.strip(), "explanation": expl.strip()}
+        term, expl = term.strip(), expl.strip()
+        if not term or not expl:
+            return None  # 缺术语或解释 → 降级为纯文字，不弹空白卡
+        return {"type": "explain_term", "term": term, "explanation": expl}
     return None
 
 

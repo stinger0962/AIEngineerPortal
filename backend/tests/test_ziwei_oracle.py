@@ -105,8 +105,16 @@ def test_parse_markers_friends_palace_alias_and_invalid_dropped():
     text = "看交友。[[focus:交友]] 乱写[[focus:火星宫]] 结束。"
     _, _, cams = parse_markers("看交友。[[focus:交友]] 结束。")
     assert cams == [{"type": "focus_palace", "palace": "仆役"}]  # 交友→仆役
-    _, _, cams2 = parse_markers(text)
+    response, _, cams2 = parse_markers(text)
     assert cams2 == [{"type": "focus_palace", "palace": "仆役"}]  # 火星宫 invalid → dropped
+    # 非法标记必须从展示文本里彻底剥掉，绝不泄漏原始 [[...]]
+    assert "火星宫" not in response and "[[" not in response
+
+
+def test_parse_markers_term_without_explanation_dropped():
+    # [[term:词]] 缺解释 → 降级为纯文字，不弹空白卡
+    _, _, cams = parse_markers("这是机月同梁格[[term:机月同梁格]]，宜稳。")
+    assert cams == []
 
 
 def test_parse_markers_no_markers():
