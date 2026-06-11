@@ -239,6 +239,9 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
           ) : (
             <div key={m.id} className="whitespace-pre-wrap text-sm leading-relaxed text-violet-100">
               {m.content}
+              {m.pending ? (
+                <span className="animate-pulse text-violet-300/70">▌</span>
+              ) : null}
             </div>
           ),
         )}
