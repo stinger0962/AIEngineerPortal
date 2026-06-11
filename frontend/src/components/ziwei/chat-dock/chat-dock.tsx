@@ -50,16 +50,19 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
   };
 
   const toggleMuted = () => {
-    setMuted((m) => {
-      const next = !m;
-      tour.setMuted(next);
-      return next;
-    });
+    const next = !muted;
+    setMuted(next);
+    tour.setMuted(next);
   };
 
   const handlePersonaChanged = (next: string) => {
     onPersonaChange(next);
-    // Persona change requires a fresh conversation context (new system prompt voice)
+    // 切人设需要全新的会话上下文（system prompt 声口变了）；并中止进行中的解读，
+    // 否则旧 tour 收尾时的 setConversationId(queue.convId) 会把这里清的 null 又覆盖回去。
+    abortRef.current?.abort();
+    tour.cancel();
+    setCaption(null);
+    setLoading(false);
     setConversationId(null);
   };
 
