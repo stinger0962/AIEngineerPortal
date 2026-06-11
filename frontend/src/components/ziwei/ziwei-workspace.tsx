@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ChartView } from "./chart-view";
-import { OracleProbe } from "./oracle-probe"; // Task 4 替换为 ChatDock
+import { ChatDock } from "./chat-dock/chat-dock";
 import { TermCard, type TermInfo } from "./term-card";
 import { hasChart, type ZiweiProfileOut } from "@/lib/ziwei/api";
 
@@ -25,7 +25,13 @@ export function ZiweiWorkspace({ profile }: { profile: ZiweiProfileOut }) {
     <div className="relative">
       <ChartView chart={chart} selectedBranch={selectedBranch} onSelectBranch={setSelectedBranch} />
       {term ? <TermCard info={term} onClose={() => setTerm(null)} /> : null}
-      <OracleProbe profileId={profile.id} />
+      <ChatDock
+        profileId={profile.id}
+        persona={profile.persona}
+        chart={chart}
+        onFocusBranch={setSelectedBranch}
+        onTerm={setTerm}
+      />
     </div>
   );
 }
