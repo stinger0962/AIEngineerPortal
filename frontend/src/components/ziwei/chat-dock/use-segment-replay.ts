@@ -15,8 +15,17 @@ type ReplayDeps = {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+const PALACE_ALIASES: Record<string, string> = { 交友: "仆役", 仆役: "交友" };
+
 function branchOf(chart: ZiweiChart, palaceName: string): string | null {
-  return chart.palaces.find((p) => p.name === palaceName)?.earthlyBranch ?? null;
+  const hit =
+    chart.palaces.find((p) => p.name === palaceName) ??
+    chart.palaces.find((p) => p.name === PALACE_ALIASES[palaceName]);
+  if (!hit) {
+    console.warn(`segment-replay: 未知宫位「${palaceName}」，镜头跳过`);
+    return null;
+  }
+  return hit.earthlyBranch;
 }
 
 export function useSegmentReplay() {

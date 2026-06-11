@@ -357,3 +357,22 @@ def test_oracle_segments_group_text_and_commands_per_round():
     assert segs[2]["text"] == "综上，事业财运俱佳。"
     assert segs[2]["commands"] == []
     assert "先看官禄宫" in result["response"] and "综上" in result["response"]
+
+
+# ────────────────────────────────────────────────────────────────
+# Test 8: focus_palace accepts and normalizes 交友/仆役 palace name
+# ────────────────────────────────────────────────────────────────
+
+def test_focus_palace_accepts_and_normalizes_friends_palace():
+    # 模型用「交友」→ 归一化为命盘实际名「仆役」
+    out = execute_tool("focus_palace", {"palace": "交友"})
+    assert out["ok"] and out["command"] == {"type": "focus_palace", "palace": "仆役"}
+    # 模型直接用「仆役」也接受
+    out2 = execute_tool("focus_palace", {"palace": "仆役"})
+    assert out2["ok"] and out2["command"]["palace"] == "仆役"
+    # 其他宫名原样
+    out3 = execute_tool("focus_palace", {"palace": "官禄"})
+    assert out3["ok"] and out3["command"]["palace"] == "官禄"
+    # 未知宫位仍拒绝
+    out4 = execute_tool("focus_palace", {"palace": "火星宫"})
+    assert out4["ok"] is False
