@@ -15,7 +15,10 @@ DUB_DIR = Path(os.getenv("DUB_VIDEO_DIR", "/data/dub_videos"))
 MAX_DURATION_S = 600
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024   # 100 MB upload cap
 DUB_RETENTION_DAYS = 7                  # auto-delete dubbed mp4s older than this
-_MAX_SPEED = 1.25
+_MAX_TTS_SPEED = 1.30   # B: global MiniMax speed ceiling
+_MAX_ATEMPO = 1.15      # A: per-clip residual speed-up ceiling (base handles global, so gentler than old 1.25)
+_CHARS_PER_SEC = 4.8    # estimate: MiniMax zh narration ≈ 4.8 chars/sec at speed 1.0
+_VOICE_FILL = 0.92      # voice occupies at most this fraction of the video, leaving breath
 _DUCK_DB = -18
 
 
@@ -147,21 +150,35 @@ def translate_segments(segments: List[Dict], anthropic_api_key: str, model: str)
     return [by_idx.get(i + 1) or s["text"] for i, s in enumerate(segments)]
 
 
-def plan_placements(segments: List[Dict], clip_durations_ms: List[int]) -> List[Dict]:
-    """Pure alignment math: given segments and each clip's natural duration (ms), return
-    [{pos, ratio, dur}] — placement (ms), atempo ratio (1.0 = none), final duration (ms).
-    Anchor each clip to its segment start; speed up only when over-slot (capped at _MAX_SPEED);
-    push later clips forward so nothing overlaps."""
+def estimate_ms(text: str) -> int:
+    """按字数估算中文旁白时长（speed 1.0）。仅用于全局匀速预算，不求精确。"""
+    return int(len(text.strip()) / _CHARS_PER_SEC * 1000)
+
+
+def compute_base_speed(zh_texts: List[str], video_ms: int) -> float:
+    """B：全局匀速——译文总估时超过视频可填时长则统一略提速（封顶 _MAX_TTS_SPEED），否则 1.0。"""
+    total = sum(estimate_ms(t) for t in zh_texts)
+    fillable = max(int(video_ms * _VOICE_FILL), 1)
+    if total <= fillable:
+        return 1.0
+    return min(round(total / fillable, 3), _MAX_TTS_SPEED)
+
+
+def plan_placements(segments: List[Dict], clip_durations_ms: List[int], video_ms: int) -> List[Dict]:
+    """A：吃停顿对齐。每句锚定原句 start；可用窗 = 到下一句 start（含其后停顿），放不下才 atempo
+    提速（封顶 _MAX_ATEMPO）；落后时 pos 被 cursor 顶高、可用窗收窄 → 内建追赶。最后一句窗到 video_ms。"""
     out: List[Dict] = []
     cursor = 0
-    for seg, clip_ms in zip(segments, clip_durations_ms):
+    n = len(segments)
+    for i, (seg, clip_ms) in enumerate(zip(segments, clip_durations_ms)):
         start_ms = int(seg["start"] * 1000)
-        slot_ms = int((seg["end"] - seg["start"]) * 1000)
-        ratio = 1.0
-        if clip_ms > slot_ms and slot_ms > 0:
-            ratio = min(clip_ms / slot_ms, _MAX_SPEED)
-        final_ms = int(round(clip_ms / ratio))
+        next_start = int(segments[i + 1]["start"] * 1000) if i + 1 < n else video_ms
         pos = max(start_ms, cursor)
+        avail = max(next_start - pos, 1)
+        ratio = 1.0
+        if clip_ms > avail:
+            ratio = min(clip_ms / avail, _MAX_ATEMPO)
+        final_ms = int(round(clip_ms / ratio))
         out.append({"pos": pos, "ratio": ratio, "dur": final_ms})
         cursor = pos + final_ms
     return out
@@ -192,10 +209,10 @@ def build_voice_track(
     mm_base: str,
     video_ms: int,
 ) -> "AudioSegment":
-    """TTS each Chinese segment (reuse podcast _tts_bytes), speed-fit + anchor-place into a
-    silent track of length video_ms."""
+    """B：先按全局 base_speed 生成 TTS（匀速、自然）；A：gap-aware 锚定放置，残余才小幅 atempo。"""
     from app.services.podcast_service import _tts_bytes
 
+    base_speed = compute_base_speed(zh_texts, video_ms)
     clips: List[Optional[AudioSegment]] = []
     durations: List[int] = []
     for zh in zh_texts:
@@ -203,12 +220,12 @@ def build_voice_track(
             clips.append(None)
             durations.append(0)
             continue
-        data = _tts_bytes(zh, voice_id, mm_key, mm_group, mm_model, mm_base)
+        data = _tts_bytes(zh, voice_id, mm_key, mm_group, mm_model, mm_base, speed=base_speed)
         clip = AudioSegment.from_file(io.BytesIO(data))
         clips.append(clip)
         durations.append(len(clip))
 
-    plans = plan_placements(segments, durations)
+    plans = plan_placements(segments, durations, video_ms)
     base = AudioSegment.silent(duration=max(video_ms, 1))
     for clip, plan in zip(clips, plans):
         if clip is None:
