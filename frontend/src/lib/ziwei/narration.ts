@@ -92,6 +92,7 @@ export class SilentNarration implements NarrationSource {
  * 任何失败（未配置 503 / 网络 / 播放）自动回退浏览器语音，绝不卡死调用方。 */
 export class CloudNarration implements NarrationSource {
   private audio: HTMLAudioElement | null = null;
+  private blobUrl: string | null = null; // 在 cancel 时也能 revoke，避免每次中断泄漏一个对象 URL（解码后的 MP3 驻留内存）
   private controller: AbortController | null = null;
   private resolveFn: (() => void) | null = null;
   private fallback = new BrowserNarration();
@@ -119,6 +120,7 @@ export class CloudNarration implements NarrationSource {
       const blob = await res.blob();
       if (controller.signal.aborted) return;
       await this.playBlob(blob);
+      this.controller = null; // 正常播完，清掉已完成的 controller
     } catch (e) {
       if (controller.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) return;
       return this.fallback.speak(clean);
@@ -128,9 +130,10 @@ export class CloudNarration implements NarrationSource {
   private playBlob(blob: Blob): Promise<void> {
     return new Promise<void>((resolve) => {
       const url = URL.createObjectURL(blob);
+      this.blobUrl = url;
       const audio = new Audio(url);
       const settle = () => {
-        URL.revokeObjectURL(url);
+        if (this.blobUrl === url) { URL.revokeObjectURL(url); this.blobUrl = null; }
         if (this.audio === audio) this.audio = null;
         this.resolveFn = null;
         resolve();
@@ -150,6 +153,7 @@ export class CloudNarration implements NarrationSource {
     const a = this.audio;
     this.audio = null;
     if (a) { a.pause(); a.onended = null; a.onerror = null; }
+    if (this.blobUrl) { URL.revokeObjectURL(this.blobUrl); this.blobUrl = null; } // 中断也回收对象 URL，杜绝泄漏
     const r = this.resolveFn;
     this.resolveFn = null;
     r?.();
