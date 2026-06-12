@@ -56,3 +56,15 @@ def test_dub_list_returns_list():
 def test_dub_delete_missing_404():
     r = client.delete("/api/v1/dub/99999999")
     assert r.status_code == 404
+
+
+def test_dub_upload_rejects_oversize(monkeypatch):
+    # Shrink the cap so a tiny test file trips the server-side byte counter.
+    import app.services.dub_service as dub
+    monkeypatch.setattr(dub, "MAX_UPLOAD_BYTES", 4)
+
+    files = {"file": ("clip.mp4", b"way more than four bytes", "video/mp4")}
+    r = client.post("/api/v1/dub/generate-upload", files=files, data={"voice_id": "random"})
+    assert r.status_code == 200  # SSE stream opens, error is carried inside it
+    assert "error" in r.text
+    assert "100MB" in r.text  # the user-facing oversize message
