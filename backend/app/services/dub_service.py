@@ -13,6 +13,8 @@ from pydub import AudioSegment
 
 DUB_DIR = Path(os.getenv("DUB_VIDEO_DIR", "/data/dub_videos"))
 MAX_DURATION_S = 600
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024   # 100 MB upload cap
+DUB_RETENTION_DAYS = 7                  # auto-delete dubbed mp4s older than this
 _MAX_SPEED = 1.25
 _DUCK_DB = -18
 
@@ -238,3 +240,47 @@ def compose(video_path: str, voice_track: "AudioSegment", out_path: str) -> int:
             check=True, capture_output=True,
         )
         return int(len(original) / 1000)
+
+
+def probe_local_duration(video_path: str) -> int:
+    """ffprobe a local file for its duration (seconds). Raises ValueError if the
+    file isn't a readable video or exceeds the 10-minute cap."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", video_path],
+            check=True, capture_output=True, text=True,
+        )
+        dur = int(float(out.stdout.strip()))
+    except Exception as exc:
+        raise ValueError("无法识别为视频文件，请换一个文件。") from exc
+    if dur <= 0:
+        raise ValueError("无法读取视频时长。")
+    if dur > MAX_DURATION_S:
+        raise ValueError("视频超过 10 分钟上限，请换更短的视频。")
+    return dur
+
+
+def purge_expired(db) -> int:
+    """Delete DubVideo rows (and their mp4 files) older than DUB_RETENTION_DAYS.
+    Best-effort on files: a missing/unremovable file never blocks row deletion.
+    Returns the number of rows purged."""
+    from datetime import datetime, timedelta
+    from sqlalchemy import select
+    from app.models.entities import DubVideo
+
+    cutoff = datetime.utcnow() - timedelta(days=DUB_RETENTION_DAYS)
+    stale = db.scalars(select(DubVideo).where(DubVideo.created_at < cutoff)).all()
+    count = 0
+    for d in stale:
+        try:
+            p = Path(d.video_path)
+            if p.exists():
+                p.unlink()
+        except OSError:
+            pass
+        db.delete(d)
+        count += 1
+    if count:
+        db.commit()
+    return count

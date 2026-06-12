@@ -67,3 +67,72 @@ def test_plan_placements_anchors_caps_and_overflows():
     assert plans[1]["ratio"] == _MAX_SPEED and plans[1]["dur"] == 4000
     assert plans[1]["pos"] == 2000
     assert plans[2]["pos"] == 6000
+
+
+def test_probe_local_duration_rejects_too_long(monkeypatch):
+    import app.services.dub_service as dub
+
+    class R:
+        stdout = "700.0"
+
+    monkeypatch.setattr(dub.subprocess, "run", lambda *a, **k: R())
+    with pytest.raises(ValueError, match="10 分钟"):
+        dub.probe_local_duration("/tmp/x.mp4")
+
+
+def test_probe_local_duration_returns_seconds(monkeypatch):
+    import app.services.dub_service as dub
+
+    class R:
+        stdout = "300.5\n"
+
+    monkeypatch.setattr(dub.subprocess, "run", lambda *a, **k: R())
+    assert dub.probe_local_duration("/tmp/x.mp4") == 300
+
+
+def test_probe_local_duration_rejects_non_video(monkeypatch):
+    import app.services.dub_service as dub
+
+    def boom(*a, **k):
+        raise RuntimeError("not a video")
+
+    monkeypatch.setattr(dub.subprocess, "run", boom)
+    with pytest.raises(ValueError, match="无法识别为视频"):
+        dub.probe_local_duration("/tmp/notvideo.txt")
+
+
+def test_purge_expired_deletes_old_keeps_fresh(tmp_path):
+    from datetime import datetime, timedelta
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+    from app.models.entities import DubVideo
+    import app.services.dub_service as dub
+
+    engine = create_engine("sqlite://")
+    DubVideo.__table__.create(bind=engine)
+
+    old_file = tmp_path / "old.mp4"
+    old_file.write_bytes(b"x")
+    fresh_file = tmp_path / "fresh.mp4"
+    fresh_file.write_bytes(b"y")
+
+    now = datetime.utcnow()
+    with Session(engine) as s:
+        old = DubVideo(youtube_url=None, title="old", voice_id="v", video_path=str(old_file),
+                       created_at=now - timedelta(days=8))
+        fresh = DubVideo(youtube_url=None, title="fresh", voice_id="v", video_path=str(fresh_file),
+                         created_at=now)
+        missing = DubVideo(youtube_url=None, title="missing", voice_id="v",
+                           video_path=str(tmp_path / "gone.mp4"),
+                           created_at=now - timedelta(days=9))
+        s.add_all([old, fresh, missing])
+        s.commit()
+
+        purged = dub.purge_expired(s)
+
+        assert purged == 2  # old + missing
+        remaining = s.scalars(select(DubVideo)).all()
+        assert [d.title for d in remaining] == ["fresh"]
+
+    assert not old_file.exists()      # file removed
+    assert fresh_file.exists()        # fresh kept
