@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Flame, Layers, Search, Plus } from "lucide-react";
+import { Flame, Layers, Search, Plus, AudioLines } from "lucide-react";
 
 export default function ToolkitsPage() {
   return (
@@ -74,6 +74,33 @@ export default function ToolkitsPage() {
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">YouTube</span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">微信</span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-[#1f6f6b]/[0.12] text-[#1f6f6b]">● Ready</span>
+            </div>
+          </div>
+        </Link>
+
+        {/* Scribe */}
+        <Link href="/toolkits/scribe" className="block h-full group">
+          <div className="relative h-full flex flex-col overflow-hidden rounded-[26px] border border-ink/10 bg-gradient-to-br from-white to-[#eef0fb] p-7 pl-8 transition-all duration-200 hover:-translate-y-1 hover:border-indigo-400/50 hover:shadow-[0_22px_46px_-18px_rgba(79,70,229,0.4)]">
+            <span className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500 to-indigo-700" />
+            <AudioLines className="pointer-events-none absolute -right-5 -bottom-6 w-36 h-36 text-indigo-600 opacity-[0.05]" strokeWidth={1.5} />
+            <div className="relative z-10 flex items-start gap-4">
+              <div className="flex-shrink-0 w-[52px] h-[52px] rounded-[16px] bg-gradient-to-br from-indigo-400 via-indigo-600 to-indigo-700 text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(79,70,229,0.6)]">
+                <AudioLines className="w-[26px] h-[26px]" strokeWidth={2} />
+              </div>
+              <div>
+                <div className="text-[12px] font-semibold tracking-wide text-ink/45">YOUTUBE → 文字稿</div>
+                <h3 className="font-display text-[23px] font-semibold text-ink mt-0.5">
+                  录 <span className="text-ink/40 text-lg font-medium">Scribe</span>
+                </h3>
+              </div>
+            </div>
+            <p className="relative z-10 text-[13.5px] leading-relaxed text-ink/[0.68] mt-4">
+              把无字幕的 YouTube 视频用 Whisper <span className="text-ink font-medium">录</span>成文字稿 —— 原语言逐字转写，可复制下载。
+            </p>
+            <div className="relative z-10 flex flex-wrap gap-1.5 mt-auto pt-4">
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">Whisper</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">无字幕视频</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-indigo-100 text-indigo-600">● Ready</span>
             </div>
           </div>
         </Link>
