@@ -21,7 +21,7 @@ from app.models.entities import DubVideo
 from app.services.podcast_service import validate_youtube_url, resolve_voice
 from app.services import dub_service
 from app.services.dub_service import (
-    probe_duration, download_video, extract_segments,
+    probe_duration, download_video, extract_segments, merge_sentences,
     translate_segments, build_voice_track, compose, _ensure_dir,
 )
 
@@ -70,6 +70,7 @@ async def _process_video(
     # the loop stays free to ping and the SSE stream survives multi-minute phases.
     yield _sse("transcribing", "转写中...")
     segments = await run_in_threadpool(extract_segments, video_path, settings.openai_api_key)
+    segments = merge_sentences(segments)  # C：碎片合并成完整句，避免半句单独配音
 
     yield _sse("translating", "翻译中...")
     zh = await run_in_threadpool(

@@ -21,6 +21,11 @@ _CHARS_PER_SEC = 4.8    # estimate: MiniMax zh narration ≈ 4.8 chars/sec at sp
 _VOICE_FILL = 0.92      # voice occupies at most this fraction of the video, leaving breath
 _DUCK_DB = -18
 
+# C: 把 Whisper 碎片按句末标点合并成完整句再翻译/配音，避免半句（以「如果」等结尾）被单独成片。
+_SENT_END = ("。", "！", "？", "…", ".", "!", "?")
+_MERGE_MAX_MS = 12000   # 单个合并句的硬上限时长，防无标点长串并成巨句
+_MERGE_MAX_CHARS = 180  # 单个合并句的硬上限字数
+
 
 def _ensure_dir() -> Path:
     DUB_DIR.mkdir(parents=True, exist_ok=True)
@@ -118,6 +123,31 @@ def extract_segments(video_path: str, openai_api_key: str) -> List[Dict]:
     if not segs:
         raise ValueError("未检测到可转写的语音。")
     return segs
+
+
+def merge_sentences(segments: List[Dict]) -> List[Dict]:
+    """C：把 Whisper 的碎片合并成完整句——累积直到文本以句末标点结束（或触及时长/字数硬上限）。
+    合并单元 start=首片 start、end=末片 end、text=拼接。这样每段配音都是一个完整自然句，
+    不会停在「如果」这种半句，整体也不再破碎。空输入安全退回原 segments。"""
+    out: List[Dict] = []
+    cur: Optional[Dict] = None
+    for s in segments:
+        text = (s.get("text") or "").strip()
+        if not text:
+            continue
+        if cur is None:
+            cur = {"start": float(s["start"]), "end": float(s["end"]), "text": text}
+        else:
+            cur["end"] = float(s["end"])
+            cur["text"] = f"{cur['text']} {text}".strip()
+        ends_sentence = cur["text"].rstrip().endswith(_SENT_END)
+        too_big = (cur["end"] - cur["start"]) * 1000 >= _MERGE_MAX_MS or len(cur["text"]) >= _MERGE_MAX_CHARS
+        if ends_sentence or too_big:
+            out.append(cur)
+            cur = None
+    if cur is not None:
+        out.append(cur)
+    return out or segments
 
 
 _TRANSLATE_PROMPT = """把下面带编号的字幕逐条翻译成自然、口语化的中文。要求：

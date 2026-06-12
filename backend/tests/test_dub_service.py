@@ -58,6 +58,34 @@ def test_translate_segments_fallback_on_missing(monkeypatch):
     assert out == ["你好", "World"]
 
 
+def test_merge_sentences_groups_fragments():
+    from app.services.dub_service import merge_sentences
+    segs = [
+        {"start": 0.0, "end": 1.0, "text": "We will win"},
+        {"start": 1.0, "end": 2.0, "text": "if"},
+        {"start": 4.0, "end": 5.0, "text": "we try hard."},
+        {"start": 5.0, "end": 6.0, "text": "Next sentence!"},
+    ]
+    merged = merge_sentences(segs)
+    assert len(merged) == 2
+    assert merged[0]["text"] == "We will win if we try hard."
+    assert merged[0]["start"] == 0.0 and merged[0]["end"] == 5.0  # spans first..last fragment
+    assert merged[1]["text"] == "Next sentence!"
+
+
+def test_merge_sentences_force_splits_long_runon():
+    from app.services.dub_service import merge_sentences
+    # no terminal punctuation, but exceeds the char cap → must still split, never one giant clip
+    segs = [{"start": float(i), "end": float(i + 1), "text": "很长的没有标点的句子片段"} for i in range(40)]
+    merged = merge_sentences(segs)
+    assert len(merged) >= 2
+
+
+def test_merge_sentences_empty_safe():
+    from app.services.dub_service import merge_sentences
+    assert merge_sentences([]) == []
+
+
 def test_plan_placements_anchors_caps_and_overflows():
     from app.services.dub_service import plan_placements, _MAX_ATEMPO
     # video_ms=8000; segs end at 6s, video ends at 8s
