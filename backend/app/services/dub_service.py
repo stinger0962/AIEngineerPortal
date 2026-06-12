@@ -111,3 +111,123 @@ def extract_segments(video_path: str, openai_api_key: str) -> List[Dict]:
     if not segs:
         raise ValueError("未检测到可转写的语音。")
     return segs
+
+
+_TRANSLATE_PROMPT = """把下面带编号的字幕逐条翻译成自然、口语化的中文。要求：
+- 保持编号一一对应，每行输出「编号. 中文」
+- 不要合并或拆分条目，不要加任何说明或前言
+字幕：
+{numbered}"""
+
+
+def translate_segments(segments: List[Dict], anthropic_api_key: str, model: str) -> List[str]:
+    """One Claude call, numbered 1:1. Returns a Chinese list the same length as segments;
+    any missing line falls back to the original text so alignment never breaks."""
+    import anthropic
+
+    numbered = "\n".join(f"{i + 1}. {s['text']}" for i, s in enumerate(segments))
+    client = anthropic.Anthropic(api_key=anthropic_api_key)
+    msg = client.messages.create(
+        model=model,
+        max_tokens=4096,
+        messages=[{"role": "user", "content": _TRANSLATE_PROMPT.format(numbered=numbered)}],
+    )
+    raw = msg.content[0].text
+
+    by_idx: Dict[int, str] = {}
+    for line in raw.splitlines():
+        m = re.match(r"\s*(\d+)[\.、)]\s*(.+)", line)
+        if m:
+            by_idx[int(m.group(1))] = m.group(2).strip()
+
+    return [by_idx.get(i + 1) or s["text"] for i, s in enumerate(segments)]
+
+
+def plan_placements(segments: List[Dict], clip_durations_ms: List[int]) -> List[Dict]:
+    """Pure alignment math: given segments and each clip's natural duration (ms), return
+    [{pos, ratio, dur}] — placement (ms), atempo ratio (1.0 = none), final duration (ms).
+    Anchor each clip to its segment start; speed up only when over-slot (capped at _MAX_SPEED);
+    push later clips forward so nothing overlaps."""
+    out: List[Dict] = []
+    cursor = 0
+    for seg, clip_ms in zip(segments, clip_durations_ms):
+        start_ms = int(seg["start"] * 1000)
+        slot_ms = int((seg["end"] - seg["start"]) * 1000)
+        ratio = 1.0
+        if clip_ms > slot_ms and slot_ms > 0:
+            ratio = min(clip_ms / slot_ms, _MAX_SPEED)
+        final_ms = int(round(clip_ms / ratio))
+        pos = max(start_ms, cursor)
+        out.append({"pos": pos, "ratio": ratio, "dur": final_ms})
+        cursor = pos + final_ms
+    return out
+
+
+def _atempo(clip: "AudioSegment", ratio: float) -> "AudioSegment":
+    """Speed up via ffmpeg atempo (pitch-preserving). ratio in (1.0, 2.0]."""
+    if ratio <= 1.0:
+        return clip
+    with tempfile.TemporaryDirectory() as tmp:
+        src = str(Path(tmp) / "in.mp3")
+        dst = str(Path(tmp) / "out.mp3")
+        clip.export(src, format="mp3")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", src, "-filter:a", f"atempo={ratio:.3f}", dst],
+            check=True, capture_output=True,
+        )
+        return AudioSegment.from_file(dst)
+
+
+def build_voice_track(
+    segments: List[Dict],
+    zh_texts: List[str],
+    voice_id: str,
+    mm_key: str,
+    mm_group: str,
+    mm_model: str,
+    mm_base: str,
+    video_ms: int,
+) -> "AudioSegment":
+    """TTS each Chinese segment (reuse podcast _tts_bytes), speed-fit + anchor-place into a
+    silent track of length video_ms."""
+    from app.services.podcast_service import _tts_bytes
+
+    clips: List[Optional[AudioSegment]] = []
+    durations: List[int] = []
+    for zh in zh_texts:
+        if not zh.strip():
+            clips.append(None)
+            durations.append(0)
+            continue
+        data = _tts_bytes(zh, voice_id, mm_key, mm_group, mm_model, mm_base)
+        clip = AudioSegment.from_file(io.BytesIO(data))
+        clips.append(clip)
+        durations.append(len(clip))
+
+    plans = plan_placements(segments, durations)
+    base = AudioSegment.silent(duration=max(video_ms, 1))
+    for clip, plan in zip(clips, plans):
+        if clip is None:
+            continue
+        if plan["ratio"] > 1.0:
+            clip = _atempo(clip, plan["ratio"])
+        base = base.overlay(clip, position=plan["pos"])
+    return base
+
+
+def compose(video_path: str, voice_track: "AudioSegment", out_path: str) -> int:
+    """Duck the original audio (-18dB) + overlay the voice track, then mux onto the video.
+    Returns the output duration in seconds."""
+    with tempfile.TemporaryDirectory() as tmp:
+        orig_mp3 = _extract_audio(video_path, str(Path(tmp) / "orig.mp3"), 44100, 2)
+        original = AudioSegment.from_file(orig_mp3)
+        final = original.apply_gain(_DUCK_DB).overlay(voice_track)
+        final_path = str(Path(tmp) / "final.mp3")
+        final.export(final_path, format="mp3")
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", video_path, "-i", final_path,
+             "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac",
+             "-shortest", out_path],
+            check=True, capture_output=True,
+        )
+        return int(len(original) / 1000)
