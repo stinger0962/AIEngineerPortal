@@ -70,7 +70,8 @@ def test_plan_placements_anchors_caps_and_overflows():
     assert plans[0]["pos"] == 0 and plans[0]["ratio"] == 1.0 and plans[0]["dur"] == 1500
     assert plans[1]["ratio"] == _MAX_ATEMPO
     assert plans[1]["pos"] == 2000
-    assert plans[2]["pos"] > 4000
+    assert plans[1]["dur"] == 4348  # int(round(5000 / 1.15))
+    assert plans[2]["pos"] == 6348  # cursor pushed forward by capped seg1 (anti-overlap)
 
 
 def test_probe_local_duration_rejects_too_long(monkeypatch):
