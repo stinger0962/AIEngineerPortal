@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   title,
   description,
   openGraph: { title, description, type: "website", siteName: "AI Engineer Portal", locale: "zh_CN" },
-  twitter: { card: "summary", title, description },
+  twitter: { card: "summary_large_image", title, description },
 };
 
 export default function DubLayout({ children }: { children: React.ReactNode }) {
