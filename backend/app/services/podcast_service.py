@@ -340,6 +340,7 @@ def _tts_bytes(
     group_id: str,
     model: str = "speech-2.6-hd",
     api_base: str = "https://api.minimax.io",
+    speed: float = 1.0,
 ) -> bytes:
     """
     Call MiniMax (海螺) T2A v2 API and return raw MP3 bytes.
@@ -363,7 +364,7 @@ def _tts_bytes(
             "stream": False,
             "voice_setting": {
                 "voice_id": voice_id,
-                "speed": 1.0,
+                "speed": speed,
                 "vol": 1.0,
                 "pitch": 0,
             },
