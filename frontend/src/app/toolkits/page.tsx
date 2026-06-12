@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Flame, Layers, Search, Plus, AudioLines } from "lucide-react";
+import { Flame, Layers, Search, Plus, AudioLines, Languages } from "lucide-react";
 
 export default function ToolkitsPage() {
   return (
@@ -101,6 +101,33 @@ export default function ToolkitsPage() {
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">Whisper</span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">无字幕视频</span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-indigo-100 text-indigo-600">● Ready</span>
+            </div>
+          </div>
+        </Link>
+
+        {/* Dub */}
+        <Link href="/toolkits/dub" className="block h-full group">
+          <div className="relative h-full flex flex-col overflow-hidden rounded-[26px] border border-ink/10 bg-gradient-to-br from-white to-[#fdeef1] p-7 pl-8 transition-all duration-200 hover:-translate-y-1 hover:border-rose-400/50 hover:shadow-[0_22px_46px_-18px_rgba(225,29,72,0.4)]">
+            <span className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-rose-500 to-rose-700" />
+            <Languages className="pointer-events-none absolute -right-5 -bottom-6 w-36 h-36 text-rose-600 opacity-[0.05]" strokeWidth={1.5} />
+            <div className="relative z-10 flex items-start gap-4">
+              <div className="flex-shrink-0 w-[52px] h-[52px] rounded-[16px] bg-gradient-to-br from-rose-400 via-rose-600 to-rose-700 text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(225,29,72,0.6)]">
+                <Languages className="w-[26px] h-[26px]" strokeWidth={2} />
+              </div>
+              <div>
+                <div className="text-[12px] font-semibold tracking-wide text-ink/45">外语视频 → 中文配音</div>
+                <h3 className="font-display text-[23px] font-semibold text-ink mt-0.5">
+                  配 <span className="text-ink/40 text-lg font-medium">Dub</span>
+                </h3>
+              </div>
+            </div>
+            <p className="relative z-10 text-[13.5px] leading-relaxed text-ink/[0.68] mt-4">
+              把外语 YouTube 视频<span className="text-ink font-medium">配</span>成中文旁白视频 —— 原声压低做背景，配音对齐时间轴。
+            </p>
+            <div className="relative z-10 flex flex-wrap gap-1.5 mt-auto pt-4">
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">Whisper</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">中文 TTS</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-rose-100 text-rose-600">● Ready</span>
             </div>
           </div>
         </Link>
