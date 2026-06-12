@@ -367,3 +367,14 @@ class ZiweiMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     chart_context_json: Mapped[Dict] = mapped_column(JSON, default=dict)  # 当时盘面上下文：focus宫位、流年年份等
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ScribeTranscript(Base):
+    __tablename__ = "scribe_transcripts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    youtube_url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    transcript: Mapped[str] = mapped_column(Text, nullable=False)
+    char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     ai_model: str = "claude-sonnet-4-20250514"
     ai_daily_token_budget: int = 100_000
+    openai_api_key: str = ""  # OpenAI Whisper (录 Scribe transcription)
     # MiniMax (海螺) TTS — purpose-built for Mandarin, replaces ElevenLabs
     minimax_api_key: str = ""
     minimax_group_id: str = ""
