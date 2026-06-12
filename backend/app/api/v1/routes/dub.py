@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.db.session import get_db
@@ -63,15 +64,22 @@ async def _process_video(
 ) -> AsyncGenerator[dict, None]:
     """Shared tail of the pipeline: transcribe → translate → voice → compose → save.
     Both the YouTube and upload routes call this once they have a local video_path."""
+    # Every heavy call below is synchronous (yt-dlp/ffmpeg/Whisper/TTS) and would
+    # block the event loop — starving sse-starlette's keepalive ping and dropping
+    # the connection during the slow proxied download. Run them in a threadpool so
+    # the loop stays free to ping and the SSE stream survives multi-minute phases.
     yield _sse("transcribing", "转写中...")
-    segments = extract_segments(video_path, settings.openai_api_key)
+    segments = await run_in_threadpool(extract_segments, video_path, settings.openai_api_key)
 
     yield _sse("translating", "翻译中...")
-    zh = translate_segments(segments, settings.anthropic_api_key, settings.ai_model)
+    zh = await run_in_threadpool(
+        translate_segments, segments, settings.anthropic_api_key, settings.ai_model
+    )
 
     yield _sse("voicing", "配音中...")
     voice_id = resolve_voice(voice_id_req)
-    voice_track = build_voice_track(
+    voice_track = await run_in_threadpool(
+        build_voice_track,
         segments, zh, voice_id,
         settings.minimax_api_key, settings.minimax_group_id,
         settings.minimax_model, settings.minimax_api_base,
@@ -86,7 +94,7 @@ async def _process_video(
     db.add(item)
     db.flush()
     out_path = str(_ensure_dir() / f"{item.id}.mp4")
-    duration = compose(video_path, voice_track, out_path)
+    duration = await run_in_threadpool(compose, video_path, voice_track, out_path)
     item.video_path = out_path
     item.duration_secs = duration
     db.commit()
@@ -106,10 +114,12 @@ async def generate(payload: DubRequest, db: Session = Depends(get_db)):
         try:
             dub_service.purge_expired(db)
             yield _sse("downloading", "下载视频中...")
-            dur_s = probe_duration(payload.youtube_url)
+            dur_s = await run_in_threadpool(probe_duration, payload.youtube_url)
 
             with tempfile.TemporaryDirectory() as tmp:
-                title, video_path = download_video(payload.youtube_url, tmp)
+                title, video_path = await run_in_threadpool(
+                    download_video, payload.youtube_url, tmp
+                )
                 async for ev in _process_video(
                     db, settings, video_path=video_path, title=title,
                     source_url=payload.youtube_url, voice_id_req=payload.voice_id, dur_s=dur_s,
@@ -156,7 +166,7 @@ async def generate_upload(
                 dest.write_bytes(raw)
 
                 title = Path(filename).stem or "上传视频"
-                dur_s = dub_service.probe_local_duration(str(dest))
+                dur_s = await run_in_threadpool(dub_service.probe_local_duration, str(dest))
                 async for ev in _process_video(
                     db, settings, video_path=str(dest), title=title,
                     source_url=None, voice_id_req=voice_id, dur_s=dur_s,

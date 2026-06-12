@@ -52,11 +52,13 @@ def probe_duration(youtube_url: str) -> int:
 
 
 def download_video(youtube_url: str, out_dir: str) -> Tuple[str, str]:
-    """yt-dlp merged mp4 (<=720p) via Webshare proxy. Returns (title, video_path)."""
+    """yt-dlp merged mp4 (<=480p) via Webshare proxy. Returns (title, video_path).
+    Capped at 480p because the residential proxy is bandwidth-throttled and the video
+    is only a backdrop for the Chinese narration — smaller download, faster dubbing."""
     import yt_dlp
 
     opts = {
-        "format": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best",
+        "format": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]/best",
         "merge_output_format": "mp4",
         "outtmpl": str(Path(out_dir) / "dub.%(ext)s"),
         "noplaylist": True,
