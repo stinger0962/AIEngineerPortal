@@ -378,3 +378,15 @@ class ScribeTranscript(Base):
     transcript: Mapped[str] = mapped_column(Text, nullable=False)
     char_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DubVideo(Base):
+    __tablename__ = "dub_videos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    youtube_url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    voice_id: Mapped[str] = mapped_column(Text, nullable=False)
+    video_path: Mapped[str] = mapped_column(Text, nullable=False)
+    duration_secs: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

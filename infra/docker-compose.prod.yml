@@ -50,6 +50,7 @@ services:
       WEBSHARE_PROXY_PASSWORD: ${WEBSHARE_PROXY_PASSWORD:-}
     volumes:
       - podcast_audio:/data/podcast_audio
+      - dub_videos:/data/dub_videos
     depends_on:
       postgres:
         condition: service_healthy
@@ -95,3 +96,4 @@ volumes:
   caddy_data:
   caddy_config:
   podcast_audio:
+  dub_videos:
