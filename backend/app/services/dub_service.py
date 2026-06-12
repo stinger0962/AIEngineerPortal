@@ -224,9 +224,16 @@ def compose(video_path: str, voice_track: "AudioSegment", out_path: str) -> int:
         final = original.apply_gain(_DUCK_DB).overlay(voice_track)
         final_path = str(Path(tmp) / "final.mp3")
         final.export(final_path, format="mp3")
+        # mp4 can't hold VP9/VP8 via stream-copy. If yt-dlp fell back to webm/mkv,
+        # re-encode the video to H.264; otherwise copy the stream (fast, lossless).
+        ext = Path(video_path).suffix.lower()
+        if ext in (".webm", ".mkv"):
+            video_codec_args = ["-c:v", "libx264", "-preset", "fast", "-crf", "23"]
+        else:
+            video_codec_args = ["-c:v", "copy"]
         subprocess.run(
             ["ffmpeg", "-y", "-i", video_path, "-i", final_path,
-             "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac",
+             "-map", "0:v:0", "-map", "1:a:0", *video_codec_args, "-c:a", "aac",
              "-shortest", out_path],
             check=True, capture_output=True,
         )
