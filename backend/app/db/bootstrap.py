@@ -49,6 +49,12 @@ SUMMARIES_COLUMN_PATCHES = {
     ],
 }
 
+# Columns whose NOT NULL must be relaxed on already-existing tables.
+# (create_all handles new DBs; this handles the prod table created earlier.)
+NULLABILITY_PATCHES = {
+    "dub_videos": ["youtube_url"],
+}
+
 
 MEMORY_CARDS_CREATE_DDL = """
 CREATE TABLE IF NOT EXISTS memory_cards (
@@ -114,6 +120,21 @@ def apply_runtime_schema_patches(engine: Engine) -> None:
                 connection.execute(
                     text(f"UPDATE {table_name} SET last_synced_at = CURRENT_TIMESTAMP WHERE last_synced_at IS NULL")
                 )
+
+        # Relax NOT NULL on columns that gained nullable semantics later.
+        # Postgres-only DDL; on SQLite the model's create_all already made it
+        # nullable, so this is a guarded no-op there.
+        if connection.dialect.name == "postgresql":
+            for table_name, columns in NULLABILITY_PATCHES.items():
+                if table_name not in existing_tables:
+                    continue
+                col_info = {c["name"]: c for c in inspector.get_columns(table_name)}
+                for col in columns:
+                    info = col_info.get(col)
+                    if info is not None and info.get("nullable") is False:
+                        connection.execute(
+                            text(f"ALTER TABLE {table_name} ALTER COLUMN {col} DROP NOT NULL")
+                        )
 
         # Apply index patches idempotently on existing databases
         for index_ddl in INDEX_PATCHES:

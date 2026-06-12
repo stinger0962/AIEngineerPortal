@@ -384,7 +384,7 @@ class DubVideo(Base):
     __tablename__ = "dub_videos"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    youtube_url: Mapped[str] = mapped_column(Text, nullable=False)
+    youtube_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     voice_id: Mapped[str] = mapped_column(Text, nullable=False)
     video_path: Mapped[str] = mapped_column(Text, nullable=False)
