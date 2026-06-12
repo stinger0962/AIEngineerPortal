@@ -6,7 +6,7 @@ import type { CameraCommand, OracleSegment, OracleStreamHandlers } from "@/lib/z
 import type { ZiweiChart } from "@/lib/ziwei/types";
 import type { TermInfo } from "../term-card";
 import { fireCamera } from "./camera";
-import { BrowserNarration, SilentNarration, type NarrationSource } from "@/lib/ziwei/narration";
+import { CloudNarration, SilentNarration, type NarrationSource } from "@/lib/ziwei/narration";
 
 const SETTLE_MS = 550;
 const GAP_MS = 300;
@@ -70,7 +70,7 @@ export type TourDeps = {
 
 export function useOracleTour() {
   const queueRef = useRef<BeatQueue | null>(null);
-  const browserRef = useRef<NarrationSource | null>(null);
+  const cloudRef = useRef<NarrationSource | null>(null);
   const silentRef = useRef<NarrationSource>(new SilentNarration());
   const mutedRef = useRef(false);
   const skippedRef = useRef(false);
@@ -81,8 +81,8 @@ export function useOracleTour() {
   // 仅依据 mute 选源；作废与否由 play 的令牌检查负责（作废的循环根本走不到 speak）。
   const getNarration = (): NarrationSource => {
     if (mutedRef.current) return silentRef.current;
-    if (!browserRef.current) browserRef.current = new BrowserNarration();
-    return browserRef.current;
+    if (!cloudRef.current) cloudRef.current = new CloudNarration();
+    return cloudRef.current;
   };
 
   const begin = useCallback((): { queue: BeatQueue; handlers: OracleStreamHandlers } => {
@@ -147,20 +147,20 @@ export function useOracleTour() {
 
   const skip = useCallback(() => {
     skippedRef.current = true;
-    browserRef.current?.cancel();
+    cloudRef.current?.cancel();
     silentRef.current.cancel();
   }, []);
 
   const cancel = useCallback(() => {
     runRef.current = {};                               // 换令牌作废所有在跑的循环
-    browserRef.current?.cancel();
+    cloudRef.current?.cancel();
     silentRef.current.cancel();
     queueRef.current?.close(null, false);
   }, []);
 
   const setMuted = useCallback((muted: boolean) => {
     mutedRef.current = muted;
-    if (muted) browserRef.current?.cancel();
+    if (muted) cloudRef.current?.cancel();
   }, []);
 
   const beginFromSegments = useCallback((segments: OracleSegment[]): BeatQueue => {

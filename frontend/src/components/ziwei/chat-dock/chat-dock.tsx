@@ -8,6 +8,7 @@ import type { ChatMessage, DockState } from "./types";
 import { useOracleTour } from "./use-oracle-tour";
 import { PersonaSwitch } from "./persona-switch";
 import { HistoryPanel } from "./history-panel";
+import { stripMarkdown } from "@/lib/ziwei/text";
 
 type ChatDockProps = {
   profileId: number;
@@ -307,7 +308,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
                 </div>
               ) : (
                 <>
-                  {m.content}
+                  {stripMarkdown(m.content)}
                   {m.pending ? <span className="animate-pulse text-violet-300/70">▌</span> : null}
                   {!m.pending && m.segments && m.segments.length > 0 ? (
                     <div className="mt-1">
