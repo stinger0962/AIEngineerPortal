@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     minimax_group_id: str = ""
     minimax_api_base: str = "https://api.minimax.io"
     minimax_model: str = "speech-2.6-hd"
+    minimax_oracle_voice_id: str = "Chinese (Mandarin)_Radio_Host"  # 解盘师默认嗓音，可经 env MINIMAX_ORACLE_VOICE_ID 覆盖
     # Voice selection is driven by VOICE_CATALOG in podcast_service.py (curated pool
     # + random picker), not by fixed env vars.
     webshare_proxy_username: str = ""   # Webshare rotating residential proxy username (proxy.webshare.io)

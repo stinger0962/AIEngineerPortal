@@ -6,12 +6,13 @@ import time
 from datetime import date, datetime
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 
+from app.core.config import get_settings
 from app.db.session import SessionLocal, get_db
 from app.models.entities import (
     AIFeedback,
@@ -21,6 +22,7 @@ from app.models.entities import (
     ZiweiProfile,
 )
 from app.services.ai_service import AIService
+from app.services.podcast_service import _tts_bytes
 from app.services.ziwei.oracle import ZiweiOracle
 from app.services.ziwei.oracle_tools import StreamMarkerParser
 
@@ -31,6 +33,13 @@ VALID_RELATIONS = {"self", "family", "friend"}
 VALID_GENDERS = {"male", "female"}
 VALID_PERSONAS = {"sage", "taoist", "analyst"}
 BIRTH_DATE_PATTERN = re.compile(r"^\d{4}-\d{1,2}-\d{1,2}$")
+
+_MD_RE = re.compile(r"\*\*|\*|__|_|`|~~|#")
+
+
+def _strip_markdown(text: str) -> str:
+    """去掉 markdown 强调符号，避免 TTS 把 ** 念成「星号星号」。"""
+    return _MD_RE.sub("", text).strip()
 
 
 class ProfileCreate(BaseModel):
@@ -54,6 +63,10 @@ class ProfileUpdate(BaseModel):
     is_leap_month: Optional[bool] = None
     chart_json: Optional[Dict] = None
     persona: Optional[str] = None
+
+
+class TtsRequest(BaseModel):
+    text: str
 
 
 def _validate(field: str, value, allowed=None) -> None:
@@ -331,3 +344,26 @@ def list_conversations(profile_id: int, db: Session = Depends(get_db)):
 def list_messages(conversation_id: int, db: Session = Depends(get_db)):
     msgs = db.scalars(select(ZiweiMessage).where(ZiweiMessage.conversation_id == conversation_id).order_by(ZiweiMessage.id.asc())).all()
     return [{"id": m.id, "role": m.role, "content": m.content, "chart_context_json": m.chart_context_json or {}, "created_at": m.created_at.isoformat() if m.created_at else None} for m in msgs]
+
+
+@router.post("/tts")
+def ziwei_tts(payload: TtsRequest):
+    settings = get_settings()
+    if not settings.minimax_api_key or not settings.minimax_group_id:
+        raise HTTPException(503, "TTS not configured")
+    text = _strip_markdown(payload.text or "")[:800]
+    if not text:
+        raise HTTPException(400, "Empty text")
+    try:
+        mp3 = _tts_bytes(
+            text,
+            settings.minimax_oracle_voice_id,
+            settings.minimax_api_key,
+            settings.minimax_group_id,
+            settings.minimax_model,
+            settings.minimax_api_base,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("ziwei tts failed")
+        raise HTTPException(502, "TTS upstream error") from exc
+    return Response(content=mp3, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
