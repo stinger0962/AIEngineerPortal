@@ -21,7 +21,12 @@ class FakeClient:
     def __init__(self, response): self._r = response; self.calls = []
     class _M:
         def __init__(self, o): self._o = o
-        def create(self, **k): self._o.calls.append(k); return self._o._r
+        def create(self, **k):
+            self._o.calls.append(k)
+            r = self._o._r
+            if isinstance(r, Exception):
+                raise r
+            return r
     @property
     def messages(self): return FakeClient._M(self)
 

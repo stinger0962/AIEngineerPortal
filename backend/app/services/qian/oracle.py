@@ -38,8 +38,6 @@ class QianOracle:
                 model=self.model, max_tokens=1200, system=system,
                 messages=[{"role": "user", "content": question}], timeout=60.0,
             )
-            if isinstance(resp, Exception):
-                raise resp
         except Exception:
             return None
         text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
