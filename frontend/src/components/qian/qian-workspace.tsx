@@ -6,11 +6,24 @@ import { useOracleTour } from "@/components/ziwei/chat-dock/use-oracle-tour";
 import { TermCard, type TermInfo } from "@/components/ziwei/term-card";
 import { makeQianFireCommand } from "./qian-camera";
 
+// ── Font stacks ────────────────────────────────────────────────────────────────
+const KAITI = "'STKaiti','KaiTi STD','KaiTi','楷体','Kaiti SC',serif";
+const SONGTI = "'Songti SC','Noto Serif CJK SC','SimSun',serif";
+
+// ── Grade → badge palette ──────────────────────────────────────────────────────
+function gradeBadge(grade: string): { bg: string; text: string } {
+  if (grade.includes("上")) return { bg: "#b8862f", text: "#fff4dc" };
+  if (grade.includes("下")) return { bg: "#8a3a22", text: "#e8c9a6" };
+  return { bg: "#9c6b1a", text: "#f0dcae" };
+}
+
 const QianScene = dynamic(() => import("./scene3d/qian-scene"), {
   ssr: false,
   loading: () => (
     <div className="flex h-full min-h-[420px] items-center justify-center">
-      <p className="animate-pulse text-sm text-[#d6a84a]/70">正在备好签筒……</p>
+      <p className="animate-pulse text-sm" style={{ color: "rgba(214,168,74,.7)" }}>
+        正在备好签筒……
+      </p>
     </div>
   ),
 });
@@ -95,62 +108,233 @@ export function QianWorkspace() {
     setPhase("idle");
   };
 
+  // Split poetry on 。 into lines, re-appending the 。
+  const poetryLines = sign?.poetry
+    ? sign.poetry
+        .split("。")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((s) => s + "。")
+    : [];
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-      <div className="relative overflow-hidden rounded-[28px] border border-[#d6a84a]/20 bg-[#140e08] min-h-[420px] h-[64vh]">
-        <QianScene shaking={phase === "shaking"} drawn={!!sign} onRenderError={() => {}} />
-        {term ? <TermCard info={term} onClose={() => setTerm(null)} /> : null}
-      </div>
-      <div className="flex flex-col gap-4">
-        <textarea
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          rows={3}
-          placeholder="写下你想问的事，例如「这段时间的事业」……"
-          className="resize-none rounded-2xl border border-[#d6a84a]/30 bg-[#1b130b] px-4 py-3 text-sm text-[#f4ece0] placeholder-[#d6a84a]/40 outline-none focus:border-[#d6a84a]/60"
-        />
-        <button
-          type="button"
-          onClick={() => void shake()}
-          disabled={!question.trim() || phase !== "idle"}
-          className="rounded-2xl bg-gradient-to-br from-[#d6a84a] to-[#b9472f] px-4 py-3 text-sm font-semibold text-[#140e08] disabled:opacity-40"
+    /* ── Outer dark immersive card ─────────────────────────────────────────── */
+    <div
+      className="rounded-3xl p-5"
+      style={{
+        background:
+          "radial-gradient(ellipse 80% 60% at 50% 40%, rgba(185,71,47,.22) 0%, #160f08 70%)",
+        border: "1px solid #3a2a14",
+        borderRadius: "24px",
+      }}
+    >
+      <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
+
+        {/* ── Left: 3D Scene ─────────────────────────────────────────────────── */}
+        <div
+          className="relative min-h-[420px] h-[64vh] overflow-hidden"
+          style={{
+            borderRadius: "18px",
+            border: "1px solid rgba(214,168,74,.25)",
+          }}
         >
-          {phase === "idle" ? "摇 签" : phase === "shaking" ? "摇签中…" : "解签中…"}
-        </button>
-        {error ? (
-          <p className="text-xs text-[#e8794f]" role="alert">
-            {error}
-          </p>
-        ) : null}
-        {sign ? (
-          <div className="rounded-2xl border border-[#d6a84a]/25 bg-[#1b130b] p-4">
-            <p className="text-xs text-[#d6a84a]">
-              第 {sign.id} 签 · {sign.grade} · {sign.palace}
+          {/* Gold corner brackets */}
+          <span className="pointer-events-none absolute left-2 top-2 h-5 w-5 border-l border-t" style={{ borderColor: "#d6a84a" }} />
+          <span className="pointer-events-none absolute right-2 top-2 h-5 w-5 border-r border-t" style={{ borderColor: "#d6a84a" }} />
+          <span className="pointer-events-none absolute bottom-2 left-2 h-5 w-5 border-b border-l" style={{ borderColor: "#d6a84a" }} />
+          <span className="pointer-events-none absolute bottom-2 right-2 h-5 w-5 border-b border-r" style={{ borderColor: "#d6a84a" }} />
+
+          <QianScene shaking={phase === "shaking"} drawn={!!sign} onRenderError={() => {}} />
+          {term ? <TermCard info={term} onClose={() => setTerm(null)} /> : null}
+        </div>
+
+        {/* ── Right: Controls + signcard + 解签 ──────────────────────────────── */}
+        <div className="flex flex-col gap-4">
+
+          {/* Question textarea */}
+          <textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            rows={3}
+            placeholder="写下你想问的事，例如「这段时间的事业」……"
+            className="resize-none rounded-2xl px-4 py-3 text-sm outline-none focus:outline-none"
+            style={{
+              background: "#1b130b",
+              border: "1px solid rgba(214,168,74,.30)",
+              color: "#f4ece0",
+              fontFamily: SONGTI,
+            }}
+          />
+
+          {/* 摇签 button */}
+          <button
+            type="button"
+            onClick={() => void shake()}
+            disabled={!question.trim() || phase !== "idle"}
+            className="w-full rounded-2xl py-3 text-sm font-bold tracking-[4px] disabled:opacity-40 transition-opacity"
+            style={{
+              background: "linear-gradient(180deg,#e7c372 0%,#c1872f 100%)",
+              color: "#2a1708",
+              letterSpacing: "4px",
+            }}
+          >
+            {phase === "idle" ? "摇 签" : phase === "shaking" ? "摇签中…" : "解签中…"}
+          </button>
+
+          {/* Error */}
+          {error ? (
+            <p className="text-xs" role="alert" style={{ color: "#e8794f" }}>
+              {error}
             </p>
-            <p className="mt-1 text-sm font-semibold text-[#f4ece0]">{sign.title}</p>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-[#e9dcc4]">
-              {sign.poetry}
-            </p>
-          </div>
-        ) : null}
-        {answer ? (
-          <div className="whitespace-pre-wrap rounded-2xl border border-[#d6a84a]/15 bg-[#1b130b]/60 p-4 text-sm leading-relaxed text-[#f4ece0]">
-            {answer}
-          </div>
-        ) : null}
-        {history.length > 0 ? (
-          <div className="mt-2">
-            <p className="text-xs uppercase tracking-[0.2em] text-[#d6a84a]/60">我的灵签</p>
-            <div className="mt-2 space-y-1.5">
-              {history.slice(0, 5).map((h) => (
-                <div key={h.id} className="rounded-xl border border-[#d6a84a]/15 bg-[#1b130b]/50 px-3 py-2 text-xs text-[#e9dcc4]/80">
-                  <span className="text-[#d6a84a]">第{h.sign_id}签 · {h.grade}</span>
-                  <span className="ml-2 text-[#e9dcc4]/60">{h.question}</span>
-                </div>
-              ))}
+          ) : null}
+
+          {/* ── Sign card (做旧签纸) ─────────────────────────────────────────── */}
+          {sign ? (
+            <div
+              className="relative rounded-2xl p-4"
+              style={{
+                background: "linear-gradient(160deg,#efe3c8,#e0cda0)",
+                border: "1px solid #d6a84a",
+              }}
+            >
+              {/* 朱砂 seal — top right */}
+              <div
+                className="absolute right-4 top-4 flex items-center justify-center"
+                style={{
+                  width: 42,
+                  height: 42,
+                  background: "#b9472f",
+                  borderRadius: 7,
+                  transform: "rotate(-6deg)",
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: KAITI,
+                    fontSize: 20,
+                    color: "#f4d9b0",
+                    lineHeight: 1,
+                  }}
+                >
+                  灵
+                </span>
+              </div>
+
+              {/* 吉凶 badge */}
+              {(() => {
+                const { bg, text } = gradeBadge(sign.grade);
+                return (
+                  <span
+                    className="inline-block rounded px-2 py-0.5 text-xs font-semibold"
+                    style={{ background: bg, color: text }}
+                  >
+                    {sign.grade}
+                  </span>
+                );
+              })()}
+
+              {/* 签号 · palace · title */}
+              <p
+                className="mt-1.5 text-xs"
+                style={{ color: "#7a5a2c", fontFamily: SONGTI }}
+              >
+                第 {sign.id} 签 · {sign.palace} · {sign.title}
+              </p>
+
+              {/* 签诗 divider + poetry */}
+              <div
+                className="mt-3 pt-3"
+                style={{ borderTop: "1px solid rgba(122,58,29,.3)" }}
+              >
+                {poetryLines.length > 0 ? (
+                  poetryLines.map((line, i) => (
+                    <p
+                      key={i}
+                      style={{
+                        fontFamily: KAITI,
+                        fontSize: 20,
+                        lineHeight: 1.7,
+                        color: "#3a230f",
+                      }}
+                    >
+                      {line}
+                    </p>
+                  ))
+                ) : (
+                  <p
+                    className="whitespace-pre-wrap"
+                    style={{
+                      fontFamily: KAITI,
+                      fontSize: 20,
+                      lineHeight: 1.7,
+                      color: "#3a230f",
+                    }}
+                  >
+                    {sign.poetry}
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+
+          {/* ── 解签 glass panel ─────────────────────────────────────────────── */}
+          {answer ? (
+            <div
+              className="rounded-2xl p-4"
+              style={{
+                background: "rgba(28,18,9,.55)",
+                backdropFilter: "blur(8px)",
+                WebkitBackdropFilter: "blur(8px)",
+                border: "1px solid rgba(214,168,74,.4)",
+              }}
+            >
+              <p
+                className="mb-2 text-xs tracking-[4px]"
+                style={{ color: "#d6a84a", fontFamily: KAITI }}
+              >
+                解 签
+              </p>
+              <p
+                className="whitespace-pre-wrap text-sm leading-[1.75]"
+                style={{ color: "#e4d7ba", fontFamily: SONGTI }}
+              >
+                {answer}
+              </p>
+            </div>
+          ) : null}
+
+          {/* ── History 我的灵签 ──────────────────────────────────────────────── */}
+          {history.length > 0 ? (
+            <div className="mt-2">
+              <p
+                className="text-xs uppercase tracking-[0.2em]"
+                style={{ color: "rgba(214,168,74,.6)" }}
+              >
+                我的灵签
+              </p>
+              <div className="mt-2 space-y-1.5">
+                {history.slice(0, 5).map((h) => (
+                  <div
+                    key={h.id}
+                    className="rounded-xl px-3 py-2 text-xs"
+                    style={{
+                      background: "rgba(28,18,9,.4)",
+                      border: "1px solid rgba(214,168,74,.15)",
+                    }}
+                  >
+                    <span style={{ color: "#d6a84a" }}>
+                      第{h.sign_id}签 · {h.grade}
+                    </span>
+                    <span className="ml-2" style={{ color: "rgba(233,220,196,.7)" }}>
+                      {h.question}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
