@@ -285,6 +285,9 @@ def compose(video_path: str, voice_track: "AudioSegment", out_path: str) -> int:
         subprocess.run(
             ["ffmpeg", "-y", "-i", video_path, "-i", final_path,
              "-map", "0:v:0", "-map", "1:a:0", *video_codec_args, "-c:a", "aac",
+             # +faststart 把 moov 元数据挪到文件开头：iOS <video> 第一段就能起播，不必先跳到
+             # 文件末尾找 moov——在弱网（如经 GFW/Cloudflare 的跨境大媒体流）下少几次易被重置的来回。
+             "-movflags", "+faststart",
              "-shortest", out_path],
             check=True, capture_output=True,
         )
