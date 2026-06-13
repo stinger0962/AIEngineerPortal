@@ -29,10 +29,7 @@ class QianRequest(BaseModel):
 
 
 def _get_user_id(db: Session) -> int:
-    try:
-        return db.scalar(select(User.id).limit(1)) or 1
-    except Exception:
-        return 1
+    return db.scalar(select(User.id).limit(1)) or 1
 
 
 @router.post("/oracle/stream")

@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 import app.api.v1.routes.qian as qian_routes
 from app.db.session import get_db
 from app.main import app
-from app.models.entities import QianReading
+from app.models.entities import QianReading, User
 
 TEST_DIR = Path(mkdtemp(prefix="qian-tests-"))
 engine = create_engine(f"sqlite:///{(TEST_DIR/'t.db').as_posix()}", connect_args={"check_same_thread": False})
@@ -49,6 +49,7 @@ def override_get_db():
 
 
 def setup_module():
+    User.__table__.create(bind=engine, checkfirst=True)
     QianReading.__table__.create(bind=engine, checkfirst=True)
     with engine.begin() as conn:
         conn.execute(text(
