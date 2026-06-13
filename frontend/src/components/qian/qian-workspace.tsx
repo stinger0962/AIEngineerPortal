@@ -1,7 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
-import { qianApi, QianApiError, type QianSign } from "@/lib/qian/api";
+import { qianApi, QianApiError, type QianSign, type QianReadingOut } from "@/lib/qian/api";
 import { useOracleTour } from "@/components/ziwei/chat-dock/use-oracle-tour";
 import { TermCard, type TermInfo } from "@/components/ziwei/term-card";
 import { makeQianFireCommand } from "./qian-camera";
@@ -22,11 +22,16 @@ export function QianWorkspace() {
   const [answer, setAnswer] = useState("");
   const [term, setTerm] = useState<TermInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<QianReadingOut[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const tour = useOracleTour();
 
   // 卸载时中止在途流 + 停指挥器，避免对已卸载组件 setState / 残留朗读
   useEffect(() => () => { abortRef.current?.abort(); tour.cancel(); }, [tour]);
+
+  useEffect(() => {
+    if (phase === "idle") qianApi.listReadings().then(setHistory).catch(() => {});
+  }, [phase]);
 
   const shake = async () => {
     const q = question.trim();
@@ -129,6 +134,19 @@ export function QianWorkspace() {
         {answer ? (
           <div className="whitespace-pre-wrap rounded-2xl border border-[#d6a84a]/15 bg-[#1b130b]/60 p-4 text-sm leading-relaxed text-[#f4ece0]">
             {answer}
+          </div>
+        ) : null}
+        {history.length > 0 ? (
+          <div className="mt-2">
+            <p className="text-xs uppercase tracking-[0.2em] text-[#d6a84a]/60">我的灵签</p>
+            <div className="mt-2 space-y-1.5">
+              {history.slice(0, 5).map((h) => (
+                <div key={h.id} className="rounded-xl border border-[#d6a84a]/15 bg-[#1b130b]/50 px-3 py-2 text-xs text-[#e9dcc4]/80">
+                  <span className="text-[#d6a84a]">第{h.sign_id}签 · {h.grade}</span>
+                  <span className="ml-2 text-[#e9dcc4]/60">{h.question}</span>
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
       </div>
