@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ziweiApi, ZiweiApiError } from "@/lib/ziwei/api";
+import type { CameraCommand } from "@/lib/ziwei/api";
 import type { ZiweiChart } from "@/lib/ziwei/types";
 import type { TermInfo } from "@/components/ziwei/term-card";
+import { fireCamera } from "./camera";
 import type { ChatMessage, DockState } from "./types";
 import { useOracleTour } from "./use-oracle-tour";
 import { PersonaSwitch } from "./persona-switch";
@@ -56,6 +58,11 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     tour.setMuted(next);
   };
 
+  const fireCommand = (cmd: CameraCommand) => {
+    if (cmd.type === "overview") { onFocusBranch(null); onTerm(null); return; }
+    fireCamera(cmd, { chart, onFocusBranch, onTerm });
+  };
+
   const handlePersonaChanged = (next: string) => {
     onPersonaChange(next);
     // 切人设需要全新的会话上下文（system prompt 声口变了）；并中止进行中的解读，
@@ -94,9 +101,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     const queue = tour.beginFromSegments(m.segments);
     tour.setMuted(muted);
     void tour.play(queue, {
-      chart,
-      onFocusBranch,
-      onTerm,
+      fireCommand,
       onCaption: setCaption,
       onReveal: () => { /* 历史正文已在气泡，无需改写 */ },
       onTourActiveChange,
@@ -153,9 +158,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
       setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content, pending } : m)));
 
     const playPromise = tour.play(queue, {
-      chart,
-      onFocusBranch,
-      onTerm,
+      fireCommand,
       onCaption: (c) => { if (reqProfileId === profileId) setCaption(c); },
       onReveal: (full) => { if (reqProfileId === profileId) { setLoading(false); setAssistant(full, false); } },
       onTourActiveChange,

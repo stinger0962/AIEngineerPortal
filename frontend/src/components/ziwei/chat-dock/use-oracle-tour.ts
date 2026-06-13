@@ -3,9 +3,6 @@
 
 import { useRef, useCallback } from "react";
 import type { CameraCommand, OracleSegment, OracleStreamHandlers } from "@/lib/ziwei/api";
-import type { ZiweiChart } from "@/lib/ziwei/types";
-import type { TermInfo } from "../term-card";
-import { fireCamera } from "./camera";
 import { CloudNarration, SilentNarration, type NarrationSource } from "@/lib/ziwei/narration";
 
 const SETTLE_MS = 550;
@@ -59,9 +56,7 @@ function captionFor(cmd: CameraCommand | null): string {
 }
 
 export type TourDeps = {
-  chart: ZiweiChart;
-  onFocusBranch: (b: string | null) => void;
-  onTerm: (t: TermInfo | null) => void;
+  fireCommand: (cmd: CameraCommand) => void;
   onCaption: (c: string | null) => void;
   onReveal: (full: string) => void;
   onTourActiveChange: (active: boolean) => void;
@@ -127,7 +122,7 @@ export function useOracleTour() {
           continue;
         }
         deps.onCaption(captionFor(beat.command));
-        if (beat.command) fireCamera(beat.command, { chart: deps.chart, onFocusBranch: deps.onFocusBranch, onTerm: deps.onTerm });
+        if (beat.command) deps.fireCommand(beat.command);
         await sleep(SETTLE_MS);
         if (isStale()) continue;
         if (beat.text.trim()) await getNarration().speak(beat.text.trim());
@@ -136,8 +131,7 @@ export function useOracleTour() {
       }
       if (!isStale()) {                                // 正常收尾：tourActive 仍为 true，镜头以解读速度缓缓回总览
         deps.onReveal(full.trim());
-        deps.onTerm(null);
-        deps.onFocusBranch(null);
+        deps.fireCommand({ type: "overview" });
       }
     } finally {
       deps.onCaption(null);
