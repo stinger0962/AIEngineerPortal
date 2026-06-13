@@ -26,8 +26,10 @@ export function QianWorkspace() {
   const abortRef = useRef<AbortController | null>(null);
   const tour = useOracleTour();
 
-  // 卸载时中止在途流 + 停指挥器，避免对已卸载组件 setState / 残留朗读
-  useEffect(() => () => { abortRef.current?.abort(); tour.cancel(); }, [tour]);
+  // 仅卸载时中止在途流 + 停指挥器。依赖稳定的 cancel（useOracleTour 每次渲染返回新对象字面量，
+  // 用 [tour] 会让 cleanup 每次渲染都触发、把刚发起的流误中止）。cancel 是 useCallback 稳定引用。
+  const { cancel: cancelTour } = tour;
+  useEffect(() => () => { abortRef.current?.abort(); cancelTour(); }, [cancelTour]);
 
   useEffect(() => {
     if (phase === "idle") qianApi.listReadings().then(setHistory).catch(() => {});
