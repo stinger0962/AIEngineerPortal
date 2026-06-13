@@ -27,7 +27,8 @@ class QianOracle:
             "约 250-450 字，口语、温和。\n"
             "## 内联标记（会被前端解析、不显示给用户）\n"
             "- 解释签诗里的生僻词或典故时，插入 [[term:词|一句话白话解释]]。\n"
-            "整段只在 1-3 个最关键的词上用 term，不要每词都标。除标记外正常说话，不要输出 JSON 或代码块。"
+            "整段只在 1-3 个最关键的词上用 term，不要每词都标。只用 term 标记，不要使用 focus 或 overview 标记。"
+            "除标记外正常说话，不要输出 JSON 或代码块。"
         )
 
     def run(self, sign: dict, question: str) -> Optional[dict]:
