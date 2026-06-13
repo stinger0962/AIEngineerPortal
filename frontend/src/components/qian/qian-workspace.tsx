@@ -1,6 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { qianApi, QianApiError, type QianSign } from "@/lib/qian/api";
 import { useOracleTour } from "@/components/ziwei/chat-dock/use-oracle-tour";
 import { TermCard, type TermInfo } from "@/components/ziwei/term-card";
@@ -24,6 +24,9 @@ export function QianWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const tour = useOracleTour();
+
+  // 卸载时中止在途流 + 停指挥器，避免对已卸载组件 setState / 残留朗读
+  useEffect(() => () => { abortRef.current?.abort(); tour.cancel(); }, [tour]);
 
   const shake = async () => {
     const q = question.trim();
@@ -69,6 +72,7 @@ export function QianWorkspace() {
       tour.cancel();
       if (e instanceof DOMException && e.name === "AbortError") {
         await playPromise;
+        setPhase("idle"); // 主动中止后解锁，避免卡在 shaking/reading
         return;
       }
       if (e instanceof QianApiError && e.status === 503)
