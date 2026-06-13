@@ -5,15 +5,24 @@ import { PerformanceMonitor } from "@react-three/drei";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import { SignCylinder } from "./sign-cylinder";
 
-// ---------- Camera push-in on draw ----------
+// ---------- Camera: set initial lookAt on mount, then animate push-in on draw ----------
 function CameraController({ drawn }: { drawn: boolean }) {
   const camera = useThree((s) => s.camera);
+
+  // On mount, aim camera down toward cup center
+  useEffect(() => {
+    camera.lookAt(0, 0.4, 0);
+  }, [camera]);
+
   useFrame((_, dt) => {
     const k = 1 - Math.exp(-3 * dt);
-    const targetZ = drawn ? 4.6 : 6;
-    const targetY = drawn ? 1.1 : 1.4;
+    // Very gentle push-in — only 0.7 units on Z, avoids cup ballooning
+    const targetZ = drawn ? 6.8 : 7.5;
+    const targetY = drawn ? 3.2 : 3.0;
     camera.position.z += (targetZ - camera.position.z) * k;
     camera.position.y += (targetY - camera.position.y) * k;
+    // Keep looking at cup/rising stick
+    camera.lookAt(0, drawn ? 0.6 : 0.4, 0);
   });
   return null;
 }
@@ -28,18 +37,13 @@ function smokeX(i: number) {
 function smokePhase(i: number) {
   return ((i * 67) % 100) / 100; // 0..1 phase offset
 }
-function smokeXOffset(i: number) {
-  return ((i * 29) % 20) / 20 * 0.4 - 0.2; // base x sway column
-}
 
 function Smoke() {
-  // Each particle: [x0, yPhase, xSway, speed]
   const particles = useMemo(
     () =>
       Array.from({ length: SMOKE_COUNT }, (_, i) => ({
         x0: smokeX(i),
         phase: smokePhase(i),
-        xBase: smokeXOffset(i),
         speed: 0.28 + ((i * 53) % 20) / 20 * 0.22, // 0.28–0.50 u/s
       })),
     []
@@ -52,9 +56,8 @@ function Smoke() {
     particles.forEach((p, i) => {
       const mesh = meshRefs.current[i];
       if (!mesh) return;
-      // life cycles 0→1 based on phase
       const life = ((t * p.speed + p.phase) % 1 + 1) % 1; // 0→1
-      const y = -1.0 + life * 4.5; // rises from -1.0 to 3.5
+      const y = -1.0 + life * 4.5;
       const x = p.x0 + Math.sin(t * 1.2 + p.phase * Math.PI * 2) * 0.12;
       const opacity = life < 0.15
         ? life / 0.15 * 0.06
@@ -64,7 +67,7 @@ function Smoke() {
       mesh.position.set(x, y, -0.3);
       const mat = mesh.material as import("three").MeshBasicMaterial;
       mat.opacity = opacity;
-      mesh.scale.setScalar(1 + life * 1.5); // expand as it rises
+      mesh.scale.setScalar(1 + life * 1.5);
     });
   });
 
@@ -110,7 +113,7 @@ export default function QianScene({ shaking, drawn, onRenderError }: QianScenePr
   return (
     <Canvas
       dpr={q === "high" ? [1, 1.75] : 1}
-      camera={{ position: [0, 1.4, 6], fov: 42 }}
+      camera={{ position: [0, 3.0, 7.5], fov: 40 }}
       style={{ background: "#140e08" }}
       onCreated={({ gl }) => {
         if (gl.getContext().isContextLost()) onRenderError?.();
@@ -123,7 +126,7 @@ export default function QianScene({ shaking, drawn, onRenderError }: QianScenePr
     >
       <PerformanceMonitor onDecline={() => setQ("low")}>
         <color attach="background" args={["#140e08"]} />
-        <fog attach="fog" args={["#140e08", 7, 20]} />
+        <fog attach="fog" args={["#140e08", 9, 24]} />
 
         {/* Warm temple lighting */}
         <ambientLight intensity={0.45} color="#f0d9a8" />

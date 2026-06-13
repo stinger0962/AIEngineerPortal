@@ -1,42 +1,49 @@
 "use client";
 import { useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
-import type { Group, Mesh } from "three";
+import type { Group, Mesh, PointLight } from "three";
 import { DoubleSide } from "three";
 
 // Seeded pseudo-random helpers (no Math.random at module scope)
-function seededHeight(i: number) {
-  return 1.5 + ((i * 53) % 40) / 40 * 0.5; // 1.5 – 2.0
-}
 function seededRadius(i: number) {
-  return 0.08 + ((i * 37) % 26) / 26 * 0.47; // 0.08 – 0.55
+  return 0.06 + ((i * 37) % 26) / 26 * 0.42; // 0.06 – 0.48 (fits inside cup r=0.7)
 }
 function seededAngle(i: number) {
   return (i * 137.508) % 360; // golden-angle packing
 }
 function seededTilt(i: number) {
-  return ((i * 71) % 14) / 14 * 0.14 - 0.07; // –0.07 … +0.07 rad
+  return ((i * 71) % 14) / 14 * 0.12 - 0.06; // –0.06 … +0.06 rad
 }
 
-const STICK_COUNT = 26;
+// Cup geometry constants
+// Cup: cylinderGeometry args=[0.7, 0.78, 1.5, 48, 1, true]
+// Cup bottom at y = -0.75, top rim at y = +0.75
+// Cup center is at group y=0, so rim is at world y=0.75 (when group at y=0)
+const CUP_RIM_Y = 0.75;      // local y of the rim top
+const CUP_BOTTOM_Y = -0.75;  // local y of the bottom
+
+const STICK_COUNT = 18;
+// Sticks: height 1.3, center at y so tops are at CUP_RIM_Y + 0.2~0.4 above
+// stick center y: top = center + h/2 = center + 0.65 = 0.75 + 0.25 = 1.0 → center = 0.35
+// i.e. stick center at roughly 0.3 (a bit inside cup, tips poke out 0.2-0.4)
+const STICK_H = 1.3;
+const STICK_CENTER_Y = 0.30; // center of bundle sticks (top = 0.30+0.65=0.95, just above rim)
 
 export function SignCylinder({ shaking, drawn }: { shaking: boolean; drawn: boolean }) {
   const cupRef = useRef<Group>(null);
   const sticksRef = useRef<Group>(null);
   const drawnRef = useRef<Group>(null);
-  const bottomCapRef = useRef<Mesh>(null);
+  const tipLightRef = useRef<PointLight>(null);
 
   // Pre-compute stick positions/rotations from index (stable, no random)
   const stickData = useMemo(
     () =>
       Array.from({ length: STICK_COUNT }, (_, i) => {
-        const h = seededHeight(i);
         const r = seededRadius(i);
         const angleDeg = seededAngle(i);
         const angleRad = (angleDeg * Math.PI) / 180;
         const tilt = seededTilt(i);
         return {
-          h,
           x: Math.cos(angleRad) * r,
           z: Math.sin(angleRad) * r,
           rotZ: tilt,
@@ -52,10 +59,10 @@ export function SignCylinder({ shaking, drawn }: { shaking: boolean; drawn: bool
     // --- cup shake ---
     if (cupRef.current) {
       if (shaking) {
-        cupRef.current.rotation.z = Math.sin(t * 22) * 0.16;
-        cupRef.current.rotation.x = Math.sin(t * 17) * 0.06;
-        cupRef.current.position.x = Math.sin(t * 26) * 0.05;
-        cupRef.current.position.y = Math.abs(Math.sin(t * 30)) * 0.04;
+        cupRef.current.rotation.z = Math.sin(t * 22) * 0.14;
+        cupRef.current.rotation.x = Math.sin(t * 16) * 0.05;
+        cupRef.current.position.x = Math.sin(t * 26) * 0.04;
+        cupRef.current.position.y += (0 - cupRef.current.position.y) * (1 - Math.exp(-8 * dt));
       } else {
         const k = 1 - Math.exp(-6 * dt);
         cupRef.current.rotation.z += (0 - cupRef.current.rotation.z) * k;
@@ -79,15 +86,17 @@ export function SignCylinder({ shaking, drawn }: { shaking: boolean; drawn: bool
 
     // --- drawn stick rise + tilt ---
     if (drawnRef.current) {
-      const k = 1 - Math.exp(-5 * dt);
-      const targetY = drawn ? 2.4 : 0.2;
-      const targetRZ = drawn ? 0.22 : 0;
-      const targetEI = drawn ? 0.8 : 0;
+      const k = 1 - Math.exp(-4 * dt);
+      // When drawn: rise so stick center is at y≈1.8 (top at 1.8+1.1=2.9, well above rim at 0.75)
+      // When not drawn: hidden low among bundle, center y≈0 (top at 1.1, just at rim, mostly inside)
+      const targetY = drawn ? 1.8 : 0.0;
+      const targetRZ = drawn ? 0.18 : 0;
+      const targetEI = drawn ? 1.1 : 0;
       drawnRef.current.position.y += (targetY - drawnRef.current.position.y) * k;
       drawnRef.current.rotation.z += (targetRZ - drawnRef.current.rotation.z) * k;
-      // drive emissiveIntensity through userData
       drawnRef.current.userData.targetEmissive = targetEI;
     }
+
     // update drawn stick mesh emissiveIntensity
     if (drawnRef.current) {
       drawnRef.current.traverse((child) => {
@@ -95,18 +104,26 @@ export function SignCylinder({ shaking, drawn }: { shaking: boolean; drawn: bool
           const mat = (child as Mesh).material as unknown as THREE_MeshStandardMaterial;
           if (mat && typeof mat.emissiveIntensity === "number") {
             const target = drawnRef.current?.userData.targetEmissive ?? 0;
-            mat.emissiveIntensity += (target - mat.emissiveIntensity) * (1 - Math.exp(-5 * dt));
+            mat.emissiveIntensity += (target - mat.emissiveIntensity) * (1 - Math.exp(-4 * dt));
           }
         }
       });
     }
+
+    // update tip point light intensity
+    if (tipLightRef.current) {
+      const targetIntensity = drawn ? 1.4 : 0;
+      tipLightRef.current.intensity += (targetIntensity - tipLightRef.current.intensity) * (1 - Math.exp(-4 * dt));
+    }
   });
 
   return (
-    <group>
+    // Cup group positioned so the cup occupies lower portion of frame.
+    // Cup center at y=-0.3 → rim at y=0.45, plenty of headroom above
+    <group position={[0, -0.3, 0]}>
       {/* Altar plane */}
-      <mesh rotation-x={-Math.PI / 2} position-y={-1.4} receiveShadow>
-        <planeGeometry args={[14, 14]} />
+      <mesh rotation-x={-Math.PI / 2} position-y={-1.1} receiveShadow>
+        <planeGeometry args={[16, 16]} />
         <meshStandardMaterial color="#2a1810" roughness={0.9} metalness={0.05} />
       </mesh>
 
@@ -114,7 +131,7 @@ export function SignCylinder({ shaking, drawn }: { shaking: boolean; drawn: bool
       <group ref={cupRef}>
         {/* Lacquered cup wall (open cylinder, double-sided) */}
         <mesh>
-          <cylinderGeometry args={[0.95, 1.05, 2.2, 48, 1, true]} />
+          <cylinderGeometry args={[0.7, 0.78, 1.5, 48, 1, true]} />
           <meshStandardMaterial
             color="#5a2a14"
             metalness={0.35}
@@ -124,55 +141,65 @@ export function SignCylinder({ shaking, drawn }: { shaking: boolean; drawn: bool
         </mesh>
 
         {/* Dark inner bottom cap — prevents seeing through */}
-        <mesh ref={bottomCapRef} position-y={-1.1}>
-          <circleGeometry args={[0.95, 48]} />
-          <meshStandardMaterial color="#2a1008" roughness={0.95} />
+        <mesh position-y={CUP_BOTTOM_Y}>
+          <circleGeometry args={[0.7, 48]} />
+          <meshStandardMaterial color="#1e0c06" roughness={0.95} />
         </mesh>
 
-        {/* Gold rim — torus ring at cup top */}
-        <mesh position-y={1.11} rotation-x={Math.PI / 2}>
-          <torusGeometry args={[0.97, 0.055, 16, 64]} />
+        {/* Gold rim ring — torus at cup top, visible from above */}
+        <mesh position-y={CUP_RIM_Y} rotation-x={Math.PI / 2}>
+          <torusGeometry args={[0.72, 0.04, 16, 64]} />
           <meshStandardMaterial
             color="#d6a84a"
             emissive="#e7c372"
-            emissiveIntensity={0.35}
-            metalness={0.9}
-            roughness={0.25}
+            emissiveIntensity={0.45}
+            metalness={0.92}
+            roughness={0.22}
           />
         </mesh>
 
-        {/* Stick bundle — rattles independently */}
+        {/* Stick bundle — muted, short, rattle independently */}
         <group ref={sticksRef}>
           {stickData.map((s, i) => (
             <mesh
               key={i}
-              position={[s.x, s.h * 0.5 - 1.05, s.z]}
+              position={[s.x, STICK_CENTER_Y, s.z]}
               rotation={[0, s.rotY, s.rotZ]}
             >
-              <boxGeometry args={[0.05, s.h, 0.05]} />
-              <meshStandardMaterial color="#d9c6a0" roughness={0.75} metalness={0.0} />
+              <boxGeometry args={[0.045, STICK_H, 0.045]} />
+              <meshStandardMaterial color="#cdb589" roughness={0.8} metalness={0.0} />
             </mesh>
           ))}
         </group>
       </group>
 
-      {/* Drawn stick — rises out of cup on draw */}
-      <group ref={drawnRef} position={[0.1, 0.2, 0.15]}>
+      {/* Drawn stick — rises out of cup on draw (outside cup group so it can move independently) */}
+      <group ref={drawnRef} position={[0.08, 0.0, 0.12]}>
+        {/* Main stick body — thicker, brighter gold */}
         <mesh>
-          <boxGeometry args={[0.08, 2.6, 0.08]} />
+          <boxGeometry args={[0.07, 2.2, 0.07]} />
           <meshStandardMaterial
-            color="#e7c372"
-            emissive="#d6a84a"
+            color="#f3e0a8"
+            emissive="#e7c372"
             emissiveIntensity={0}
             metalness={0.55}
-            roughness={0.3}
+            roughness={0.28}
           />
         </mesh>
-        {/* Tip accent — slightly darker */}
-        <mesh position-y={1.35}>
-          <boxGeometry args={[0.085, 0.12, 0.085]} />
-          <meshStandardMaterial color="#b9975f" roughness={0.4} metalness={0.45} />
+        {/* Tip accent */}
+        <mesh position-y={1.12}>
+          <boxGeometry args={[0.075, 0.1, 0.075]} />
+          <meshStandardMaterial color="#b9975f" roughness={0.35} metalness={0.5} />
         </mesh>
+        {/* Point light at stick tip — glows when drawn */}
+        <pointLight
+          ref={tipLightRef}
+          position={[0, 1.2, 0]}
+          color="#ffe6a8"
+          intensity={0}
+          distance={3}
+          decay={2}
+        />
       </group>
     </group>
   );

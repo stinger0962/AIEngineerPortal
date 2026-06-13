@@ -119,6 +119,8 @@ export function QianWorkspace() {
 
   return (
     /* ── Outer dark immersive card ─────────────────────────────────────────── */
+    <>
+    <style>{`@keyframes qianFade{from{opacity:0}to{opacity:1}}`}</style>
     <div
       className="rounded-3xl p-5"
       style={{
@@ -145,6 +147,25 @@ export function QianWorkspace() {
           <span className="pointer-events-none absolute bottom-2 right-2 h-5 w-5 border-b border-r" style={{ borderColor: "#d6a84a" }} />
 
           <QianScene shaking={phase === "shaking"} drawn={!!sign} onRenderError={() => {}} />
+          {sign ? (
+            <div
+              className="pointer-events-none absolute"
+              style={{
+                left: "50%",
+                top: "12%",
+                transform: "translateX(-50%)",
+                textAlign: "center",
+                animation: "qianFade .8s ease both",
+              }}
+            >
+              <div style={{ fontFamily: KAITI, fontSize: "30px", color: "#ffe9c4", textShadow: "0 0 16px rgba(231,195,114,.75)" }}>
+                第 {sign.id} 签
+              </div>
+              <div style={{ fontFamily: KAITI, fontSize: "14px", color: "#e7c372", letterSpacing: "3px", marginTop: "2px" }}>
+                {sign.grade} · {sign.palace}
+              </div>
+            </div>
+          ) : null}
           {term ? <TermCard info={term} onClose={() => setTerm(null)} /> : null}
         </div>
 
@@ -337,5 +358,6 @@ export function QianWorkspace() {
         </div>
       </div>
     </div>
+    </>
   );
 }
