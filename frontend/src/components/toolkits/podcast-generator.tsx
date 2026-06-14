@@ -159,7 +159,7 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
           className={`w-full rounded-xl border px-3 py-2.5 text-sm bg-white text-ink placeholder:text-ink/30 outline-none transition-colors ${
             url && !urlValid
               ? "border-red-400 focus:border-red-500"
-              : "border-ink/15 focus:border-ember"
+              : "border-ink/15 focus:border-[#d9531e]"
           } disabled:opacity-40`}
         />
         {url && !urlValid && (
@@ -178,7 +178,7 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
               disabled={isGenerating}
               className={`flex-1 rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-40 ${
                 digestMins === mins
-                  ? "bg-ember/15 text-ember border border-ember/40"
+                  ? "bg-[#d9531e]/15 text-[#d9531e] border border-[#d9531e]/40"
                   : "bg-white text-ink/50 border border-ink/15 hover:border-ink/30"
               }`}
             >
@@ -199,7 +199,7 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
               disabled={isGenerating}
               className={`flex-1 rounded-xl py-2 text-sm font-medium transition-colors disabled:opacity-40 ${
                 format === fmt
-                  ? "bg-ember/15 text-ember border border-ember/40"
+                  ? "bg-[#d9531e]/15 text-[#d9531e] border border-[#d9531e]/40"
                   : "bg-white text-ink/50 border border-ink/15 hover:border-ink/30"
               }`}
             >
@@ -222,7 +222,7 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
             value={voiceId}
             onChange={(e) => setVoiceId(e.target.value)}
             disabled={isGenerating}
-            className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition-colors focus:border-ember disabled:opacity-40"
+            className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition-colors focus:border-[#d9531e] disabled:opacity-40"
           >
             <option value="random">🎲 随机 Random</option>
             {femaleVoices.length > 0 && (
@@ -249,20 +249,20 @@ export function PodcastGenerator({ onEpisodeReady }: PodcastGeneratorProps) {
 
       {/* Progress / Generate button */}
       {isGenerating ? (
-        <div className="rounded-xl border border-ember/20 bg-ember/5 px-4 py-3">
+        <div className="rounded-xl border border-[#d9531e]/20 bg-[#d9531e]/5 px-4 py-3">
           <div className="flex items-center gap-2">
-            <svg className="animate-spin h-4 w-4 text-ember flex-shrink-0" fill="none" viewBox="0 0 24 24">
+            <svg className="animate-spin h-4 w-4 text-[#d9531e] flex-shrink-0" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
             </svg>
-            <span className="text-sm text-ember">{STATUS_LABELS[status]}</span>
+            <span className="text-sm text-[#d9531e]">{STATUS_LABELS[status]}</span>
           </div>
         </div>
       ) : (
         <button
           onClick={handleGenerate}
           disabled={!urlValid}
-          className="w-full rounded-xl bg-ember py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+          className="w-full rounded-xl bg-[#d9531e] py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
         >
           <span aria-hidden="true">🎙</span>{" "}Generate Podcast
         </button>

@@ -68,10 +68,10 @@ function EpisodeCard({
   }
 
   return (
-    <div className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-ember/30 hover:shadow-sm transition-all">
+    <div className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-[#d9531e]/30 hover:shadow-sm transition-all">
       <div className="flex items-start gap-3">
         {/* Icon */}
-        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-ember/10 flex items-center justify-center text-base">
+        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#d9531e]/10 flex items-center justify-center text-base">
           🎙
         </div>
 
@@ -106,7 +106,7 @@ function EpisodeCard({
             href={`${API_BASE}/podcast/episodes/${ep.id}/download`}
             download={`podcast-${ep.id}.mp3`}
             aria-label="Download episode MP3"
-            className="flex items-center justify-center w-10 h-10 rounded-full text-ink/40 hover:text-ember hover:bg-ember/10 active:bg-ember/15 transition-colors text-lg leading-none"
+            className="flex items-center justify-center w-10 h-10 rounded-full text-ink/40 hover:text-[#d9531e] hover:bg-[#d9531e]/10 active:bg-[#d9531e]/15 transition-colors text-lg leading-none"
             title="Download MP3"
           >
             ↓
