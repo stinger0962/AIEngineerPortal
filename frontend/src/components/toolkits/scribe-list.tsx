@@ -50,15 +50,15 @@ function TranscriptCard({ t, onDelete }: { t: Transcript; onDelete: (id: number)
   }
 
   return (
-    <div className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-indigo-300 hover:shadow-sm transition-all">
+    <div className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-[#cba672] hover:shadow-sm transition-all">
       <div className="flex items-start gap-3 cursor-pointer" onClick={() => setOpen((o) => !o)}>
-        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-indigo-50 text-indigo-500 flex items-center justify-center">
+        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#f7f0e6] text-[#a87a3e] flex items-center justify-center">
           <AudioLines className="w-[18px] h-[18px]" strokeWidth={2} />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-ink truncate">{t.title}</p>
           <div className="flex items-center gap-2 mt-1">
-            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-indigo-50 text-indigo-500">文字稿</span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-[#f7f0e6] text-[#a87a3e]">文字稿</span>
             <span className="text-[11px] text-ink/20">·</span>
             <span className="text-[11px] text-ink/40">{t.char_count} 字</span>
             <span className="text-[11px] text-ink/20">·</span>
@@ -83,7 +83,7 @@ function TranscriptCard({ t, onDelete }: { t: Transcript; onDelete: (id: number)
           <div className="flex gap-2">
             <button
               onClick={handleCopy}
-              className="text-xs font-medium px-3 py-1.5 rounded-lg border border-ink/15 text-ink/60 hover:border-indigo-400 hover:text-indigo-600 transition-colors"
+              className="text-xs font-medium px-3 py-1.5 rounded-lg border border-ink/15 text-ink/60 hover:border-[#b88a52] hover:text-[#9a6a34] transition-colors"
             >
               {copied ? "已复制 ✓" : "复制 Copy"}
             </button>
@@ -91,7 +91,7 @@ function TranscriptCard({ t, onDelete }: { t: Transcript; onDelete: (id: number)
               href={`${API_BASE}/scribe/${t.id}/download`}
               download={`scribe-${t.id}.txt`}
               onClick={(e) => e.stopPropagation()}
-              className="text-xs font-medium px-3 py-1.5 rounded-lg border border-ink/15 text-ink/60 hover:border-indigo-400 hover:text-indigo-600 transition-colors"
+              className="text-xs font-medium px-3 py-1.5 rounded-lg border border-ink/15 text-ink/60 hover:border-[#b88a52] hover:text-[#9a6a34] transition-colors"
             >
               下载 .txt
             </a>

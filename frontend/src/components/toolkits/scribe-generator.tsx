@@ -103,7 +103,7 @@ export function ScribeGenerator({ onReady }: Props) {
           placeholder="https://youtube.com/watch?v=..."
           disabled={isBusy}
           className={`w-full rounded-xl border px-3 py-2.5 text-sm bg-white text-ink placeholder:text-ink/30 outline-none transition-colors ${
-            url && !valid ? "border-red-400 focus:border-red-500" : "border-ink/15 focus:border-indigo-500"
+            url && !valid ? "border-red-400 focus:border-red-500" : "border-ink/15 focus:border-[#a87a3e]"
           } disabled:opacity-40`}
         />
         {url && !valid && <p className="text-[11px] text-red-500">请输入有效的 YouTube 链接</p>}
@@ -111,25 +111,25 @@ export function ScribeGenerator({ onReady }: Props) {
       </div>
 
       {isBusy ? (
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 flex items-center gap-2">
-          <svg className="animate-spin h-4 w-4 text-indigo-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+        <div className="rounded-xl border border-[#e3d2b0] bg-[#f7f0e6] px-4 py-3 flex items-center gap-2">
+          <svg className="animate-spin h-4 w-4 text-[#a87a3e] flex-shrink-0" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
           </svg>
-          <span className="text-sm text-indigo-600">{STATUS_LABELS[status]}</span>
+          <span className="text-sm text-[#9a6a34]">{STATUS_LABELS[status]}</span>
         </div>
       ) : (
         <button
           onClick={handleGenerate}
           disabled={!valid}
-          className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+          className="w-full rounded-xl bg-[#9a6a34] py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
         >
           <span aria-hidden="true">🎧</span> 生成文字稿 Transcribe
         </button>
       )}
 
       {status === "done" && (
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-600 font-medium">
+        <div className="rounded-xl border border-[#e3d2b0] bg-[#f7f0e6] px-4 py-3 text-sm text-[#9a6a34] font-medium">
           ✓ 文字稿已生成 — 见右侧列表！
         </div>
       )}

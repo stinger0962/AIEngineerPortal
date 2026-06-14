@@ -38,7 +38,7 @@ export default function ScribePage() {
           ← 蒸馏所
         </Link>
         <div className="flex items-center gap-3 mt-1">
-          <div className="flex-shrink-0 w-11 h-11 rounded-[14px] bg-gradient-to-br from-indigo-400 via-indigo-600 to-indigo-700 text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(79,70,229,0.6)]">
+          <div className="flex-shrink-0 w-11 h-11 rounded-[14px] bg-gradient-to-br from-[#b88a52] via-[#9a6a34] to-[#7a521f] text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(154,106,52,0.6)]">
             <AudioLines className="w-6 h-6" strokeWidth={2} />
           </div>
           <div>
@@ -52,13 +52,13 @@ export default function ScribePage() {
       <div className="lg:hidden flex gap-1.5 rounded-2xl bg-ink/5 p-1">
         <button
           onClick={() => setMobileTab("generate")}
-          className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-semibold transition-colors ${mobileTab === "generate" ? "bg-white shadow-sm text-indigo-600" : "text-ink/50"}`}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-semibold transition-colors ${mobileTab === "generate" ? "bg-white shadow-sm text-[#9a6a34]" : "text-ink/50"}`}
         >
           <Sparkles className="w-4 h-4" strokeWidth={2} /> 转写
         </button>
         <button
           onClick={() => setMobileTab("library")}
-          className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-semibold transition-colors ${mobileTab === "library" ? "bg-white shadow-sm text-indigo-600" : "text-ink/50"}`}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-semibold transition-colors ${mobileTab === "library" ? "bg-white shadow-sm text-[#9a6a34]" : "text-ink/50"}`}
         >
           <List className="w-4 h-4" strokeWidth={2} /> 我的文字稿
         </button>
@@ -66,7 +66,7 @@ export default function ScribePage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] rounded-[28px] border border-ink/10 bg-white/85 shadow-panel overflow-hidden lg:min-h-[600px]">
         <div className={`${mobileTab === "generate" ? "block" : "hidden"} lg:block relative overflow-hidden border-b lg:border-b-0 lg:border-r border-ink/10 bg-sand/20 p-5 lg:p-6`}>
-          <AudioLines className="pointer-events-none absolute -right-6 -bottom-7 w-36 h-36 text-indigo-600 opacity-[0.05]" strokeWidth={1.5} />
+          <AudioLines className="pointer-events-none absolute -right-6 -bottom-7 w-36 h-36 text-[#9a6a34] opacity-[0.05]" strokeWidth={1.5} />
           <div className="relative z-10">
             <ScribeGenerator onReady={handleNew} />
           </div>
