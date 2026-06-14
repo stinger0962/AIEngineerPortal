@@ -6,11 +6,11 @@ export default function ToolkitsPage() {
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <span className="text-xs font-semibold uppercase tracking-[0.3em] text-ember">
+        <span className="text-xs font-semibold uppercase tracking-[0.3em] text-[#bf6a1e]">
           蒸馏所 · Distill
         </span>
         <h1 className="font-display text-4xl mt-2 leading-[1.05]">
-          <span className="bg-gradient-to-r from-ember via-[#e0590a] to-[#1f6f6b] bg-clip-text text-transparent">
+          <span className="bg-gradient-to-r from-[#d9531e] via-[#c9772a] to-[#c0892e] bg-clip-text text-transparent">
             万物皆可蒸馏。
           </span>{" "}
           <span className="text-ink/30 font-medium">Distill anything.</span>
@@ -22,13 +22,13 @@ export default function ToolkitsPage() {
 
       {/* Ready tools — equal height */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
-        {/* Forge */}
+        {/* Forge — 焰铜 flame-copper */}
         <Link href="/toolkits/podcast" className="block h-full group">
-          <div className="relative h-full flex flex-col overflow-hidden rounded-[26px] border border-ink/10 bg-gradient-to-br from-white to-[#fff4e8] p-7 pl-8 transition-all duration-200 hover:-translate-y-1 hover:border-ember/40 hover:shadow-[0_22px_46px_-18px_rgba(247,127,0,0.4)]">
-            <span className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-ember to-[#e0590a]" />
-            <Flame className="pointer-events-none absolute -right-5 -bottom-6 w-36 h-36 text-ember opacity-[0.05]" strokeWidth={1.5} />
+          <div className="relative h-full flex flex-col overflow-hidden rounded-[26px] border border-ink/10 bg-gradient-to-br from-white to-[#fdf0e6] p-7 pl-8 transition-all duration-200 hover:-translate-y-1 hover:border-[#d9531e]/40 hover:shadow-[0_22px_46px_-18px_rgba(217,83,30,0.4)]">
+            <span className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#d9531e] to-[#b8410f]" />
+            <Flame className="pointer-events-none absolute -right-5 -bottom-6 w-36 h-36 text-[#d9531e] opacity-[0.05]" strokeWidth={1.5} />
             <div className="relative z-10 flex items-start gap-4">
-              <div className="flex-shrink-0 w-[52px] h-[52px] rounded-[16px] bg-gradient-to-br from-[#ffa53d] via-ember to-[#e0590a] text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(247,127,0,0.6)]">
+              <div className="flex-shrink-0 w-[52px] h-[52px] rounded-[16px] bg-gradient-to-br from-[#f0894a] via-[#d9531e] to-[#b8410f] text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(217,83,30,0.6)]">
                 <Flame className="w-[26px] h-[26px]" strokeWidth={2} />
               </div>
               <div>
@@ -44,18 +44,18 @@ export default function ToolkitsPage() {
             <div className="relative z-10 flex flex-wrap gap-1.5 mt-auto pt-4">
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">语音合成</span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">AI 提炼</span>
-              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-ember/[0.14] text-ember">● Ready</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-[#d9531e]/[0.14] text-[#b8410f]">● Ready</span>
             </div>
           </div>
         </Link>
 
-        {/* Loom */}
+        {/* Loom — 赤金 amber-gold */}
         <Link href="/toolkits/summarize" className="block h-full group">
-          <div className="relative h-full flex flex-col overflow-hidden rounded-[26px] border border-ink/10 bg-gradient-to-br from-white to-[#ecf6f2] p-7 pl-8 transition-all duration-200 hover:-translate-y-1 hover:border-[#1f6f6b]/40 hover:shadow-[0_22px_46px_-18px_rgba(31,111,107,0.38)]">
-            <span className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#1f6f6b] to-[#155653]" />
-            <Layers className="pointer-events-none absolute -right-5 -bottom-6 w-36 h-36 text-[#1f6f6b] opacity-[0.05]" strokeWidth={1.5} />
+          <div className="relative h-full flex flex-col overflow-hidden rounded-[26px] border border-ink/10 bg-gradient-to-br from-white to-[#faf2e2] p-7 pl-8 transition-all duration-200 hover:-translate-y-1 hover:border-[#c0892e]/40 hover:shadow-[0_22px_46px_-18px_rgba(192,137,46,0.38)]">
+            <span className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#c0892e] to-[#9c6a18]" />
+            <Layers className="pointer-events-none absolute -right-5 -bottom-6 w-36 h-36 text-[#c0892e] opacity-[0.05]" strokeWidth={1.5} />
             <div className="relative z-10 flex items-start gap-4">
-              <div className="flex-shrink-0 w-[52px] h-[52px] rounded-[16px] bg-gradient-to-br from-[#3fa39d] via-[#1f6f6b] to-[#155653] text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(31,111,107,0.6)]">
+              <div className="flex-shrink-0 w-[52px] h-[52px] rounded-[16px] bg-gradient-to-br from-[#e0ad55] via-[#c0892e] to-[#9c6a18] text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(192,137,46,0.6)]">
                 <Layers className="w-[26px] h-[26px]" strokeWidth={2} />
               </div>
               <div>
@@ -73,18 +73,18 @@ export default function ToolkitsPage() {
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">网页</span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">YouTube</span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">微信</span>
-              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-[#1f6f6b]/[0.12] text-[#1f6f6b]">● Ready</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-[rgba(192,137,46,0.14)] text-[#9c6a18]">● Ready</span>
             </div>
           </div>
         </Link>
 
-        {/* Scribe */}
+        {/* Scribe — 古铜 antique-bronze */}
         <Link href="/toolkits/scribe" className="block h-full group">
-          <div className="relative h-full flex flex-col overflow-hidden rounded-[26px] border border-ink/10 bg-gradient-to-br from-white to-[#eef0fb] p-7 pl-8 transition-all duration-200 hover:-translate-y-1 hover:border-indigo-400/50 hover:shadow-[0_22px_46px_-18px_rgba(79,70,229,0.4)]">
-            <span className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-indigo-500 to-indigo-700" />
-            <AudioLines className="pointer-events-none absolute -right-5 -bottom-6 w-36 h-36 text-indigo-600 opacity-[0.05]" strokeWidth={1.5} />
+          <div className="relative h-full flex flex-col overflow-hidden rounded-[26px] border border-ink/10 bg-gradient-to-br from-white to-[#f7f0e6] p-7 pl-8 transition-all duration-200 hover:-translate-y-1 hover:border-[#9a6a34]/50 hover:shadow-[0_22px_46px_-18px_rgba(154,106,52,0.4)]">
+            <span className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#9a6a34] to-[#7a521f]" />
+            <AudioLines className="pointer-events-none absolute -right-5 -bottom-6 w-36 h-36 text-[#9a6a34] opacity-[0.05]" strokeWidth={1.5} />
             <div className="relative z-10 flex items-start gap-4">
-              <div className="flex-shrink-0 w-[52px] h-[52px] rounded-[16px] bg-gradient-to-br from-indigo-400 via-indigo-600 to-indigo-700 text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(79,70,229,0.6)]">
+              <div className="flex-shrink-0 w-[52px] h-[52px] rounded-[16px] bg-gradient-to-br from-[#b88a52] via-[#9a6a34] to-[#7a521f] text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(154,106,52,0.6)]">
                 <AudioLines className="w-[26px] h-[26px]" strokeWidth={2} />
               </div>
               <div>
@@ -100,18 +100,18 @@ export default function ToolkitsPage() {
             <div className="relative z-10 flex flex-wrap gap-1.5 mt-auto pt-4">
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">Whisper</span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">无字幕视频</span>
-              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-indigo-100 text-indigo-600">● Ready</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-[rgba(154,106,52,0.15)] text-[#7a521f]">● Ready</span>
             </div>
           </div>
         </Link>
 
-        {/* Dub */}
+        {/* Dub — 朱赭 cinnabar-earth */}
         <Link href="/toolkits/dub" className="block h-full group">
-          <div className="relative h-full flex flex-col overflow-hidden rounded-[26px] border border-ink/10 bg-gradient-to-br from-white to-[#fdeef1] p-7 pl-8 transition-all duration-200 hover:-translate-y-1 hover:border-rose-400/50 hover:shadow-[0_22px_46px_-18px_rgba(225,29,72,0.4)]">
-            <span className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-rose-500 to-rose-700" />
-            <Languages className="pointer-events-none absolute -right-5 -bottom-6 w-36 h-36 text-rose-600 opacity-[0.05]" strokeWidth={1.5} />
+          <div className="relative h-full flex flex-col overflow-hidden rounded-[26px] border border-ink/10 bg-gradient-to-br from-white to-[#fceee8] p-7 pl-8 transition-all duration-200 hover:-translate-y-1 hover:border-[#b9472f]/50 hover:shadow-[0_22px_46px_-18px_rgba(185,71,47,0.4)]">
+            <span className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-[#b9472f] to-[#97351f]" />
+            <Languages className="pointer-events-none absolute -right-5 -bottom-6 w-36 h-36 text-[#b9472f] opacity-[0.05]" strokeWidth={1.5} />
             <div className="relative z-10 flex items-start gap-4">
-              <div className="flex-shrink-0 w-[52px] h-[52px] rounded-[16px] bg-gradient-to-br from-rose-400 via-rose-600 to-rose-700 text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(225,29,72,0.6)]">
+              <div className="flex-shrink-0 w-[52px] h-[52px] rounded-[16px] bg-gradient-to-br from-[#d2694a] via-[#b9472f] to-[#97351f] text-white flex items-center justify-center shadow-[0_6px_16px_-6px_rgba(185,71,47,0.6)]">
                 <Languages className="w-[26px] h-[26px]" strokeWidth={2} />
               </div>
               <div>
@@ -127,7 +127,7 @@ export default function ToolkitsPage() {
             <div className="relative z-10 flex flex-wrap gap-1.5 mt-auto pt-4">
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">Whisper</span>
               <span className="text-[11px] px-2.5 py-0.5 rounded-full font-medium bg-ink/5 text-ink/55">中文 TTS</span>
-              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-rose-100 text-rose-600">● Ready</span>
+              <span className="text-[11px] px-2.5 py-0.5 rounded-full font-semibold bg-[rgba(185,71,47,0.14)] text-[#97351f]">● Ready</span>
             </div>
           </div>
         </Link>
