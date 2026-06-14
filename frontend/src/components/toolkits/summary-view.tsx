@@ -22,8 +22,8 @@ export function SummaryView({ summary }: { summary: Summary }) {
   return (
     <div className="space-y-4">
       {/* TL;DR — most prominent */}
-      <div className="rounded-2xl border border-teal/20 bg-teal/5 p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-teal/70 mb-1">
+      <div className="rounded-2xl border border-[#c0892e]/20 bg-[#c0892e]/5 p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#c0892e]/70 mb-1">
           TL;DR
         </p>
         <p className="text-base font-medium text-ink leading-relaxed">{summary.tldr}</p>
@@ -38,7 +38,7 @@ export function SummaryView({ summary }: { summary: Summary }) {
           <ul className="space-y-1.5">
             {sec.points.map((p, j) => (
               <li key={j} className="flex gap-2 text-sm text-ink/80 leading-relaxed">
-                <span className="text-teal flex-shrink-0">•</span>
+                <span className="text-[#c0892e] flex-shrink-0">•</span>
                 <span>{p}</span>
               </li>
             ))}
@@ -52,7 +52,7 @@ export function SummaryView({ summary }: { summary: Summary }) {
           href={summary.source_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-block text-[11px] text-ink/40 hover:text-teal transition-colors break-all"
+          className="inline-block text-[11px] text-ink/40 hover:text-[#c0892e] transition-colors break-all"
         >
           🔗 {summary.source_url}
         </a>

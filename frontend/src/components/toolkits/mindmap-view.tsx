@@ -70,7 +70,7 @@ export function MindMapView({ markdown }: { markdown: string }) {
     <div className="fixed inset-0 z-[100] bg-white flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-ink/10">
         <span className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <span className="text-teal" aria-hidden="true">🧠</span> 思维导图
+          <span className="text-[#c0892e]" aria-hidden="true">🧠</span> 思维导图
         </span>
         <button
           onClick={() => setIsFull(false)}
@@ -95,7 +95,7 @@ export function MindMapView({ markdown }: { markdown: string }) {
           onClick={() => setIsFull(true)}
           aria-label="全屏查看思维导图"
           title="全屏"
-          className="absolute top-2 right-2 z-10 flex items-center justify-center w-9 h-9 rounded-lg bg-white/90 border border-ink/10 text-ink/50 hover:text-teal hover:border-teal/40 shadow-sm transition-colors"
+          className="absolute top-2 right-2 z-10 flex items-center justify-center w-9 h-9 rounded-lg bg-white/90 border border-ink/10 text-ink/50 hover:text-[#c0892e] hover:border-[#c0892e]/40 shadow-sm transition-colors"
         >
           <Maximize2 className="w-4 h-4" strokeWidth={2} />
         </button>

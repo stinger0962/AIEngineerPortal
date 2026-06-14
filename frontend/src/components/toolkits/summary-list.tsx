@@ -48,13 +48,13 @@ function SummaryCard({ s, onDelete }: { s: Summary; onDelete: (id: number) => vo
   }
 
   return (
-    <div className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-teal/30 hover:shadow-sm transition-all">
+    <div className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-[#c0892e]/30 hover:shadow-sm transition-all">
       <div className="flex items-start gap-3 cursor-pointer" onClick={() => setOpen((o) => !o)}>
-        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-teal/10 text-teal flex items-center justify-center"><Layers className="w-[18px] h-[18px]" strokeWidth={2} /></div>
+        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#c0892e]/10 text-[#c0892e] flex items-center justify-center"><Layers className="w-[18px] h-[18px]" strokeWidth={2} /></div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-ink truncate">{s.title}</p>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-teal/10 text-teal">
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-[#c0892e]/10 text-[#c0892e]">
               {s.output_type === "mindmap" ? "思维导图" : "摘要"}
             </span>
             <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-ink/8 text-ink/50">
