@@ -112,7 +112,7 @@ export default function XuanPage() {
           {/* ── Door 1: 紫微斗数 ── */}
           <DoorLink
             href="/ziwei"
-            theme={{ char: "紫", accent: "#9a7bf0", innerBg: "linear-gradient(#171036,#0e0a1f)" }}
+            theme={{ char: "紫", accent: "#9a7bf0", innerBg: "linear-gradient(#171036,#0e0a1f)", backdrop: "radial-gradient(circle at top left, rgba(124,92,240,0.14), transparent 30%), linear-gradient(135deg, #efeaf7, #f4eee6)" }}
             ariaLabel="紫微斗数 · 入口"
             className="xuan-door xuan-door--ziwei"
             style={{
@@ -262,7 +262,7 @@ export default function XuanPage() {
           {/* ── Door 2: 灵签 ── */}
           <DoorLink
             href="/qian"
-            theme={{ char: "灵", accent: "#d6a84a", innerBg: "linear-gradient(#1c1408,#120c05)" }}
+            theme={{ char: "灵", accent: "#d6a84a", innerBg: "linear-gradient(#1c1408,#120c05)", backdrop: "radial-gradient(circle at top left, rgba(214,168,74,0.16), transparent 30%), linear-gradient(135deg, #f4eee6, #efeaf7)" }}
             ariaLabel="灵签求签 · 入口"
             className="xuan-door xuan-door--qian"
             style={{

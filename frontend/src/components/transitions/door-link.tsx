@@ -18,10 +18,14 @@ export type DoorTheme = {
   accent: string;
   /** Inner-panel gradient painted on each leaf. */
   innerBg: string;
+  /** OPAQUE field revealed behind the opening leaves — set to the destination
+   *  page's dominant background so the swing reveals that domain's space, never
+   *  a flash of the page you're leaving. */
+  backdrop: string;
 };
 
-const SWING_MS = 1100;
-const NAVIGATE_MS = 1250;
+const SWING_MS = 1400;
+const NAVIGATE_MS = 1480;
 
 export function DoorLink({
   href,
@@ -93,7 +97,8 @@ function leafFace(theme: DoorTheme, side: "left" | "right"): React.CSSProperties
         ? "inset -2px 0 0 rgba(202,164,74,.4)"
         : "inset 2px 0 0 rgba(202,164,74,.4)",
     overflow: "hidden",
-    animation: `${side === "left" ? "door-swing-l" : "door-swing-r"} ${SWING_MS}ms cubic-bezier(.6,.02,.2,1) forwards`,
+    backfaceVisibility: "hidden",
+    animation: `${side === "left" ? "door-swing-l" : "door-swing-r"} ${SWING_MS}ms cubic-bezier(.55,.04,.25,1) forwards`,
   };
 }
 
@@ -104,18 +109,22 @@ function DoorOverlay({ theme }: { theme: DoorTheme }) {
       style={{ position: "fixed", inset: 0, zIndex: 80, perspective: "1600px", overflow: "hidden" }}
     >
       <style>{`
-        @keyframes door-swing-l { from { transform: rotateY(0); } to { transform: rotateY(-110deg); } }
-        @keyframes door-swing-r { from { transform: rotateY(0); } to { transform: rotateY(110deg); } }
+        @keyframes door-swing-l { from { transform: rotateY(0); } to { transform: rotateY(-112deg); } }
+        @keyframes door-swing-r { from { transform: rotateY(0); } to { transform: rotateY(112deg); } }
         @keyframes door-glow-in { from { opacity: 0; } to { opacity: 1; } }
       `}</style>
 
-      {/* light spilling from behind the doors */}
+      {/* OPAQUE destination-colored field — hides the page we're leaving so the
+          opening doors reveal this domain's space, not the old homepage */}
+      <div style={{ position: "absolute", inset: 0, background: theme.backdrop }} />
+
+      {/* accent light blooming through on top of the opaque field */}
       <div
         style={{
           position: "absolute",
           inset: 0,
-          background: `radial-gradient(80% 70% at 50% 50%, ${theme.accent}66, #050308 72%)`,
-          animation: "door-glow-in 600ms ease forwards",
+          background: `radial-gradient(70% 60% at 50% 50%, ${theme.accent}55, transparent 72%)`,
+          animation: "door-glow-in 700ms ease forwards",
         }}
       />
 

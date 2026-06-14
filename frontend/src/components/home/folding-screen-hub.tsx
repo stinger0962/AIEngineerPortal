@@ -30,6 +30,7 @@ type Domain = {
   nameColor: string;
   bg: string; // panel base gradient
   glow: string; // hover radial wash
+  backdrop: string; // opaque field revealed behind the doors (≈ destination bg)
   motif: React.ReactNode;
 };
 
@@ -47,6 +48,7 @@ const DOMAINS: Domain[] = [
     nameColor: "#cdbd8e",
     bg: "linear-gradient(#0f1815,#0a110f)",
     glow: "radial-gradient(120% 90% at 50% 108%, rgba(95,179,163,.26), transparent 62%)",
+    backdrop: "linear-gradient(135deg, #f3ead9, #eef3ec 58%, #f4eee4)",
     motif: (
       <svg width="42" height="42" viewBox="0 0 42 42" aria-hidden="true">
         <path
@@ -72,6 +74,7 @@ const DOMAINS: Domain[] = [
     nameColor: "#e7c372",
     bg: "linear-gradient(#1a120a,#100a06)",
     glow: "radial-gradient(120% 90% at 50% 108%, rgba(224,138,60,.26), transparent 62%)",
+    backdrop: "radial-gradient(circle at top left, rgba(192,115,46,0.16), transparent 30%), linear-gradient(135deg, #f5ecdc, #efe2cd)",
     motif: (
       <svg width="42" height="46" viewBox="0 0 42 46" aria-hidden="true">
         <path
@@ -87,7 +90,7 @@ const DOMAINS: Domain[] = [
   },
   {
     key: "xuan",
-    href: "/ziwei",
+    href: "/xuan",
     numeral: "叁",
     char: "玄",
     enLabel: "Oracle",
@@ -98,6 +101,7 @@ const DOMAINS: Domain[] = [
     nameColor: "#cdbfff",
     bg: "linear-gradient(#100c1c,#0a0814)",
     glow: "radial-gradient(120% 90% at 50% 108%, rgba(154,123,240,.28), transparent 62%)",
+    backdrop: "radial-gradient(130% 95% at 50% -6%, #1a1330, #0c0a18 55%)",
     motif: (
       <svg width="48" height="44" viewBox="0 0 48 44" aria-hidden="true">
         <g fill="#c9b6ff">
@@ -119,7 +123,7 @@ function DomainDoor({ domain }: { domain: Domain }) {
   return (
     <DoorLink
       href={domain.href}
-      theme={{ char: domain.char, accent: domain.accent, innerBg: domain.bg }}
+      theme={{ char: domain.char, accent: domain.accent, innerBg: domain.bg, backdrop: domain.backdrop }}
       className="screen-door"
       ariaLabel={`${domain.verticalName} · 入口`}
       style={

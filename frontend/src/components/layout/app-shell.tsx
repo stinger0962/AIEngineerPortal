@@ -6,10 +6,11 @@ import { ConditionalHeader } from "@/components/layout/conditional-header";
 import { DomainShell, type DomainConfig } from "@/components/layout/domain-shell";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
 
-// 造 · 蒸馏所 silo — warm copper accent.
+// 造 · 蒸馏所 silo — warm copper accent + faint copper page bg.
 const ZAO: DomainConfig = {
   wordmark: "蒸馏所 · 造",
   accent: "#bf6a1e",
+  bg: "radial-gradient(circle at top left, rgba(192,115,46,0.16), transparent 28%), linear-gradient(135deg, #f5ecdc, #efe2cd 60%, #f3e8d6)",
   links: [
     { label: "蒸馏所", href: "/toolkits" },
     { label: "炼", href: "/toolkits/podcast" },
@@ -19,10 +20,11 @@ const ZAO: DomainConfig = {
   ],
 };
 
-// 玄 · 命理 silo — violet accent (deepened for contrast on the light strip).
+// 玄 · 命理 silo — violet accent + faint violet→gold page bg (紫 + 暗金).
 const XUAN: DomainConfig = {
   wordmark: "命理 · 玄",
   accent: "#7c5cf0",
+  bg: "radial-gradient(circle at top left, rgba(124,92,240,0.13), transparent 26%), radial-gradient(circle at bottom right, rgba(214,168,74,0.12), transparent 30%), linear-gradient(135deg, #efeaf7, #f4eee6)",
   links: [
     { label: "命理", href: "/xuan" },
     { label: "紫微斗数", href: "/ziwei" },

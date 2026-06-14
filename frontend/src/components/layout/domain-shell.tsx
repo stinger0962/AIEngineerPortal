@@ -16,6 +16,8 @@ export type DomainConfig = {
   wordmark: string; // e.g. "蒸馏所 · 造"
   accent: string; // hex — strip wordmark + active link color
   links: DomainLink[];
+  /** Faint domain-tinted page background (light — pages keep dark-on-light text). */
+  bg: string;
 };
 
 export function DomainShell({ config, children }: { config: DomainConfig; children: React.ReactNode }) {
@@ -23,7 +25,7 @@ export function DomainShell({ config, children }: { config: DomainConfig; childr
   const active = (href: string) => pathname === href;
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(247,127,0,0.16),_transparent_24%),linear-gradient(135deg,_#f8f3e8,_#eef5f1_58%,_#f7efe5)] text-ink">
+    <div className="min-h-screen text-ink" style={{ background: config.bg }}>
       {/* Top strip */}
       <header className="sticky top-0 z-30 border-b border-ink/10 bg-white/75 backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] items-center gap-4 px-4 py-3 lg:px-8">
