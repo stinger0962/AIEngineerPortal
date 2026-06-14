@@ -289,7 +289,8 @@ export default function FoldingScreenHub() {
       {/* Full-bleed dark "room" the screen stands in */}
       <div
         style={{
-          minHeight: "100svh",
+          height: "100dvh",
+          minHeight: "100dvh",
           width: "100%",
           display: "flex",
           flexDirection: "column",
@@ -337,10 +338,20 @@ export default function FoldingScreenHub() {
         </header>
 
         {/* The folding screen — lacquer frame fills the rest of the viewport */}
-        <main style={{ flex: 1, minHeight: 0, padding: "0 clamp(14px, 3vw, 40px) clamp(16px, 3.2vh, 38px)" }}>
+        <main
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            padding: "0 clamp(14px, 3vw, 40px) clamp(16px, 3.2vh, 38px)",
+          }}
+        >
           <div
             style={{
-              height: "100%",
+              flex: 1,
+              minHeight: 0,
+              display: "flex",
               padding: 13,
               borderRadius: 20,
               background: "linear-gradient(135deg,#3a1a0c,#1c0d06)",
@@ -349,7 +360,7 @@ export default function FoldingScreenHub() {
             }}
           >
             {/* Desktop: three doors side by side */}
-            <div className="hidden lg:flex" style={{ height: "100%" }}>
+            <div className="hidden lg:flex" style={{ flex: 1, minWidth: 0 }}>
               {DOMAINS.map((domain, i) => (
                 <React.Fragment key={domain.key}>
                   {i > 0 && <GoldSeam />}
@@ -359,7 +370,7 @@ export default function FoldingScreenHub() {
             </div>
 
             {/* Mobile: three doors stacked */}
-            <div className="flex lg:hidden" style={{ flexDirection: "column", gap: 10, height: "100%" }}>
+            <div className="flex lg:hidden" style={{ flex: 1, minHeight: 0, flexDirection: "column", gap: 10 }}>
               {DOMAINS.map((domain) => (
                 <DomainDoor key={domain.key} domain={domain} />
               ))}
