@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useRef, useState } from "react";
 
 import { DoorLink } from "@/components/transitions/door-link";
 
@@ -267,10 +267,21 @@ function GoldSeam() {
 }
 
 export default function FoldingScreenHub() {
+  const pagerRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(0);
+
+  const onPagerScroll = () => {
+    const el = pagerRef.current;
+    if (!el) return;
+    const idx = Math.round(el.scrollLeft / el.clientWidth);
+    setActive((prev) => (prev === idx ? prev : idx));
+  };
+
   return (
     <>
       <style>{`
         .screen-door { transition: border-color .4s ease, box-shadow .4s ease; }
+        .screen-pager::-webkit-scrollbar { display: none; }
         .screen-door:hover, .screen-door:focus-visible {
           border-color: color-mix(in srgb, var(--accent) 55%, #2c2417);
           box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent),
@@ -371,11 +382,50 @@ export default function FoldingScreenHub() {
               ))}
             </div>
 
-            {/* Mobile: three doors stacked */}
-            <div className="flex lg:hidden" style={{ flex: 1, minHeight: 0, flexDirection: "column", gap: 10 }}>
-              {DOMAINS.map((domain) => (
-                <DomainDoor key={domain.key} domain={domain} />
-              ))}
+            {/* Mobile: full-screen swipeable pager — one 屏风 per page */}
+            <div className="flex flex-col lg:hidden" style={{ flex: 1, minHeight: 0 }}>
+              {/* ==——  position indicator */}
+              <div style={{ display: "flex", justifyContent: "center", gap: 7, padding: "2px 0 11px", flexShrink: 0 }}>
+                {DOMAINS.map((domain, i) => (
+                  <span
+                    key={domain.key}
+                    aria-hidden="true"
+                    style={{
+                      height: 3,
+                      borderRadius: 2,
+                      width: i === active ? 26 : 13,
+                      background: i === active ? domain.accent : "rgba(255,255,255,.22)",
+                      transition: "width .3s ease, background .3s ease",
+                    }}
+                  />
+                ))}
+              </div>
+
+              {/* swipe track (native scroll-snap, no JS lib) */}
+              <div
+                ref={pagerRef}
+                onScroll={onPagerScroll}
+                className="screen-pager"
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  display: "flex",
+                  overflowX: "auto",
+                  overflowY: "hidden",
+                  scrollSnapType: "x mandatory",
+                  scrollbarWidth: "none",
+                  WebkitOverflowScrolling: "touch",
+                }}
+              >
+                {DOMAINS.map((domain) => (
+                  <div
+                    key={domain.key}
+                    style={{ flex: "0 0 100%", minWidth: 0, display: "flex", scrollSnapAlign: "center" }}
+                  >
+                    <DomainDoor domain={domain} />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </main>
