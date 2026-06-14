@@ -160,7 +160,7 @@ export function DubGenerator({ onReady }: Props) {
           onClick={() => setMode("link")}
           disabled={isBusy}
           className={`flex-1 rounded-xl py-2 text-sm font-semibold transition-colors disabled:opacity-40 ${
-            mode === "link" ? "bg-white shadow-sm text-rose-600" : "text-ink/50"
+            mode === "link" ? "bg-white shadow-sm text-[#b9472f]" : "text-ink/50"
           }`}
         >
           🔗 链接
@@ -169,7 +169,7 @@ export function DubGenerator({ onReady }: Props) {
           onClick={() => setMode("upload")}
           disabled={isBusy}
           className={`flex-1 rounded-xl py-2 text-sm font-semibold transition-colors disabled:opacity-40 ${
-            mode === "upload" ? "bg-white shadow-sm text-rose-600" : "text-ink/50"
+            mode === "upload" ? "bg-white shadow-sm text-[#b9472f]" : "text-ink/50"
           }`}
         >
           📁 上传
@@ -186,7 +186,7 @@ export function DubGenerator({ onReady }: Props) {
             placeholder="https://youtube.com/watch?v=..."
             disabled={isBusy}
             className={`w-full rounded-xl border px-3 py-2.5 text-sm bg-white text-ink placeholder:text-ink/30 outline-none transition-colors ${
-              url && !urlValid ? "border-red-400 focus:border-red-500" : "border-ink/15 focus:border-rose-500"
+              url && !urlValid ? "border-red-400 focus:border-red-500" : "border-ink/15 focus:border-[#c2502f]"
             } disabled:opacity-40`}
           />
           {url && !urlValid && <p className="text-[11px] text-red-500">请输入有效的 YouTube 链接</p>}
@@ -200,7 +200,7 @@ export function DubGenerator({ onReady }: Props) {
             accept="video/*"
             onChange={onPickFile}
             disabled={isBusy}
-            className="block w-full text-sm text-ink/70 file:mr-3 file:rounded-lg file:border-0 file:bg-rose-600 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:opacity-90 disabled:opacity-40"
+            className="block w-full text-sm text-ink/70 file:mr-3 file:rounded-lg file:border-0 file:bg-[#b9472f] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:opacity-90 disabled:opacity-40"
           />
           {file && (
             <p className={`text-[11px] ${fileTooBig ? "text-red-500" : "text-ink/50"}`}>
@@ -218,7 +218,7 @@ export function DubGenerator({ onReady }: Props) {
           value={voiceId}
           onChange={(e) => setVoiceId(e.target.value)}
           disabled={isBusy}
-          className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition-colors focus:border-rose-500 disabled:opacity-40"
+          className="w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-sm text-ink outline-none transition-colors focus:border-[#c2502f] disabled:opacity-40"
         >
           <option value="random">🎲 随机 Random</option>
           {femaleVoices.length > 0 && (
@@ -239,25 +239,25 @@ export function DubGenerator({ onReady }: Props) {
       </div>
 
       {isBusy ? (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 flex items-center gap-2">
-          <svg className="animate-spin h-4 w-4 text-rose-500 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+        <div className="rounded-xl border border-[#ecc2b5] bg-[#fbeee9] px-4 py-3 flex items-center gap-2">
+          <svg className="animate-spin h-4 w-4 text-[#c2502f] flex-shrink-0" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
           </svg>
-          <span className="text-sm text-rose-600">{STATUS_LABELS[status]}</span>
+          <span className="text-sm text-[#b9472f]">{STATUS_LABELS[status]}</span>
         </div>
       ) : (
         <button
           onClick={handleGenerate}
           disabled={!valid}
-          className="w-full rounded-xl bg-rose-600 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+          className="w-full rounded-xl bg-[#b9472f] py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-30"
         >
           <span aria-hidden="true">🎬</span> 生成配音视频 Dub
         </button>
       )}
 
       {status === "done" && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600 font-medium">
+        <div className="rounded-xl border border-[#ecc2b5] bg-[#fbeee9] px-4 py-3 text-sm text-[#b9472f] font-medium">
           ✓ 配音视频已生成 — 见右侧列表！
         </div>
       )}

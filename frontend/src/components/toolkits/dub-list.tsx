@@ -44,15 +44,15 @@ function DubCard({ d, onDelete }: { d: Dub; onDelete: (id: number) => void }) {
   }
 
   return (
-    <div className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-rose-300 hover:shadow-sm transition-all">
+    <div className="rounded-2xl border border-ink/10 bg-white p-4 hover:border-[#dd9a85] hover:shadow-sm transition-all">
       <div className="flex items-start gap-3 cursor-pointer" onClick={() => setOpen((o) => !o)}>
-        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center">
+        <div className="flex-shrink-0 w-9 h-9 rounded-xl bg-[#fbeee9] text-[#c2502f] flex items-center justify-center">
           <Languages className="w-[18px] h-[18px]" strokeWidth={2} />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-ink truncate">{d.title}</p>
           <div className="flex items-center gap-2 mt-1">
-            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-rose-50 text-rose-500">中文配音</span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-[#fbeee9] text-[#c2502f]">中文配音</span>
             <span className="text-[11px] text-ink/20">·</span>
             <span className="text-[11px] text-ink/40">{fmtDur(d.duration_secs)}</span>
             <span className="text-[11px] text-ink/20">·</span>
@@ -76,7 +76,7 @@ function DubCard({ d, onDelete }: { d: Dub; onDelete: (id: number) => void }) {
             href={`${API_BASE}/dub/${d.id}/video`}
             download={`dub-${d.id}.mp4`}
             onClick={(e) => e.stopPropagation()}
-            className="inline-block text-xs font-medium px-3 py-1.5 rounded-lg border border-ink/15 text-ink/60 hover:border-rose-400 hover:text-rose-600 transition-colors"
+            className="inline-block text-xs font-medium px-3 py-1.5 rounded-lg border border-ink/15 text-ink/60 hover:border-[#d2694a] hover:text-[#b9472f] transition-colors"
           >
             下载 mp4
           </a>
