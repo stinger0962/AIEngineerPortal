@@ -15,13 +15,15 @@ function font(): Buffer {
 }
 
 type CardOpts = {
-  char: string; // 蒸/炼/织/录/配
+  char: string; // 蒸/炼/织/录/配/灵
   title: string; // 蒸馏所 · 配 Dub
   category: string; // 外语视频 → 中文配音
   accent: string; // hex 主色
+  eyebrow?: string; // 顶部小标，默认蒸馏所；灵签等可覆盖
+  bg?: string; // 底色，默认冷黑；庙宇等暖色可覆盖
 };
 
-export function renderOgCard({ char, title, category, accent }: CardOpts) {
+export function renderOgCard({ char, title, category, accent, eyebrow = "蒸馏所 · Distill", bg = "#0b0b12" }: CardOpts) {
   return new ImageResponse(
     (
       <div
@@ -29,7 +31,7 @@ export function renderOgCard({ char, title, category, accent }: CardOpts) {
           width: "100%",
           height: "100%",
           display: "flex",
-          backgroundColor: "#0b0b12",
+          backgroundColor: bg,
           backgroundImage: `radial-gradient(1100px 700px at 18% 28%, ${accent}38 0%, rgba(11,11,18,0) 60%)`,
           fontFamily: "NotoSC",
           color: "#f6f6fb",
@@ -66,7 +68,7 @@ export function renderOgCard({ char, title, category, accent }: CardOpts) {
           }}
         >
           <div style={{ display: "flex", fontSize: 30, letterSpacing: 8, color: accent, marginBottom: 18 }}>
-            蒸馏所 · Distill
+            {eyebrow}
           </div>
           <div style={{ display: "flex", fontSize: 84, fontWeight: 700, marginBottom: 22 }}>{title}</div>
           <div style={{ display: "flex", fontSize: 38, color: "#b9b9c8" }}>{category}</div>

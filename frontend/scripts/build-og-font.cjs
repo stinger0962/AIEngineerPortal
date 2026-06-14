@@ -20,6 +20,7 @@ const TEXT = [
   "织 Loom", "内容", "摘要",
   "录 Scribe", "文字稿",
   "配 Dub", "外语视频", "中文配音",
+  "灵签 观音灵签 Oracle", "摇一支签 为你解签",
   "AI Engineer Portal", "portal.leipan.cc",
   "·", "→", "—",
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.",
