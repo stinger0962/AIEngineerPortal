@@ -8,8 +8,9 @@ import { SidebarNav } from "@/components/layout/sidebar-nav";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
-  // Homepage (屏风 hub) is a full-bleed immersive launcher — no sidebar, no header, no chrome.
-  if (pathname === "/") {
+  // Full-bleed immersive routes — no sidebar, no header, no chrome.
+  // / = 屏风 hub homepage; /xuan = 命理 · 玄 domain landing
+  if (pathname === "/" || pathname === "/xuan") {
     return <div className="min-h-screen">{children}</div>;
   }
 
