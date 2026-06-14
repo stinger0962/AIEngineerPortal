@@ -1,7 +1,18 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+
 import { ConditionalHeader } from "@/components/layout/conditional-header";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  // Homepage (屏风 hub) is a full-bleed immersive launcher — no sidebar, no header, no chrome.
+  if (pathname === "/") {
+    return <div className="min-h-screen">{children}</div>;
+  }
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(247,127,0,0.18),_transparent_24%),linear-gradient(135deg,_#f8f3e8,_#eef5f1_58%,_#f7efe5)] text-ink">
       <div className="mx-auto flex max-w-[1600px]">
