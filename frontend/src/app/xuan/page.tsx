@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { DoorLink } from "@/components/transitions/door-link";
+
 const SERIF = "'Songti SC','Noto Serif CJK SC','STSong','SimSun',serif";
 
 export default function XuanPage() {
@@ -108,9 +110,10 @@ export default function XuanPage() {
           }}
         >
           {/* ── Door 1: 紫微斗数 ── */}
-          <Link
+          <DoorLink
             href="/ziwei"
-            aria-label="紫微斗数 · 入口"
+            theme={{ char: "紫", accent: "#9a7bf0", innerBg: "linear-gradient(#171036,#0e0a1f)" }}
+            ariaLabel="紫微斗数 · 入口"
             className="xuan-door xuan-door--ziwei"
             style={{
               flex: 1,
@@ -254,12 +257,13 @@ export default function XuanPage() {
                 pointerEvents: "none",
               }}
             />
-          </Link>
+          </DoorLink>
 
           {/* ── Door 2: 灵签 ── */}
-          <Link
+          <DoorLink
             href="/qian"
-            aria-label="灵签求签 · 入口"
+            theme={{ char: "灵", accent: "#d6a84a", innerBg: "linear-gradient(#1c1408,#120c05)" }}
+            ariaLabel="灵签求签 · 入口"
             className="xuan-door xuan-door--qian"
             style={{
               flex: 1,
@@ -394,7 +398,7 @@ export default function XuanPage() {
                 pointerEvents: "none",
               }}
             />
-          </Link>
+          </DoorLink>
         </main>
       </div>
 

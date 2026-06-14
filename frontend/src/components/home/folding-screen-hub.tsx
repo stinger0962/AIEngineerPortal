@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import Link from "next/link";
+
+import { DoorLink } from "@/components/transitions/door-link";
 
 /**
  * 方寸 · 屏风 launcher (full-screen homepage).
@@ -116,10 +117,11 @@ const DOMAINS: Domain[] = [
 
 function DomainDoor({ domain }: { domain: Domain }) {
   return (
-    <Link
+    <DoorLink
       href={domain.href}
+      theme={{ char: domain.char, accent: domain.accent, innerBg: domain.bg }}
       className="screen-door"
-      aria-label={`${domain.verticalName} · 入口`}
+      ariaLabel={`${domain.verticalName} · 入口`}
       style={
         {
           "--accent": domain.accent,
@@ -252,7 +254,7 @@ function DomainDoor({ domain }: { domain: Domain }) {
           入口&nbsp;→
         </span>
       </span>
-    </Link>
+    </DoorLink>
   );
 }
 

@@ -4,12 +4,13 @@ import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Brain, Briefcase, Compass, FileText, GraduationCap, Home, Menu, MessageSquare, Mic, Scroll, Search, Settings, Sparkles, SquareTerminal, BookOpen, Wrench, X } from "lucide-react";
+import { Brain, Briefcase, Compass, FileText, GraduationCap, Home, Menu, MessageSquare, Search, Settings, SquareTerminal, BookOpen, X } from "lucide-react";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 type NavGroup = { key: string; label: string; accent: string; items: NavItem[] };
 
-// 方寸 · 三域门户：首页(屏风) → 学(成长) → 造(蒸馏) → 玄(命理) → 系统
+// 学域筒仓侧栏：只含「学」域 + 系统 + 回首页。造/玄 是独立筒仓，只从首页进入，
+// 不在此交叉链接（三域互相独立）。
 const groups: NavGroup[] = [
   {
     key: "home",
@@ -31,24 +32,6 @@ const groups: NavGroup[] = [
       { href: "/resume", label: "Resume", icon: FileText },
       { href: "/jobs/live", label: "Jobs", icon: Search },
       { href: "/copilot", label: "Copilot", icon: MessageSquare },
-    ],
-  },
-  {
-    key: "zao",
-    label: "造 · Distill",
-    accent: "#e08a3c",
-    items: [
-      { href: "/toolkits", label: "蒸馏所", icon: Wrench },
-      { href: "/toolkits/dub", label: "配 · Dub", icon: Mic },
-    ],
-  },
-  {
-    key: "xuan",
-    label: "玄 · Oracle",
-    accent: "#9a7bf0",
-    items: [
-      { href: "/ziwei", label: "紫微斗数", icon: Sparkles },
-      { href: "/qian", label: "灵签", icon: Scroll },
     ],
   },
   {
