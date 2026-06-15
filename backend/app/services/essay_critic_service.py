@@ -196,7 +196,13 @@ def evaluate(text: str, paper_type: str, output_lang: str, anthropic_api_key: st
     overall = _maybe_json(result.get("overall"))
     dims = _as_list(result.get("dimensions"))
     if not isinstance(overall, dict) or not dims:
-        raise ValueError("评估失败：模型未返回结构化结果，请重试。")
+        ov = result.get("overall")
+        dm = result.get("dimensions")
+        raise ValueError(
+            f"评估失败：结构不完整 keys={list(result.keys())} "
+            f"overall={type(ov).__name__}/{(ov[:60] if isinstance(ov, str) else 'obj')} "
+            f"dims={type(dm).__name__}/{(dm[:60] if isinstance(dm, str) else 'arr')}"
+        )
     for d in dims:
         if isinstance(d, dict):
             d["suggestions"] = _as_list(d.get("suggestions"))
