@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Brain, Briefcase, Compass, FileText, GraduationCap, Home, Menu, MessageSquare, Search, Settings, SquareTerminal, BookOpen, X } from "lucide-react";
+import { Brain, Briefcase, ClipboardCheck, Compass, FileText, GraduationCap, Home, Menu, MessageSquare, Search, Settings, SquareTerminal, BookOpen, X } from "lucide-react";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 type NavGroup = { key: string; label: string; accent: string; items: NavItem[] };
@@ -27,6 +27,7 @@ const groups: NavGroup[] = [
       { href: "/learn", label: "Learn", icon: GraduationCap },
       { href: "/practice", label: "Practice", icon: SquareTerminal },
       { href: "/review", label: "Review", icon: Brain },
+      { href: "/critique", label: "Critique", icon: ClipboardCheck },
       { href: "/interview", label: "Interview", icon: BookOpen },
       { href: "/projects", label: "Portfolio", icon: Briefcase },
       { href: "/resume", label: "Resume", icon: FileText },
