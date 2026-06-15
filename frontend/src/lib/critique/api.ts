@@ -18,6 +18,18 @@ export type Evaluation = {
   dimensions: Dimension[];
 };
 
+export type Verdict = {
+  better: boolean;
+  reason: string;
+  dimensions_improved: string[];
+};
+
+export type Revision = {
+  revised: string;
+  changes: string[];
+  verdict: Verdict;
+};
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function handleError(res: Response, fallback: string): Promise<never> {
@@ -52,17 +64,18 @@ export async function extractFile(
 }
 
 /**
- * Send extracted text + paper type for evaluation.
+ * Send extracted text + paper type + output language for evaluation.
  * Returns a full Evaluation object on success.
  */
 export async function evaluateEssay(
   text: string,
   paperType: string,
+  outputLang: string,
 ): Promise<Evaluation> {
   const res = await fetch(`${API_BASE}/critique/evaluate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, paper_type: paperType }),
+    body: JSON.stringify({ text, paper_type: paperType, output_lang: outputLang }),
     cache: "no-store",
   });
 
@@ -71,4 +84,28 @@ export async function evaluateEssay(
   }
 
   return res.json() as Promise<Evaluation>;
+}
+
+/**
+ * Send text for a single-round AI-assisted revision.
+ * Returns a Revision object (revised text + changes list + verdict).
+ * Caps at ~15 000 chars; backend returns 422 with a message if exceeded.
+ */
+export async function reviseEssay(
+  text: string,
+  paperType: string,
+  outputLang: string,
+): Promise<Revision> {
+  const res = await fetch(`${API_BASE}/critique/revise`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, paper_type: paperType, output_lang: outputLang }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    await handleError(res, "改进失败");
+  }
+
+  return res.json() as Promise<Revision>;
 }

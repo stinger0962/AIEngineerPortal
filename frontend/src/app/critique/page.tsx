@@ -2,8 +2,8 @@
 
 import { useRef, useState } from "react";
 import { ClipboardCheck, Upload, Loader2 } from "lucide-react";
-import { extractFile, evaluateEssay } from "@/lib/critique/api";
-import type { Evaluation } from "@/lib/critique/api";
+import { extractFile, evaluateEssay, reviseEssay } from "@/lib/critique/api";
+import type { Evaluation, Revision } from "@/lib/critique/api";
 
 // ── Paper type config ─────────────────────────────────────────────────────────
 
@@ -14,6 +14,16 @@ const PAPER_TYPES = [
 ] as const;
 
 type PaperType = (typeof PAPER_TYPES)[number]["value"];
+
+// ── Output language config ────────────────────────────────────────────────────
+
+const OUTPUT_LANGS = [
+  { value: "zh", label: "中文" },
+  { value: "en", label: "English" },
+  { value: "auto", label: "跟随原文" },
+] as const;
+
+type OutputLang = (typeof OUTPUT_LANGS)[number]["value"];
 
 // ── Score bar ─────────────────────────────────────────────────────────────────
 
@@ -76,7 +86,37 @@ function DimensionCard({
 
 // ── Results panel ─────────────────────────────────────────────────────────────
 
-function ResultsPanel({ result }: { result: Evaluation | null }) {
+type ResultsPanelProps = {
+  result: Evaluation | null;
+  onRevise: () => void;
+  revising: boolean;
+  reviseError: string | null;
+  revision: Revision | null;
+  originalSnapshot: string;
+  onAdopt: (revised: string) => void;
+};
+
+function ResultsPanel({
+  result,
+  onRevise,
+  revising,
+  reviseError,
+  revision,
+  originalSnapshot,
+  onAdopt,
+}: ResultsPanelProps) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // clipboard not available; silently ignore
+    }
+  }
+
   if (!result) {
     return (
       <div className="flex h-full min-h-[320px] items-center justify-center rounded-[28px] border border-ink/10 bg-white/85 shadow-panel">
@@ -145,6 +185,174 @@ function ResultsPanel({ result }: { result: Evaluation | null }) {
           <DimensionCard key={i} {...dim} />
         ))}
       </div>
+
+      {/* Divider before revise */}
+      <div className="border-t border-ink/8" />
+
+      {/* ── Revise button ── */}
+      <button
+        onClick={onRevise}
+        disabled={revising}
+        className="flex w-full items-center justify-center gap-2 rounded-[16px] py-3 text-sm font-semibold transition-all"
+        style={{
+          background: revising
+            ? "rgba(20,33,61,0.08)"
+            : "rgba(95,179,163,0.12)",
+          color: revising ? "rgba(20,33,61,0.30)" : "#3f8a7d",
+          border: revising
+            ? "1px solid rgba(20,33,61,0.10)"
+            : "1px solid rgba(95,179,163,0.35)",
+          cursor: revising ? "not-allowed" : "pointer",
+        }}
+      >
+        {revising ? (
+          <>
+            <Loader2 size={15} className="animate-spin" />
+            改进中…（约 20–40 秒）
+          </>
+        ) : (
+          "改进这一版 Revise"
+        )}
+      </button>
+
+      {/* Revise error */}
+      {reviseError && (
+        <p className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-600">
+          {reviseError}
+        </p>
+      )}
+
+      {/* ── Revision block ── */}
+      {revision && (
+        <div className="space-y-5">
+          {/* Verdict pill + reason */}
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {revision.verdict.better ? (
+                <span
+                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
+                  style={{
+                    background: "rgba(31,122,77,0.10)",
+                    color: "#1f7a4d",
+                    border: "1px solid rgba(31,122,77,0.25)",
+                  }}
+                >
+                  改后更好 ✓
+                </span>
+              ) : (
+                <span
+                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
+                  style={{
+                    background: "rgba(160,106,48,0.10)",
+                    color: "#a06a30",
+                    border: "1px solid rgba(160,106,48,0.25)",
+                  }}
+                >
+                  未必更好 · 谨慎采纳
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-ink/70 leading-6">{revision.verdict.reason}</p>
+            {revision.verdict.dimensions_improved.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-ink/45">提升：</span>
+                {revision.verdict.dimensions_improved.map((d, i) => (
+                  <span
+                    key={i}
+                    className="rounded-full px-2.5 py-0.5 text-xs"
+                    style={{
+                      background: "rgba(95,179,163,0.10)",
+                      color: "#3f8a7d",
+                      border: "1px solid rgba(95,179,163,0.25)",
+                    }}
+                  >
+                    {d}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Changes list */}
+          {revision.changes.length > 0 && (
+            <div className="space-y-2">
+              <p
+                className="text-[10px] font-semibold uppercase tracking-[0.28em]"
+                style={{ color: "#5fb3a3" }}
+              >
+                这轮改了什么
+              </p>
+              <ul className="space-y-1.5">
+                {revision.changes.map((c, i) => (
+                  <li key={i} className="flex gap-2 text-[13px] text-ink/75 leading-5">
+                    <span className="shrink-0 font-semibold" style={{ color: "#5fb3a3" }}>
+                      →
+                    </span>
+                    <span>{c}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Side-by-side comparison */}
+          <div className="space-y-2">
+            <p
+              className="text-[10px] font-semibold uppercase tracking-[0.28em]"
+              style={{ color: "#5fb3a3" }}
+            >
+              并排对照
+            </p>
+            <div className="grid lg:grid-cols-2 gap-3">
+              {/* Original */}
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-ink/50">原文</p>
+                <div
+                  className="max-h-[420px] overflow-auto rounded-xl border border-ink/10 bg-white p-4 text-[13px] leading-6 whitespace-pre-wrap text-ink/80"
+                >
+                  {originalSnapshot}
+                </div>
+              </div>
+              {/* Revised */}
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-ink/50">改后</p>
+                <div
+                  className="max-h-[420px] overflow-auto rounded-xl border border-ink/10 bg-white p-4 text-[13px] leading-6 whitespace-pre-wrap text-ink/80"
+                >
+                  {revision.revised}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-wrap gap-3">
+            {/* 采纳改后 */}
+            <button
+              onClick={() => onAdopt(revision.revised)}
+              className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
+              style={{
+                background: "linear-gradient(135deg, #7fcab9 0%, #5fb3a3 50%, #3f8a7d 100%)",
+                color: "white",
+              }}
+            >
+              采纳改后
+            </button>
+            {/* 复制改后 */}
+            <button
+              onClick={() => handleCopy(revision.revised)}
+              className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
+              style={{
+                background: "transparent",
+                color: "#3f8a7d",
+                border: "1px solid rgba(95,179,163,0.40)",
+              }}
+            >
+              {copied ? "已复制" : "复制改后"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -153,6 +361,7 @@ function ResultsPanel({ result }: { result: Evaluation | null }) {
 
 export default function CritiquePage() {
   const [paperType, setPaperType] = useState<PaperType>("research");
+  const [outputLang, setOutputLang] = useState<OutputLang>("auto");
   const [text, setText] = useState("");
   const [filename, setFilename] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
@@ -160,6 +369,12 @@ export default function CritiquePage() {
   const [evaluating, setEvaluating] = useState(false);
   const [evalError, setEvalError] = useState<string | null>(null);
   const [result, setResult] = useState<Evaluation | null>(null);
+
+  // Revise state
+  const [revising, setRevising] = useState(false);
+  const [reviseError, setReviseError] = useState<string | null>(null);
+  const [revision, setRevision] = useState<Revision | null>(null);
+  const [originalSnapshot, setOriginalSnapshot] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -191,14 +406,43 @@ export default function CritiquePage() {
     if (!canEvaluate) return;
     setEvalError(null);
     setEvaluating(true);
+    // Clear any prior revision when re-evaluating
+    setRevision(null);
+    setReviseError(null);
     try {
-      const evaluation = await evaluateEssay(text, paperType);
+      const evaluation = await evaluateEssay(text, paperType, outputLang);
       setResult(evaluation);
     } catch (err) {
       setEvalError(err instanceof Error ? err.message : "评估失败");
     } finally {
       setEvaluating(false);
     }
+  }
+
+  async function handleRevise() {
+    if (revising) return;
+    setReviseError(null);
+    setRevision(null);
+    // Snapshot the textarea content at the moment of clicking revise
+    const snapshot = text;
+    setOriginalSnapshot(snapshot);
+    setRevising(true);
+    try {
+      const rev = await reviseEssay(snapshot, paperType, outputLang);
+      setRevision(rev);
+    } catch (err) {
+      setReviseError(err instanceof Error ? err.message : "改进失败");
+    } finally {
+      setRevising(false);
+    }
+  }
+
+  function handleAdopt(revised: string) {
+    setText(revised);
+    // Clear eval + revision so user is prompted to re-evaluate
+    setResult(null);
+    setRevision(null);
+    setReviseError(null);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -254,6 +498,40 @@ export default function CritiquePage() {
                   <button
                     key={value}
                     onClick={() => setPaperType(value)}
+                    className="rounded-full px-4 py-1.5 text-xs font-semibold transition-all"
+                    style={
+                      active
+                        ? {
+                            background: "rgba(95,179,163,0.12)",
+                            color: "#3f8a7d",
+                            border: "1px solid rgba(95,179,163,0.35)",
+                          }
+                        : {
+                            background: "transparent",
+                            color: "rgba(20,33,61,0.50)",
+                            border: "1px solid rgba(20,33,61,0.12)",
+                          }
+                    }
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Output language selector */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-ink/45">
+              输出语言
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              {OUTPUT_LANGS.map(({ value, label }) => {
+                const active = outputLang === value;
+                return (
+                  <button
+                    key={value}
+                    onClick={() => setOutputLang(value)}
                     className="rounded-full px-4 py-1.5 text-xs font-semibold transition-all"
                     style={
                       active
@@ -368,7 +646,15 @@ export default function CritiquePage() {
 
         {/* ── RIGHT: Results panel ── */}
         <div>
-          <ResultsPanel result={result} />
+          <ResultsPanel
+            result={result}
+            onRevise={handleRevise}
+            revising={revising}
+            reviseError={reviseError}
+            revision={revision}
+            originalSnapshot={originalSnapshot}
+            onAdopt={handleAdopt}
+          />
         </div>
       </div>
     </div>
