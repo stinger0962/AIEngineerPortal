@@ -136,27 +136,34 @@ _SYSTEM = """你是一位严格、就事论事的学术写作评审，不奉承�
 只通过 report_evaluation 工具返回结构化结果，不要输出其它文字。"""
 
 
-def _run_tool(anthropic_api_key: str, model: str, *, max_tokens: int, system: str, user: str, tool: dict, fail_msg: str) -> Dict[str, Any]:
-    """Single forced-tool Claude call → the tool's input dict. Raises ValueError on failure."""
+def _run_tool(anthropic_api_key: str, model: str, *, max_tokens: int, system: str, user: str, tool: dict, fail_msg: str, attempts: int = 3) -> Dict[str, Any]:
+    """Forced-tool Claude call → the tool's input dict. Retries on transient API
+    errors and on the model occasionally failing to emit a usable structured
+    payload (it sometimes returns the tool input as a JSON string). Raises ValueError
+    once attempts are exhausted."""
     import anthropic
 
     client = anthropic.Anthropic(api_key=anthropic_api_key)
-    try:
-        msg = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=system,
-            tools=[tool],
-            tool_choice={"type": "tool", "name": tool["name"]},
-            messages=[{"role": "user", "content": user}],
-        )
-    except Exception as exc:
-        raise ValueError(f"{fail_msg}：{exc}") from exc
-    for block in msg.content:
-        if getattr(block, "type", None) == "tool_use" and block.name == tool["name"]:
-            if isinstance(block.input, dict):
-                return block.input
-    raise ValueError(f"{fail_msg}：模型未返回结构化结果，请重试。")
+    last_err: str = "模型未返回结构化结果，请重试。"
+    for _ in range(max(1, attempts)):
+        try:
+            msg = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                tools=[tool],
+                tool_choice={"type": "tool", "name": tool["name"]},
+                messages=[{"role": "user", "content": user}],
+            )
+        except Exception as exc:  # transient API error → retry
+            last_err = str(exc)
+            continue
+        for block in msg.content:
+            if getattr(block, "type", None) == "tool_use" and block.name == tool["name"]:
+                data = _maybe_json(block.input)  # the model sometimes returns the whole input as a JSON string
+                if isinstance(data, dict):
+                    return data
+    raise ValueError(f"{fail_msg}：{last_err}")
 
 
 def evaluate(text: str, paper_type: str, output_lang: str, anthropic_api_key: str, model: str) -> Dict[str, Any]:
