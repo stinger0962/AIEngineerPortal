@@ -181,7 +181,7 @@ def evaluate(text: str, paper_type: str, output_lang: str, anthropic_api_key: st
     result = _run_tool(
         anthropic_api_key,
         model,
-        max_tokens=3000,
+        max_tokens=8000,  # 6-dim Chinese critique easily exceeds 3000 → truncated tool JSON → unusable
         system=_SYSTEM.format(type=type_label, lang=_lang_instr(output_lang)),
         user=f"论文类型：{type_label}{note}\n\n论文正文：\n\n{text}",
         tool=_TOOL,
