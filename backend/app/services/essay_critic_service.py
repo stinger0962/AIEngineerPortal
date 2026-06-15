@@ -8,7 +8,8 @@ improvement. (See the project discussion on reward-hacking an LLM judge.)
 from __future__ import annotations
 
 import io
-from typing import Any, Dict
+import json
+from typing import Any, Dict, List
 
 _MIN_CHARS = 200
 _MAX_CHARS = 60000  # cap input to keep token cost / latency sane (~ a long paper)
@@ -31,6 +32,36 @@ _LANG = {
 
 def _lang_instr(output_lang: str) -> str:
     return _LANG.get(output_lang, _LANG["auto"])
+
+
+def _maybe_json(v: Any) -> Any:
+    """Claude's tool calls sometimes return nested object/array params as JSON
+    STRINGS instead of structured values. If v looks like serialized JSON, parse it."""
+    if isinstance(v, str):
+        s = v.strip()
+        if s[:1] in ("{", "["):
+            try:
+                return json.loads(s)
+            except (ValueError, TypeError):
+                return v
+    return v
+
+
+def _as_list(v: Any) -> List[Any]:
+    v = _maybe_json(v)
+    if isinstance(v, list):
+        return v
+    if v is None or v == "":
+        return []
+    return [v]
+
+
+def _as_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes", "是")
+    return bool(v)
 
 
 def extract_text(filename: str, raw: bytes) -> str:
@@ -149,9 +180,15 @@ def evaluate(text: str, paper_type: str, output_lang: str, anthropic_api_key: st
         tool=_TOOL,
         fail_msg="评估失败",
     )
-    if "overall" not in result or "dimensions" not in result:
+    # Claude may stringify the nested object/array params — coerce back to structure.
+    overall = _maybe_json(result.get("overall"))
+    dims = _as_list(result.get("dimensions"))
+    if not isinstance(overall, dict) or not dims:
         raise ValueError("评估失败：模型未返回结构化结果，请重试。")
-    return result
+    for d in dims:
+        if isinstance(d, dict):
+            d["suggestions"] = _as_list(d.get("suggestions"))
+    return {"overall": overall, "dimensions": dims}
 
 
 # ── 改进层：助攻式单轮 revise + 成对裁决 judge ──────────────────────────────
@@ -221,10 +258,10 @@ def revise(text: str, paper_type: str, output_lang: str, anthropic_api_key: str,
         tool=_REVISE_TOOL,
         fail_msg="改进失败",
     )
-    if not result.get("revised"):
+    revised = _maybe_json(result.get("revised"))
+    if not isinstance(revised, str) or not revised.strip():
         raise ValueError("改进失败：模型未返回改后正文，请重试。")
-    result.setdefault("changes", [])
-    return result
+    return {"revised": revised, "changes": _as_list(result.get("changes"))}
 
 
 def judge_pair(original: str, revised: str, paper_type: str, output_lang: str, anthropic_api_key: str, model: str) -> Dict[str, Any]:
@@ -239,5 +276,8 @@ def judge_pair(original: str, revised: str, paper_type: str, output_lang: str, a
         tool=_JUDGE_TOOL,
         fail_msg="裁决失败",
     )
-    result.setdefault("dimensions_improved", [])
-    return result
+    return {
+        "better": _as_bool(result.get("better")),
+        "reason": result.get("reason") or "",
+        "dimensions_improved": _as_list(result.get("dimensions_improved")),
+    }

@@ -38,6 +38,67 @@ async function handleError(res: Response, fallback: string): Promise<never> {
   throw new Error(detail ?? fallback);
 }
 
+// Defense-in-depth: a tool-call response can occasionally arrive with a nested
+// field serialized as a JSON string instead of a real array/object. Coerce so
+// the UI's .map() never crashes the page (the backend also normalizes this).
+function asArray<T = unknown>(v: unknown): T[] {
+  if (Array.isArray(v)) return v as T[];
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v);
+      if (Array.isArray(parsed)) return parsed as T[];
+    } catch {
+      /* not JSON — fall through */
+    }
+  }
+  return [];
+}
+
+function asObject(v: unknown): Record<string, unknown> {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v);
+      if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
+    } catch {
+      /* ignore */
+    }
+  }
+  return {};
+}
+
+function normalizeEvaluation(raw: unknown): Evaluation {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const overall = asObject(r.overall);
+  return {
+    overall: {
+      band: String(overall.band ?? ""),
+      summary: String(overall.summary ?? ""),
+      top_fix: String(overall.top_fix ?? ""),
+    },
+    dimensions: asArray<Record<string, unknown>>(r.dimensions).map((d) => ({
+      label: String(d.label ?? ""),
+      score: Number(d.score ?? 0),
+      critique: String(d.critique ?? ""),
+      suggestions: asArray<string>(d.suggestions).map((s) => String(s)),
+    })),
+  };
+}
+
+function normalizeRevision(raw: unknown): Revision {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const verdict = asObject(r.verdict);
+  return {
+    revised: String(r.revised ?? ""),
+    changes: asArray<string>(r.changes).map((c) => String(c)),
+    verdict: {
+      better: Boolean(verdict.better),
+      reason: String(verdict.reason ?? ""),
+      dimensions_improved: asArray<string>(verdict.dimensions_improved).map((d) => String(d)),
+    },
+  };
+}
+
 // ── API Functions ─────────────────────────────────────────────────────────────
 
 /**
@@ -83,7 +144,7 @@ export async function evaluateEssay(
     await handleError(res, "评估失败");
   }
 
-  return res.json() as Promise<Evaluation>;
+  return normalizeEvaluation(await res.json());
 }
 
 /**
@@ -107,5 +168,5 @@ export async function reviseEssay(
     await handleError(res, "改进失败");
   }
 
-  return res.json() as Promise<Revision>;
+  return normalizeRevision(await res.json());
 }
