@@ -4,10 +4,14 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+# Anthropic model ids that have been retired (return 404). Remap transparently so
+# a stale value baked into the VPS .env can't break the whole AI layer.
+_RETIRED_MODELS = {"claude-sonnet-4-20250514": "claude-sonnet-4-6"}
 
 
 class Settings(BaseSettings):
@@ -21,6 +25,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     ai_model: str = "claude-sonnet-4-6"  # claude-sonnet-4-20250514 was retired (404)
     ai_daily_token_budget: int = 100_000
+
+    @field_validator("ai_model")
+    @classmethod
+    def _resolve_retired_model(cls, v: str) -> str:
+        return _RETIRED_MODELS.get((v or "").strip(), v)
     openai_api_key: str = ""  # OpenAI Whisper (录 Scribe transcription)
     # MiniMax (海螺) TTS — purpose-built for Mandarin, replaces ElevenLabs
     minimax_api_key: str = ""
