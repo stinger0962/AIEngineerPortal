@@ -158,11 +158,16 @@ def _run_tool(anthropic_api_key: str, model: str, *, max_tokens: int, system: st
         except Exception as exc:  # transient API error → retry
             last_err = str(exc)
             continue
+        types = [getattr(b, "type", "?") for b in msg.content]
         for block in msg.content:
             if getattr(block, "type", None) == "tool_use" and block.name == tool["name"]:
                 data = _maybe_json(block.input)  # the model sometimes returns the whole input as a JSON string
                 if isinstance(data, dict):
                     return data
+                last_err = f"tool_use input type={type(block.input).__name__} stop={getattr(msg, 'stop_reason', '?')}"
+                break
+        else:
+            last_err = f"no tool_use; blocks={types} stop={getattr(msg, 'stop_reason', '?')}"
     raise ValueError(f"{fail_msg}：{last_err}")
 
 
