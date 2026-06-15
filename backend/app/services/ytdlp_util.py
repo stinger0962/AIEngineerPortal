@@ -52,7 +52,11 @@ def build_opts(extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     proxy = proxy_url()
     if proxy:
         opts["proxy"] = proxy
-    opts["extractor_args"] = {"youtube": {"player_client": ["tv", "ios", "web"]}}
+    # Prefer mobile clients: they dodge the web "sign in to confirm you're not a
+    # bot" check AND return clean (non-DRM) downloadable streams. NOT `tv` — it
+    # avoids the bot-check but serves DRM-encrypted streams for some videos.
+    # `web` kept only as a last-resort fallback.
+    opts["extractor_args"] = {"youtube": {"player_client": ["ios", "android", "web"]}}
     if extra:
         opts.update(extra)
     return opts
