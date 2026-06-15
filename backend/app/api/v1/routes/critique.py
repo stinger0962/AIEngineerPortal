@@ -18,6 +18,13 @@ _MAX_UPLOAD = 10 * 1024 * 1024  # 10 MB
 class EvaluateRequest(BaseModel):
     text: str
     paper_type: str = "research"
+    output_lang: str = "auto"  # auto | zh | en
+
+
+class ReviseRequest(BaseModel):
+    text: str
+    paper_type: str = "research"
+    output_lang: str = "auto"
 
 
 @router.post("/extract")
@@ -46,10 +53,33 @@ def evaluate(payload: EvaluateRequest):
         raise HTTPException(status_code=503, detail="评估服务未配置。")
     try:
         return critic.evaluate(
-            payload.text, payload.paper_type, settings.anthropic_api_key, settings.ai_model
+            payload.text, payload.paper_type, payload.output_lang, settings.anthropic_api_key, settings.ai_model
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception:
         logger.exception("Critique evaluate failed")
         raise HTTPException(status_code=500, detail="评估失败，请稍后重试。")
+
+
+@router.post("/revise")
+def revise(payload: ReviseRequest):
+    """Assisted single-round revision: produce a writing-layer revision + a pairwise
+    verdict on whether it's genuinely better. The user reviews the diff and decides."""
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="改进服务未配置。")
+    try:
+        rev = critic.revise(
+            payload.text, payload.paper_type, payload.output_lang, settings.anthropic_api_key, settings.ai_model
+        )
+        verdict = critic.judge_pair(
+            payload.text, rev["revised"], payload.paper_type, payload.output_lang,
+            settings.anthropic_api_key, settings.ai_model,
+        )
+        return {"revised": rev["revised"], "changes": rev.get("changes", []), "verdict": verdict}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        logger.exception("Critique revise failed")
+        raise HTTPException(status_code=500, detail="改进失败，请稍后重试。")
