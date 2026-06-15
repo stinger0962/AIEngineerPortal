@@ -32,23 +32,12 @@ def _ensure_dir() -> Path:
     return DUB_DIR
 
 
-def _proxy_url() -> Optional[str]:
-    u = os.getenv("WEBSHARE_PROXY_USERNAME", "")
-    p = os.getenv("WEBSHARE_PROXY_PASSWORD", "")
-    return f"http://{u}:{p}@p.webshare.io:80" if u and p else None
-
-
 def probe_duration(youtube_url: str) -> int:
     """Return duration seconds without downloading. Raises ValueError if unavailable or > 10 min."""
-    import yt_dlp
+    from app.services import ytdlp_util
 
-    opts = {"quiet": True, "no_warnings": True, "noplaylist": True}
-    proxy = _proxy_url()
-    if proxy:
-        opts["proxy"] = proxy
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(youtube_url, download=False)
+        info = ytdlp_util.extract_info(youtube_url, download=False)
         dur = int(info.get("duration") or 0)
     except Exception as exc:
         raise ValueError(f"无法读取该视频信息：{exc}") from exc
@@ -60,25 +49,22 @@ def probe_duration(youtube_url: str) -> int:
 
 
 def download_video(youtube_url: str, out_dir: str) -> Tuple[str, str]:
-    """yt-dlp merged mp4 (<=480p) via Webshare proxy. Returns (title, video_path).
-    Capped at 480p because the residential proxy is bandwidth-throttled and the video
-    is only a backdrop for the Chinese narration — smaller download, faster dubbing."""
-    import yt_dlp
+    """yt-dlp merged mp4 (<=480p) via Webshare proxy, with exit-IP rotation on
+    bot-detection. Returns (title, video_path). Capped at 480p because the
+    residential proxy is bandwidth-throttled and the video is only a backdrop for
+    the Chinese narration — smaller download, faster dubbing."""
+    from app.services import ytdlp_util
 
-    opts = {
-        "format": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]/best",
-        "merge_output_format": "mp4",
-        "outtmpl": str(Path(out_dir) / "dub.%(ext)s"),
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-    }
-    proxy = _proxy_url()
-    if proxy:
-        opts["proxy"] = proxy
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(youtube_url, download=True)
+        info = ytdlp_util.extract_info(
+            youtube_url,
+            download=True,
+            extra_opts={
+                "format": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]/best",
+                "merge_output_format": "mp4",
+                "outtmpl": str(Path(out_dir) / "dub.%(ext)s"),
+            },
+        )
         title = (info.get("title") or "视频").strip()
     except Exception as exc:
         raise ValueError(f"无法下载该视频：{exc}") from exc

@@ -10,33 +10,23 @@ _WHISPER_MODEL = "whisper-1"
 _CHUNK_MS = 10 * 60 * 1000  # 10-min chunks — 16kHz mono mp3 stays well under OpenAI's 25MB/request
 
 
-def _proxy_url() -> Optional[str]:
-    user = os.getenv("WEBSHARE_PROXY_USERNAME", "")
-    pw = os.getenv("WEBSHARE_PROXY_PASSWORD", "")
-    return f"http://{user}:{pw}@p.webshare.io:80" if user and pw else None
-
-
 def download_audio(youtube_url: str, out_dir: str) -> Tuple[str, str]:
     """yt-dlp bestaudio -> 16kHz mono mp3 at out_dir/scribe.mp3 (via Webshare proxy
-    when configured). Returns (title, audio_path). Raises ValueError on failure."""
-    import yt_dlp
-
-    opts = {
-        "format": "bestaudio/best",
-        "outtmpl": str(Path(out_dir) / "scribe.%(ext)s"),
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
-        "postprocessor_args": ["-ar", "16000", "-ac", "1"],
-    }
-    proxy = _proxy_url()
-    if proxy:
-        opts["proxy"] = proxy
+    with exit-IP rotation on bot-detection). Returns (title, audio_path). Raises
+    ValueError on failure."""
+    from app.services import ytdlp_util
 
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(youtube_url, download=True)
+        info = ytdlp_util.extract_info(
+            youtube_url,
+            download=True,
+            extra_opts={
+                "format": "bestaudio/best",
+                "outtmpl": str(Path(out_dir) / "scribe.%(ext)s"),
+                "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
+                "postprocessor_args": ["-ar", "16000", "-ac", "1"],
+            },
+        )
         title = (info.get("title") or "YouTube 视频").strip()
     except Exception as exc:
         raise ValueError(f"无法下载该视频的音频：{exc}") from exc
