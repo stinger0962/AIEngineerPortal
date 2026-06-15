@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     cors_origins: str = Field(default="http://localhost:3000")
     anthropic_api_key: str = ""
-    ai_model: str = "claude-sonnet-4-20250514"
+    ai_model: str = "claude-sonnet-4-6"  # claude-sonnet-4-20250514 was retired (404)
     ai_daily_token_budget: int = 100_000
     openai_api_key: str = ""  # OpenAI Whisper (录 Scribe transcription)
     # MiniMax (海螺) TTS — purpose-built for Mandarin, replaces ElevenLabs

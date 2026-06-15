@@ -299,7 +299,7 @@ def generate_script(
     digest_length_mins: int,
     fmt: str,
     anthropic_api_key: str,
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-sonnet-4-6",
 ) -> str:
     """
     Call Claude to produce a Chinese podcast script.
