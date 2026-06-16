@@ -73,7 +73,7 @@ def evaluate(payload: EvaluateRequest):
         raise HTTPException(status_code=503, detail="评估服务未配置。")
     try:
         return critic.evaluate(
-            payload.text, payload.paper_type, payload.output_lang, settings.anthropic_api_key, settings.ai_model
+            payload.text, payload.paper_type, payload.output_lang, settings.anthropic_api_key, settings.critique_model
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -91,11 +91,11 @@ def revise(payload: ReviseRequest):
         raise HTTPException(status_code=503, detail="改进服务未配置。")
     try:
         rev = critic.revise(
-            payload.text, payload.paper_type, payload.output_lang, settings.anthropic_api_key, settings.ai_model
+            payload.text, payload.paper_type, payload.output_lang, settings.anthropic_api_key, settings.critique_model
         )
         verdict = critic.judge_pair(
             payload.text, rev["revised"], payload.paper_type, payload.output_lang,
-            settings.anthropic_api_key, settings.ai_model,
+            settings.anthropic_api_key, settings.critique_model,
         )
         return {"revised": rev["revised"], "changes": rev.get("changes", []), "verdict": verdict}
     except ValueError as exc:
@@ -114,7 +114,7 @@ def docreview(payload: DocReviewRequest):
         raise HTTPException(status_code=503, detail="审阅服务未配置。")
     try:
         return critic.doc_review(
-            payload.text, payload.paper_type, payload.output_lang, settings.anthropic_api_key, settings.ai_model
+            payload.text, payload.paper_type, payload.output_lang, settings.anthropic_api_key, settings.critique_model
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -133,7 +133,7 @@ def polish(payload: PolishRequest):
     try:
         return critic.polish(
             payload.text, payload.paper_type, payload.output_lang, payload.depth,
-            settings.anthropic_api_key, settings.ai_model,
+            settings.anthropic_api_key, settings.critique_model,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -153,7 +153,7 @@ def patch(payload: PatchRequest):
     try:
         return critic.patch(
             payload.text, payload.paper_type, payload.output_lang, payload.depth,
-            settings.anthropic_api_key, settings.ai_model,
+            settings.anthropic_api_key, settings.critique_model,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))

@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     cors_origins: str = Field(default="http://localhost:3000")
     anthropic_api_key: str = ""
     ai_model: str = "claude-sonnet-4-6"  # claude-sonnet-4-20250514 was retired (404)
+    # Paper editing (Critique) is a high-value, low-frequency task → use the strongest
+    # model just here, independent of the shared ai_model (keeps high-frequency tools
+    # like dub translation / podcast on cheaper Sonnet).
+    critique_model: str = "claude-opus-4-8"
     ai_daily_token_budget: int = 100_000
 
     @field_validator("ai_model")
