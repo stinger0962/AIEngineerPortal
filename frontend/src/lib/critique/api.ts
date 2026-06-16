@@ -16,8 +16,11 @@ export type Patch = {
   notes: string[];
 };
 
+export type DimensionLayer = "writing" | "substance";
+
 export type Dimension = {
   label: string;
+  layer: DimensionLayer;
   score: number;
   critique: string;
   suggestions: string[];
@@ -55,6 +58,20 @@ export type Finding = {
 export type DocReview = {
   summary: string;
   findings: Finding[];
+};
+
+export type ProbeQuestion = {
+  location: string;
+  weakness: string;
+  question: string;
+};
+
+export type ProbeStance = "evidence" | "speculation" | "skip";
+
+export type ProbeAnswerInput = {
+  question: string;
+  answer: string;
+  stance: ProbeStance;
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -103,12 +120,23 @@ function normalizeEvaluation(raw: unknown): Evaluation {
       summary: String(overall.summary ?? ""),
       top_fix: String(overall.top_fix ?? ""),
     },
-    dimensions: asArray<Record<string, unknown>>(r.dimensions).map((d) => ({
-      label: String(d.label ?? ""),
-      score: Number(d.score ?? 0),
-      critique: String(d.critique ?? ""),
-      suggestions: asArray<string>(d.suggestions).map((s) => String(s)),
-    })),
+    dimensions: asArray<Record<string, unknown>>(r.dimensions).map((d) => {
+      const label = String(d.label ?? "");
+      let layer = String(d.layer ?? "").toLowerCase();
+      if (layer !== "writing" && layer !== "substance") {
+        // Fallback: classify by label keyword (substance = rigor / originality).
+        layer = /严谨|rigor|原创|贡献|originality|contribution/i.test(label)
+          ? "substance"
+          : "writing";
+      }
+      return {
+        label,
+        layer: layer as DimensionLayer,
+        score: Number(d.score ?? 0),
+        critique: String(d.critique ?? ""),
+        suggestions: asArray<string>(d.suggestions).map((s) => String(s)),
+      };
+    }),
   };
 }
 
@@ -138,6 +166,15 @@ function normalizeRevision(raw: unknown): Revision {
       dimensions_improved: asArray<string>(verdict.dimensions_improved).map((d) => String(d)),
     },
   };
+}
+
+function normalizeProbe(raw: unknown): ProbeQuestion[] {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  return asArray<Record<string, unknown>>(r.questions).map((q) => ({
+    location: String(q.location ?? ""),
+    weakness: String(q.weakness ?? ""),
+    question: String(q.question ?? ""),
+  }));
 }
 
 function normalizePatch(raw: unknown): Patch {
@@ -271,6 +308,53 @@ export async function patchEssay(
 
   if (!res.ok) {
     await handleError(res, "改进失败");
+  }
+
+  return normalizePatch(await res.json());
+}
+
+/**
+ * 深挖实质 step 1: get targeted probe questions on the paper's substance-layer
+ * weaknesses (rigor / originality). No character cap (handles up to ~60 000 chars).
+ */
+export async function probeEssay(
+  text: string,
+  paperType: string,
+  outputLang: string,
+): Promise<ProbeQuestion[]> {
+  const res = await fetch(`${API_BASE}/critique/probe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, paper_type: paperType, output_lang: outputLang }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    await handleError(res, "提问失败");
+  }
+
+  return normalizeProbe(await res.json());
+}
+
+/**
+ * 深挖实质 step 2: weave the author's answers into the paper. Returns a Patch object
+ * (full updated text + applied/unapplied edits + notes). Never fabricates.
+ */
+export async function integrateAnswers(
+  text: string,
+  answers: ProbeAnswerInput[],
+  paperType: string,
+  outputLang: string,
+): Promise<Patch> {
+  const res = await fetch(`${API_BASE}/critique/integrate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, paper_type: paperType, output_lang: outputLang, answers }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    await handleError(res, "融入失败");
   }
 
   return normalizePatch(await res.json());

@@ -47,6 +47,25 @@ class PatchRequest(BaseModel):
     depth: str = "medium"
 
 
+class ProbeRequest(BaseModel):
+    text: str
+    paper_type: str = "research"
+    output_lang: str = "auto"
+
+
+class ProbeAnswer(BaseModel):
+    question: str
+    answer: str = ""
+    stance: str = "evidence"  # evidence | speculation | skip
+
+
+class IntegrateRequest(BaseModel):
+    text: str
+    paper_type: str = "research"
+    output_lang: str = "auto"
+    answers: list[ProbeAnswer] = []
+
+
 @router.post("/extract")
 async def extract(file: UploadFile = File(...)):
     """Parse an uploaded .docx/.pdf/.md/.txt to plain text so the user can review
@@ -160,3 +179,46 @@ def patch(payload: PatchRequest):
     except Exception:
         logger.exception("Critique patch failed")
         raise HTTPException(status_code=500, detail="改进失败，请稍后重试。")
+
+
+@router.post("/probe")
+def probe(payload: ProbeRequest):
+    """深挖实质 step 1: generate targeted probe questions on the paper's substance-layer
+    weaknesses (rigor / originality) — the things AI can't fix without the author's real
+    material. Returns {questions:[{location, weakness, question}]}."""
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="深挖服务未配置。")
+    try:
+        return critic.probe(
+            payload.text, payload.paper_type, payload.output_lang, settings.anthropic_api_key, settings.critique_model
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        logger.exception("Critique probe failed")
+        raise HTTPException(status_code=500, detail="提问失败，请稍后重试。")
+
+
+@router.post("/integrate")
+def integrate(payload: IntegrateRequest):
+    """深挖实质 step 2: weave the author's answers into the paper as patch-style
+    find/replace edits, honoring each answer's stance (evidence/speculation/skip).
+    Never fabricates. Returns the same shape as /patch."""
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="深挖服务未配置。")
+    try:
+        return critic.integrate(
+            payload.text,
+            [a.model_dump() for a in payload.answers],
+            payload.paper_type,
+            payload.output_lang,
+            settings.anthropic_api_key,
+            settings.critique_model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        logger.exception("Critique integrate failed")
+        raise HTTPException(status_code=500, detail="融入失败，请稍后重试。")

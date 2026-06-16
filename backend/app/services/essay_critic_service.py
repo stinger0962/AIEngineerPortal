@@ -150,6 +150,11 @@ _TOOL = {
                     "type": "object",
                     "properties": {
                         "label": {"type": "string", "description": "维度名，如 论点 Thesis"},
+                        "layer": {
+                            "type": "string",
+                            "enum": ["writing", "substance"],
+                            "description": "层级：writing=写作层（编辑可代改：论点表达/论证组织/结构连贯/行文用词）；substance=实质层（需作者补充真材料才能改：严谨性/原创与贡献）",
+                        },
                         "score": {"type": "integer", "description": "1–10 分"},
                         "critique": {"type": "string", "description": "强在哪、弱在哪，引用文中真实问题，不空泛"},
                         "suggestions": {
@@ -158,7 +163,7 @@ _TOOL = {
                             "description": "1–3 条具体可执行的修改建议",
                         },
                     },
-                    "required": ["label", "score", "critique", "suggestions"],
+                    "required": ["label", "layer", "score", "critique", "suggestions"],
                 },
             },
         },
@@ -169,6 +174,7 @@ _TOOL = {
 _SYSTEM = """你是一位严格、就事论事的学术写作评审，不奉承、不说空话。给定一篇{type}，按 5–6 个维度评估：
 论点(Thesis) / 论证与证据(Argument & Evidence) / 结构与连贯(Structure) / 严谨性(Rigor，研究类含方法是否恰当、结论是否被支撑、有无过度声称) / 原创与贡献(Originality) / 行文(Writing)。
 按论文类型调整侧重：议论文重说服力与逻辑链；个人陈述重真诚、个人声音与具体性（少讲大道理）。
+每个维度标注 layer：论点 / 论证与证据 / 结构与连贯 / 行文 属 writing（写作层，编辑可代为修改）；严谨性 / 原创与贡献 属 substance（实质层，AI 不能代为编造数据、证据或新观点，须作者补充真材料）。
 
 规则：
 - 每个维度给 1–10 分 + **具体**简评（指出文中真实的强点与弱点，可引用片段），再给 1–3 条**可执行**的修改建议（落到具体段落/句子，不要泛泛说"加强论证"）。
@@ -240,9 +246,15 @@ def evaluate(text: str, paper_type: str, output_lang: str, anthropic_api_key: st
     dims = _as_list(result.get("dimensions"))
     if not isinstance(overall, dict) or not dims:
         raise ValueError("评估失败：模型未返回结构化结果，请重试。")
+    _SUBSTANCE_HINTS = ("严谨", "rigor", "原创", "贡献", "originality", "contribution")
     for d in dims:
         if isinstance(d, dict):
             d["suggestions"] = _as_list(d.get("suggestions"))
+            layer = str(d.get("layer") or "").strip().lower()
+            if layer not in ("writing", "substance"):
+                label = str(d.get("label") or "").lower()
+                layer = "substance" if any(h in label for h in _SUBSTANCE_HINTS) else "writing"
+            d["layer"] = layer
     return {"overall": overall, "dimensions": dims}
 
 
@@ -605,18 +617,160 @@ def patch(text: str, paper_type: str, output_lang: str, depth: str, anthropic_ap
         system=_PATCH_SYSTEM.format(type=type_label, depth=_DEPTH.get(depth, _DEPTH["medium"]), lang=_lang_instr(output_lang), fmt=_FMT),
         user=f"全文：\n\n{text}", tool=_PATCH_TOOL, fail_msg="改进失败",
     )
-    raw_edits = [e for e in _as_list(result.get("edits")) if isinstance(e, dict) and str(e.get("find", "")).strip()]
-    # Apply specific (first-occurrence) edits before global term sweeps to reduce conflicts.
-    raw_edits.sort(key=lambda e: _as_bool(e.get("replace_all")))
+    working, applied, unapplied = _apply_edits(text, _as_list(result.get("edits")))
+    return {
+        "patched": working,
+        "summary": result.get("summary") or "",
+        "applied": applied,
+        "unapplied": unapplied,
+        "notes": _as_list(result.get("notes")),
+    }
+
+
+def _apply_edits(text: str, raw_edits: List[Any]) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Apply a list of find/replace edit dicts to text. Specific (first-occurrence)
+    edits run before global term sweeps to reduce conflicts. Returns
+    (patched_text, applied[], unapplied[])."""
+    edits = [e for e in raw_edits if isinstance(e, dict) and str(e.get("find", "")).strip()]
+    edits.sort(key=lambda e: _as_bool(e.get("replace_all")))
     working = text
     applied: List[Dict[str, Any]] = []
     unapplied: List[Dict[str, Any]] = []
-    for e in raw_edits:
+    for e in edits:
         find = str(e.get("find", ""))
         replace = str(e.get("replace", ""))
         working, ok = _apply_edit(working, find, replace, _as_bool(e.get("replace_all")))
         rec = {"find": find, "replace": replace, "reason": str(e.get("reason", ""))}
         (applied if ok else unapplied).append(rec)
+    return working, applied, unapplied
+
+
+# ── 深挖实质（Socratic）：就实质层薄弱处提问 → 作者补真材料 → 融入论文 ─────────
+# 实质层（严谨性/原创与贡献）AI 改不了——它不能替作者编造数据/证据/观点。
+# 所以改成苏格拉底式：AI 提针对性问题，作者补真东西，AI 再据实融入（绝不编造）。
+
+_PROBE_TOOL = {
+    "name": "report_probes",
+    "description": "Targeted probe questions on the paper's substance-layer weaknesses.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "questions": {
+                "type": "array",
+                "description": "3–5 个针对实质层薄弱处的问题",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "location": {"type": "string", "description": "文中位置：章节、或一小段引用片段，便于作者对照"},
+                        "weakness": {"type": "string", "description": "这里实质上弱在哪（如：结论缺乏数据支撑、声称过强、没有对照、贡献点不清）"},
+                        "question": {"type": "string", "description": "向作者提出的具体问题，引导他拿出 AI 无法编造的真材料（数据/出处/对照/机制/反驳的回应）"},
+                    },
+                    "required": ["location", "weakness", "question"],
+                },
+            },
+        },
+        "required": ["questions"],
+    },
+}
+
+_PROBE_SYSTEM = """你是一位严格、就事论事的学术导师。通读整篇{type}，只针对**实质层**（严谨性、原创与贡献）的薄弱处，向作者提 3–5 个**有针对性**的问题。
+目的：实质问题 AI 不能替作者解决（不能编造数据、证据、出处、新观点），只能引导作者补充真材料。
+规则：
+- 每个问题绑定文中**具体位置**，指出实质上弱在哪（结论无数据支撑 / 声称过强 / 缺对照或反例 / 方法不足以支撑结论 / 贡献点不清或不新）。
+- 问题要**具体到能让作者拿出真东西**（具体的数据、文献出处、对照组、机制解释、对反驳的回应），不要泛泛问「能否再深入」。
+- **不要**问写作层（表达、结构、用词）的问题——那些另有工具处理。
+- 按重要性排序，最多 5 个，宁缺勿凑。
+- {lang}
+{fmt}
+只通过 report_probes 返回。"""
+
+
+def probe(text: str, paper_type: str, output_lang: str, anthropic_api_key: str, model: str) -> Dict[str, Any]:
+    """Generate targeted probe questions on substance-layer weaknesses. Returns
+    {questions:[{location, weakness, question}]}."""
+    text = (text or "").strip()
+    if len(text) < _MIN_CHARS:
+        raise ValueError(f"正文太短，至少贴入约 {_MIN_CHARS} 字。")
+    if len(text) > _MAX_CHARS:
+        text = text[:_MAX_CHARS]
+    type_label = PAPER_TYPES.get(paper_type, PAPER_TYPES["research"])
+    result = _run_tool(
+        anthropic_api_key, model, max_tokens=4000,
+        system=_PROBE_SYSTEM.format(type=type_label, lang=_lang_instr(output_lang), fmt=_FMT),
+        user=f"全文：\n\n{text}", tool=_PROBE_TOOL, fail_msg="提问失败",
+    )
+    questions: List[Dict[str, Any]] = []
+    for q in _as_list(result.get("questions")):
+        if isinstance(q, dict) and str(q.get("question", "")).strip():
+            questions.append({
+                "location": str(q.get("location", "")),
+                "weakness": str(q.get("weakness", "")),
+                "question": str(q.get("question", "")),
+            })
+    if not questions:
+        raise ValueError("提问失败：模型未返回问题，请重试。")
+    return {"questions": questions}
+
+
+_STANCES = {
+    "evidence": "作者提供了真实材料（据此补强论文相应处）",
+    "speculation": "作者声明这只是推测（不可当事实写——改为恰当的限定/弱化表述，如『可能』『初步』『有待验证』，或明确标注为假设）",
+    "skip": "作者暂时跳过（不要改动论文，可在 notes 里提醒此处仍待补充）",
+}
+
+_INTEGRATE_SYSTEM = """你是资深学术编辑。作者针对论文实质层薄弱处的若干问题给出了回答。把这些回答**据实融入论文**，用补丁式 find/replace 编辑（不重写全文）。
+对每条问答按作者立场处理：
+- evidence（提供了真材料）：据此补强论文相应处——补上数据/出处/对照/机制等，让论证更扎实。
+- speculation（只是推测）：**不可当事实写**，改为恰当的限定或弱化表述，或明确标注为假设/待验证。
+- skip（暂时跳过）：不改动论文，在 notes 里提醒此处仍待补充。
+铁律：
+- **绝不编造**作者没有提供的事实、数据、引用、实验结果。作者没给的就不要凭空写进去。
+- find 必须从原文**逐字照抄**、能精确定位；只动与回答相关的句段，保留作者其余内容与语气。
+- 无法靠 find/replace 自动完成的（需新增整段、重排结构），写进 notes 给作者。
+{lang}
+{fmt}
+只通过 report_patch 返回 {{summary, edits, notes}}。"""
+
+
+def integrate(text: str, answers: List[Dict[str, Any]], paper_type: str, output_lang: str, anthropic_api_key: str, model: str) -> Dict[str, Any]:
+    """Weave the author's answers (to probe questions) into the paper as find/replace
+    edits, honoring each answer's stance (evidence/speculation/skip). Never fabricates.
+    Returns the same shape as patch(): {patched, summary, applied, unapplied, notes}."""
+    text = (text or "").strip()
+    if len(text) < _MIN_CHARS:
+        raise ValueError(f"正文太短，至少贴入约 {_MIN_CHARS} 字。")
+    if len(text) > _MAX_CHARS:
+        text = text[:_MAX_CHARS]
+    # Keep only answered items (a skipped item with no answer still conveys "leave it").
+    items = []
+    for a in answers or []:
+        if not isinstance(a, dict):
+            continue
+        stance = str(a.get("stance", "")).strip().lower()
+        if stance not in _STANCES:
+            stance = "evidence"
+        question = str(a.get("question", "")).strip()
+        answer = str(a.get("answer", "")).strip()
+        if not question:
+            continue
+        if stance != "skip" and not answer:
+            continue  # nothing to integrate
+        items.append({"stance": stance, "question": question, "answer": answer})
+    if not items:
+        raise ValueError("没有可融入的回答——请先回答问题并填写内容。")
+
+    type_label = PAPER_TYPES.get(paper_type, PAPER_TYPES["research"])
+    qa_block = "\n\n".join(
+        f"问题 {i + 1}：{it['question']}\n作者立场：{_STANCES[it['stance']]}\n作者回答：{it['answer'] or '（无）'}"
+        for i, it in enumerate(items)
+    )
+    result = _run_tool(
+        anthropic_api_key, model, max_tokens=8000,
+        system=_INTEGRATE_SYSTEM.format(lang=_lang_instr(output_lang), fmt=_FMT),
+        user=f"论文类型：{type_label}\n\n论文全文：\n\n{text}\n\n———\n\n作者的问答：\n\n{qa_block}",
+        tool=_PATCH_TOOL, fail_msg="融入失败",
+    )
+    working, applied, unapplied = _apply_edits(text, _as_list(result.get("edits")))
     return {
         "patched": working,
         "summary": result.get("summary") or "",
