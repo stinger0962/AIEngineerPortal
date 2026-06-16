@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
+import time
 from pathlib import Path
 from typing import AsyncGenerator, List, Optional
 
@@ -58,26 +59,39 @@ def _sse(status: str, message: str) -> dict:
     return {"data": json.dumps({"status": status, "message": message})}
 
 
+def _fmt(sec: float) -> str:
+    m, s = divmod(int(round(sec)), 60)
+    return f"{m}m{s:02d}s" if m else f"{s}s"
+
+
 async def _process_video(
     db: Session, settings, *, video_path: str, title: str,
     source_url: Optional[str], voice_id_req: Optional[str], dur_s: int,
+    timings: dict, prior_msg: str = "",
 ) -> AsyncGenerator[dict, None]:
     """Shared tail of the pipeline: transcribe → translate → voice → compose → save.
-    Both the YouTube and upload routes call this once they have a local video_path."""
+    Both the YouTube and upload routes call this once they have a local video_path.
+    Records per-stage wall-clock into `timings` and shows it live in each message,
+    so the slowest stage is visible without server logs."""
     # Every heavy call below is synchronous (yt-dlp/ffmpeg/Whisper/TTS) and would
     # block the event loop — starving sse-starlette's keepalive ping and dropping
     # the connection during the slow proxied download. Run them in a threadpool so
     # the loop stays free to ping and the SSE stream survives multi-minute phases.
-    yield _sse("transcribing", "转写中...")
+    t = time.monotonic()
+    yield _sse("transcribing", f"转写中...（{prior_msg}）" if prior_msg else "转写中...")
     segments = await run_in_threadpool(extract_segments, video_path, settings.openai_api_key)
     segments = merge_sentences(segments)  # C：碎片合并成完整句，避免半句单独配音
+    timings["transcribe"] = time.monotonic() - t
 
-    yield _sse("translating", "翻译中...")
+    t = time.monotonic()
+    yield _sse("translating", f"翻译中...（转写 {_fmt(timings['transcribe'])}）")
     zh = await run_in_threadpool(
         translate_segments, segments, settings.anthropic_api_key, settings.ai_model
     )
+    timings["translate"] = time.monotonic() - t
 
-    yield _sse("voicing", "配音中...")
+    t = time.monotonic()
+    yield _sse("voicing", f"配音中...（翻译 {_fmt(timings['translate'])}，共 {len(segments)} 句，并行合成）")
     voice_id = resolve_voice(voice_id_req)
     voice_track = await run_in_threadpool(
         build_voice_track,
@@ -86,8 +100,10 @@ async def _process_video(
         settings.minimax_model, settings.minimax_api_base,
         dur_s * 1000,
     )
+    timings["voice"] = time.monotonic() - t
 
-    yield _sse("composing", "合成视频中...")
+    t = time.monotonic()
+    yield _sse("composing", f"合成视频中...（配音 {_fmt(timings['voice'])}）")
     item = DubVideo(
         youtube_url=source_url, title=title, voice_id=voice_id,
         video_path="pending", duration_secs=None,
@@ -100,8 +116,11 @@ async def _process_video(
     item.duration_secs = duration
     db.commit()
     db.refresh(item)
+    timings["compose"] = time.monotonic() - t
 
-    yield {"data": json.dumps({"status": "done", "item": _to_out(item)})}
+    rounded = {k: round(v) for k, v in timings.items()}
+    logger.info("Dub done — timings(s)=%s title=%s", rounded, title)
+    yield {"data": json.dumps({"status": "done", "item": _to_out(item), "timings": rounded})}
 
 
 @router.post("/generate")
@@ -114,6 +133,8 @@ async def generate(payload: DubRequest, db: Session = Depends(get_db)):
     async def event_stream() -> AsyncGenerator[dict, None]:
         try:
             dub_service.purge_expired(db)
+            timings: dict = {}
+            t = time.monotonic()
             yield _sse("downloading", "下载视频中...")
             dur_s = await run_in_threadpool(probe_duration, payload.youtube_url)
 
@@ -121,9 +142,11 @@ async def generate(payload: DubRequest, db: Session = Depends(get_db)):
                 title, video_path = await run_in_threadpool(
                     download_video, payload.youtube_url, tmp
                 )
+                timings["download"] = time.monotonic() - t
                 async for ev in _process_video(
                     db, settings, video_path=video_path, title=title,
                     source_url=payload.youtube_url, voice_id_req=payload.voice_id, dur_s=dur_s,
+                    timings=timings, prior_msg=f"下载 {_fmt(timings['download'])}",
                 ):
                     yield ev
         except ValueError as exc:
@@ -156,6 +179,8 @@ async def generate_upload(
     async def event_stream() -> AsyncGenerator[dict, None]:
         try:
             dub_service.purge_expired(db)
+            timings: dict = {}
+            t = time.monotonic()
             yield _sse("uploading", "接收文件中...")
 
             if len(raw) > dub_service.MAX_UPLOAD_BYTES:
@@ -168,9 +193,11 @@ async def generate_upload(
 
                 title = Path(filename).stem or "上传视频"
                 dur_s = await run_in_threadpool(dub_service.probe_local_duration, str(dest))
+                timings["upload"] = time.monotonic() - t
                 async for ev in _process_video(
                     db, settings, video_path=str(dest), title=title,
                     source_url=None, voice_id_req=voice_id, dur_s=dur_s,
+                    timings=timings, prior_msg=f"接收 {_fmt(timings['upload'])}",
                 ):
                     yield ev
         except ValueError as exc:

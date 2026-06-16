@@ -6,10 +6,15 @@ import os
 import re
 import subprocess
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from pydub import AudioSegment
+
+_TTS_CONCURRENCY = 5   # fire N MiniMax TTS calls at once (I/O-bound) — ~5x faster than sequential
+_TTS_RETRIES = 3       # per-segment retry (parallel bursts can trip transient 429s)
 
 DUB_DIR = Path(os.getenv("DUB_VIDEO_DIR", "/data/dub_videos"))
 MAX_DURATION_S = 600
@@ -229,17 +234,24 @@ def build_voice_track(
     from app.services.podcast_service import _tts_bytes
 
     base_speed = compute_base_speed(zh_texts, video_ms)
-    clips: List[Optional[AudioSegment]] = []
-    durations: List[int] = []
-    for zh in zh_texts:
+
+    def _synth(zh: str) -> Optional[AudioSegment]:
         if not zh.strip():
-            clips.append(None)
-            durations.append(0)
-            continue
-        data = _tts_bytes(zh, voice_id, mm_key, mm_group, mm_model, mm_base, speed=base_speed)
-        clip = AudioSegment.from_file(io.BytesIO(data))
-        clips.append(clip)
-        durations.append(len(clip))
+            return None
+        last_exc: Optional[Exception] = None
+        for attempt in range(_TTS_RETRIES):
+            try:
+                data = _tts_bytes(zh, voice_id, mm_key, mm_group, mm_model, mm_base, speed=base_speed)
+                return AudioSegment.from_file(io.BytesIO(data))
+            except Exception as exc:  # transient 429 / timeout under parallel load → retry
+                last_exc = exc
+                time.sleep(0.6 * (attempt + 1))
+        raise last_exc if last_exc else RuntimeError("TTS failed")
+
+    # Parallelize the per-segment TTS (I/O-bound HTTP calls) — order preserved by map().
+    with ThreadPoolExecutor(max_workers=_TTS_CONCURRENCY) as ex:
+        clips: List[Optional[AudioSegment]] = list(ex.map(_synth, zh_texts))
+    durations: List[int] = [len(c) if c is not None else 0 for c in clips]
 
     plans = plan_placements(segments, durations, video_ms)
     base = AudioSegment.silent(duration=max(video_ms, 1))
