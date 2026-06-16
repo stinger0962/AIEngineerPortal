@@ -2,6 +2,20 @@ import { API_BASE } from "@/lib/api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+export type PatchEdit = {
+  find: string;
+  replace: string;
+  reason: string;
+};
+
+export type Patch = {
+  patched: string;
+  summary: string;
+  applied: PatchEdit[];
+  unapplied: PatchEdit[];
+  notes: string[];
+};
+
 export type Dimension = {
   label: string;
   score: number;
@@ -126,6 +140,22 @@ function normalizeRevision(raw: unknown): Revision {
   };
 }
 
+function normalizePatch(raw: unknown): Patch {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const normEdit = (e: Record<string, unknown>): PatchEdit => ({
+    find: String(e.find ?? ""),
+    replace: String(e.replace ?? ""),
+    reason: String(e.reason ?? ""),
+  });
+  return {
+    patched: String(r.patched ?? ""),
+    summary: String(r.summary ?? ""),
+    applied: asArray<Record<string, unknown>>(r.applied).map(normEdit),
+    unapplied: asArray<Record<string, unknown>>(r.unapplied).map(normEdit),
+    notes: asArray<string>(r.notes).map((n) => String(n)),
+  };
+}
+
 // ── API Functions ─────────────────────────────────────────────────────────────
 
 /**
@@ -220,4 +250,28 @@ export async function reviseEssay(
   }
 
   return normalizeRevision(await res.json());
+}
+
+/**
+ * Send text for patch-style improvement (find/replace edits applied in place).
+ * Returns a Patch object: full improved text + applied/unapplied edit list + notes.
+ * No character cap — handles up to ~60 000 chars.
+ */
+export async function patchEssay(
+  text: string,
+  paperType: string,
+  outputLang: string,
+): Promise<Patch> {
+  const res = await fetch(`${API_BASE}/critique/patch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, paper_type: paperType, output_lang: outputLang, depth: "medium" }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    await handleError(res, "改进失败");
+  }
+
+  return normalizePatch(await res.json());
 }

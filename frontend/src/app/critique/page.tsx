@@ -2,8 +2,8 @@
 
 import { useRef, useState } from "react";
 import { ClipboardCheck, Upload, Loader2 } from "lucide-react";
-import { extractFile, evaluateEssay, reviseEssay, docReview as callDocReview } from "@/lib/critique/api";
-import type { Evaluation, Revision, DocReview, Finding } from "@/lib/critique/api";
+import { extractFile, evaluateEssay, patchEssay, docReview as callDocReview } from "@/lib/critique/api";
+import type { Evaluation, Patch, PatchEdit, DocReview, Finding } from "@/lib/critique/api";
 
 // ── Paper type config ─────────────────────────────────────────────────────────
 
@@ -178,32 +178,53 @@ function DocReviewPanel({ review }: { review: DocReview }) {
   );
 }
 
-// ── Results panel ─────────────────────────────────────────────────────────────
+// ── Patch edit diff card ──────────────────────────────────────────────────────
 
-type ResultsPanelProps = {
-  result: Evaluation | null;
-  onRevise: () => void;
-  revising: boolean;
-  reviseError: string | null;
-  revision: Revision | null;
-  originalSnapshot: string;
-  onAdopt: (revised: string) => void;
+function PatchEditCard({ edit, variant = "applied" }: { edit: PatchEdit; variant?: "applied" | "unapplied" }) {
+  const borderColor = variant === "unapplied" ? "rgba(160,106,48,0.30)" : "rgba(20,33,61,0.10)";
+  return (
+    <div
+      className="rounded-xl p-3 space-y-1.5"
+      style={{
+        background: "#fff",
+        border: `1px solid ${borderColor}`,
+      }}
+    >
+      {/* find — strikethrough red */}
+      <p
+        className="text-[13px] leading-5 line-through break-words"
+        style={{ color: "#a3322d", background: "rgba(163,50,45,0.06)", borderRadius: 4, padding: "2px 4px" }}
+      >
+        {edit.find}
+      </p>
+      {/* replace — green */}
+      <p
+        className="text-[13px] leading-5 break-words"
+        style={{ color: "#1f7a4d", background: "rgba(31,122,77,0.08)", borderRadius: 4, padding: "2px 4px" }}
+      >
+        {edit.replace}
+      </p>
+      {/* reason */}
+      {edit.reason && (
+        <p className="text-[12px] leading-5 text-ink/55">{edit.reason}</p>
+      )}
+    </div>
+  );
+}
+
+// ── Patch results panel ───────────────────────────────────────────────────────
+
+type PatchPanelProps = {
+  patch: Patch;
+  onAdopt: (text: string) => void;
 };
 
-function ResultsPanel({
-  result,
-  onRevise,
-  revising,
-  reviseError,
-  revision,
-  originalSnapshot,
-  onAdopt,
-}: ResultsPanelProps) {
+function PatchPanel({ patch, onAdopt }: PatchPanelProps) {
   const [copied, setCopied] = useState(false);
 
-  async function handleCopy(text: string) {
+  async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(patch.patched);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
@@ -211,6 +232,166 @@ function ResultsPanel({
     }
   }
 
+  function handleDownload() {
+    const blob = new Blob([patch.patched], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "improved.md";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="rounded-[28px] border border-ink/10 bg-white/85 shadow-panel p-6 space-y-5">
+      {/* Section header + summary */}
+      <div className="space-y-1.5">
+        <p
+          className="text-[10px] font-semibold uppercase tracking-[0.28em]"
+          style={{ color: "#5fb3a3" }}
+        >
+          改进 · Improve
+        </p>
+        <p className="text-sm leading-6 text-ink/75">{patch.summary}</p>
+      </div>
+
+      <div className="border-t border-ink/8" />
+
+      {/* Applied edits */}
+      {patch.applied.length > 0 && (
+        <div className="space-y-3">
+          <p
+            className="text-[10px] font-semibold uppercase tracking-[0.28em]"
+            style={{ color: "#5fb3a3" }}
+          >
+            已应用 ({patch.applied.length})
+          </p>
+          <div className="space-y-2">
+            {patch.applied.map((edit, i) => (
+              <PatchEditCard key={i} edit={edit} variant="applied" />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Unapplied edits */}
+      {patch.unapplied.length > 0 && (
+        <div
+          className="rounded-xl p-4 space-y-3"
+          style={{
+            background: "rgba(160,106,48,0.06)",
+            border: "1px solid rgba(160,106,48,0.22)",
+          }}
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: "#a06a30" }}>
+            未能自动定位 ({patch.unapplied.length}) · 请手动处理
+          </p>
+          <div className="space-y-2">
+            {patch.unapplied.map((edit, i) => (
+              <PatchEditCard key={i} edit={edit} variant="unapplied" />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Notes */}
+      {patch.notes.length > 0 && (
+        <div className="space-y-2">
+          <p
+            className="text-[10px] font-semibold uppercase tracking-[0.28em]"
+            style={{ color: "#5fb3a3" }}
+          >
+            建议（需手动）
+          </p>
+          <ul className="space-y-1.5">
+            {patch.notes.map((note, i) => (
+              <li key={i} className="flex gap-2 text-[13px] text-ink/75 leading-5">
+                <span className="shrink-0 font-semibold" style={{ color: "#5fb3a3" }}>→</span>
+                <span>{note}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Full improved text */}
+      <div className="space-y-2">
+        <p
+          className="text-[10px] font-semibold uppercase tracking-[0.28em]"
+          style={{ color: "#5fb3a3" }}
+        >
+          改后全文
+        </p>
+        <div
+          className="max-h-[420px] overflow-auto bg-white border border-ink/10 rounded-xl p-4 text-[13px] leading-6 whitespace-pre-wrap text-ink/80"
+        >
+          {patch.patched}
+        </div>
+      </div>
+
+      {/* Action buttons */}
+      <div className="flex flex-wrap gap-3">
+        {/* 采纳 */}
+        <button
+          onClick={() => onAdopt(patch.patched)}
+          className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
+          style={{
+            background: "linear-gradient(135deg, #7fcab9 0%, #5fb3a3 50%, #3f8a7d 100%)",
+            color: "white",
+          }}
+        >
+          采纳
+        </button>
+        {/* 复制 */}
+        <button
+          onClick={handleCopy}
+          className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
+          style={{
+            background: "transparent",
+            color: "#3f8a7d",
+            border: "1px solid rgba(95,179,163,0.40)",
+          }}
+        >
+          {copied ? "已复制" : "复制"}
+        </button>
+        {/* 下载 */}
+        <button
+          onClick={handleDownload}
+          className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
+          style={{
+            background: "transparent",
+            color: "rgba(20,33,61,0.55)",
+            border: "1px solid rgba(20,33,61,0.15)",
+          }}
+        >
+          下载 .md
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Results panel ─────────────────────────────────────────────────────────────
+
+type ResultsPanelProps = {
+  result: Evaluation | null;
+  onImprove: () => void;
+  improving: boolean;
+  improveError: string | null;
+  patch: Patch | null;
+  canImprove: boolean;
+  onAdopt: (text: string) => void;
+};
+
+function ResultsPanel({
+  result,
+  onImprove,
+  improving,
+  improveError,
+  patch,
+  canImprove,
+  onAdopt,
+}: ResultsPanelProps) {
   if (!result) {
     return (
       <div className="flex h-full min-h-[320px] items-center justify-center rounded-[28px] border border-ink/10 bg-white/85 shadow-panel">
@@ -280,172 +461,45 @@ function ResultsPanel({
         ))}
       </div>
 
-      {/* Divider before revise */}
+      {/* Divider before improve */}
       <div className="border-t border-ink/8" />
 
-      {/* ── Revise button ── */}
+      {/* ── Improve button ── */}
       <button
-        onClick={onRevise}
-        disabled={revising}
+        onClick={onImprove}
+        disabled={!canImprove}
         className="flex w-full items-center justify-center gap-2 rounded-[16px] py-3 text-sm font-semibold transition-all"
         style={{
-          background: revising
-            ? "rgba(20,33,61,0.08)"
-            : "rgba(95,179,163,0.12)",
-          color: revising ? "rgba(20,33,61,0.30)" : "#3f8a7d",
-          border: revising
-            ? "1px solid rgba(20,33,61,0.10)"
-            : "1px solid rgba(95,179,163,0.35)",
-          cursor: revising ? "not-allowed" : "pointer",
+          background: canImprove
+            ? "rgba(95,179,163,0.12)"
+            : "rgba(20,33,61,0.08)",
+          color: canImprove ? "#3f8a7d" : "rgba(20,33,61,0.30)",
+          border: canImprove
+            ? "1px solid rgba(95,179,163,0.35)"
+            : "1px solid rgba(20,33,61,0.10)",
+          cursor: canImprove ? "pointer" : "not-allowed",
         }}
       >
-        {revising ? (
+        {improving ? (
           <>
             <Loader2 size={15} className="animate-spin" />
-            改进中…（约 20–40 秒）
+            改进中…（读全文、出编辑，约 20–40 秒）
           </>
         ) : (
-          "改进这一版 Revise"
+          "「改进这一版 Improve」"
         )}
       </button>
 
-      {/* Revise error */}
-      {reviseError && (
+      {/* Improve error */}
+      {improveError && (
         <p className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-600">
-          {reviseError}
+          {improveError}
         </p>
       )}
 
-      {/* ── Revision block ── */}
-      {revision && (
-        <div className="space-y-5">
-          {/* Verdict pill + reason */}
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              {revision.verdict.better ? (
-                <span
-                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
-                  style={{
-                    background: "rgba(31,122,77,0.10)",
-                    color: "#1f7a4d",
-                    border: "1px solid rgba(31,122,77,0.25)",
-                  }}
-                >
-                  改后更好 ✓
-                </span>
-              ) : (
-                <span
-                  className="inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold"
-                  style={{
-                    background: "rgba(160,106,48,0.10)",
-                    color: "#a06a30",
-                    border: "1px solid rgba(160,106,48,0.25)",
-                  }}
-                >
-                  未必更好 · 谨慎采纳
-                </span>
-              )}
-            </div>
-            <p className="text-sm text-ink/70 leading-6">{revision.verdict.reason}</p>
-            {revision.verdict.dimensions_improved.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs text-ink/45">提升：</span>
-                {revision.verdict.dimensions_improved.map((d, i) => (
-                  <span
-                    key={i}
-                    className="rounded-full px-2.5 py-0.5 text-xs"
-                    style={{
-                      background: "rgba(95,179,163,0.10)",
-                      color: "#3f8a7d",
-                      border: "1px solid rgba(95,179,163,0.25)",
-                    }}
-                  >
-                    {d}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Changes list */}
-          {revision.changes.length > 0 && (
-            <div className="space-y-2">
-              <p
-                className="text-[10px] font-semibold uppercase tracking-[0.28em]"
-                style={{ color: "#5fb3a3" }}
-              >
-                这轮改了什么
-              </p>
-              <ul className="space-y-1.5">
-                {revision.changes.map((c, i) => (
-                  <li key={i} className="flex gap-2 text-[13px] text-ink/75 leading-5">
-                    <span className="shrink-0 font-semibold" style={{ color: "#5fb3a3" }}>
-                      →
-                    </span>
-                    <span>{c}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Side-by-side comparison */}
-          <div className="space-y-2">
-            <p
-              className="text-[10px] font-semibold uppercase tracking-[0.28em]"
-              style={{ color: "#5fb3a3" }}
-            >
-              并排对照
-            </p>
-            <div className="grid lg:grid-cols-2 gap-3">
-              {/* Original */}
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-ink/50">原文</p>
-                <div
-                  className="max-h-[420px] overflow-auto rounded-xl border border-ink/10 bg-white p-4 text-[13px] leading-6 whitespace-pre-wrap text-ink/80"
-                >
-                  {originalSnapshot}
-                </div>
-              </div>
-              {/* Revised */}
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-ink/50">改后</p>
-                <div
-                  className="max-h-[420px] overflow-auto rounded-xl border border-ink/10 bg-white p-4 text-[13px] leading-6 whitespace-pre-wrap text-ink/80"
-                >
-                  {revision.revised}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex flex-wrap gap-3">
-            {/* 采纳改后 */}
-            <button
-              onClick={() => onAdopt(revision.revised)}
-              className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
-              style={{
-                background: "linear-gradient(135deg, #7fcab9 0%, #5fb3a3 50%, #3f8a7d 100%)",
-                color: "white",
-              }}
-            >
-              采纳改后
-            </button>
-            {/* 复制改后 */}
-            <button
-              onClick={() => handleCopy(revision.revised)}
-              className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
-              style={{
-                background: "transparent",
-                color: "#3f8a7d",
-                border: "1px solid rgba(95,179,163,0.40)",
-              }}
-            >
-              {copied ? "已复制" : "复制改后"}
-            </button>
-          </div>
-        </div>
+      {/* ── Patch results ── */}
+      {patch && (
+        <PatchPanel patch={patch} onAdopt={onAdopt} />
       )}
     </div>
   );
@@ -464,11 +518,10 @@ export default function CritiquePage() {
   const [evalError, setEvalError] = useState<string | null>(null);
   const [result, setResult] = useState<Evaluation | null>(null);
 
-  // Revise state
-  const [revising, setRevising] = useState(false);
-  const [reviseError, setReviseError] = useState<string | null>(null);
-  const [revision, setRevision] = useState<Revision | null>(null);
-  const [originalSnapshot, setOriginalSnapshot] = useState("");
+  // Patch/improve state
+  const [improving, setImproving] = useState(false);
+  const [improveError, setImproveError] = useState<string | null>(null);
+  const [patch, setPatch] = useState<Patch | null>(null);
 
   // Doc-review state
   const [docReviewing, setDocReviewing] = useState(false);
@@ -480,6 +533,7 @@ export default function CritiquePage() {
   const charCount = text.length;
   const canEvaluate = charCount >= 200 && !evaluating;
   const canDocReview = charCount >= 200 && !docReviewing && !evaluating;
+  const canImprove = charCount >= 200 && !improving && !evaluating && !docReviewing;
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -506,9 +560,9 @@ export default function CritiquePage() {
     if (!canEvaluate) return;
     setEvalError(null);
     setEvaluating(true);
-    // Clear any prior revision and doc-review when re-evaluating
-    setRevision(null);
-    setReviseError(null);
+    // Clear any prior patch and doc-review when re-evaluating
+    setPatch(null);
+    setImproveError(null);
     setDocReviewResult(null);
     setDocReviewError(null);
     try {
@@ -526,6 +580,9 @@ export default function CritiquePage() {
     setDocReviewError(null);
     setDocReviewResult(null);
     setDocReviewing(true);
+    // Clear patch results when running doc-review
+    setPatch(null);
+    setImproveError(null);
     try {
       const review = await callDocReview(text, paperType, outputLang);
       setDocReviewResult(review);
@@ -536,30 +593,27 @@ export default function CritiquePage() {
     }
   }
 
-  async function handleRevise() {
-    if (revising) return;
-    setReviseError(null);
-    setRevision(null);
-    // Snapshot the textarea content at the moment of clicking revise
-    const snapshot = text;
-    setOriginalSnapshot(snapshot);
-    setRevising(true);
+  async function handleImprove() {
+    if (!canImprove) return;
+    setImproveError(null);
+    setPatch(null);
+    setImproving(true);
     try {
-      const rev = await reviseEssay(snapshot, paperType, outputLang);
-      setRevision(rev);
+      const result = await patchEssay(text, paperType, outputLang);
+      setPatch(result);
     } catch (err) {
-      setReviseError(err instanceof Error ? err.message : "改进失败");
+      setImproveError(err instanceof Error ? err.message : "改进失败");
     } finally {
-      setRevising(false);
+      setImproving(false);
     }
   }
 
-  function handleAdopt(revised: string) {
-    setText(revised);
-    // Clear eval + revision + doc-review so user is prompted to re-evaluate
+  function handleAdopt(improved: string) {
+    setText(improved);
+    // Clear eval + patch + doc-review so user is prompted to re-evaluate
     setResult(null);
-    setRevision(null);
-    setReviseError(null);
+    setPatch(null);
+    setImproveError(null);
     setDocReviewResult(null);
     setDocReviewError(null);
   }
@@ -810,11 +864,11 @@ export default function CritiquePage() {
           ) : (
             <ResultsPanel
               result={result}
-              onRevise={handleRevise}
-              revising={revising}
-              reviseError={reviseError}
-              revision={revision}
-              originalSnapshot={originalSnapshot}
+              onImprove={handleImprove}
+              improving={improving}
+              improveError={improveError}
+              patch={patch}
+              canImprove={canImprove}
               onAdopt={handleAdopt}
             />
           )}
@@ -822,11 +876,11 @@ export default function CritiquePage() {
           {docReviewResult && result && (
             <ResultsPanel
               result={result}
-              onRevise={handleRevise}
-              revising={revising}
-              reviseError={reviseError}
-              revision={revision}
-              originalSnapshot={originalSnapshot}
+              onImprove={handleImprove}
+              improving={improving}
+              improveError={improveError}
+              patch={patch}
+              canImprove={canImprove}
               onAdopt={handleAdopt}
             />
           )}
