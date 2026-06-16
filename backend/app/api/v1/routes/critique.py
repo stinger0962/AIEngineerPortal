@@ -40,6 +40,13 @@ class PolishRequest(BaseModel):
     depth: str = "medium"  # light | medium | deep
 
 
+class PatchRequest(BaseModel):
+    text: str
+    paper_type: str = "research"
+    output_lang: str = "auto"
+    depth: str = "medium"
+
+
 @router.post("/extract")
 async def extract(file: UploadFile = File(...)):
     """Parse an uploaded .docx/.pdf/.md/.txt to plain text so the user can review
@@ -133,3 +140,23 @@ def polish(payload: PolishRequest):
     except Exception:
         logger.exception("Critique polish failed")
         raise HTTPException(status_code=500, detail="深度改进失败，请稍后重试。")
+
+
+@router.post("/patch")
+def patch(payload: PatchRequest):
+    """Patch-style improve: model returns precise find/replace edits over the whole
+    doc (no length cap, ~5–10x fewer output tokens than a rewrite), applied
+    programmatically. Returns {patched, summary, applied, unapplied, notes}."""
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="改进服务未配置。")
+    try:
+        return critic.patch(
+            payload.text, payload.paper_type, payload.output_lang, payload.depth,
+            settings.anthropic_api_key, settings.ai_model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        logger.exception("Critique patch failed")
+        raise HTTPException(status_code=500, detail="改进失败，请稍后重试。")

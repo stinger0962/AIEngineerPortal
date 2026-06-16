@@ -531,3 +531,96 @@ def polish(text: str, paper_type: str, output_lang: str, depth: str, anthropic_a
         parts.append(rev if isinstance(rev, str) and rev.strip() else ch)
         changes += [f"[第{i}块] {c}" for c in _as_list(r.get("changes"))]
     return {"plan": plan, "revised": "\n\n".join(parts), "changes": changes, "chunk_count": len(chunks)}
+
+
+# ── 补丁式改进：读全文 → 只输出 find/replace 编辑 → 程序化套用 ──────────────
+# 不重写整篇：输出只含改动的句子，省 5–10× token，一次调用，无长度上限，自动套用。
+
+import re as _re
+
+_PATCH_TOOL = {
+    "name": "report_patch",
+    "description": "Precise find/replace edits to apply to the paper (NOT a rewrite).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string", "description": "一句话总体说明（改了哪些方面、共多少处）"},
+            "edits": {
+                "type": "array",
+                "description": "逐条精确编辑",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "find": {"type": "string", "description": "从原文逐字照抄的一小段（通常一句或一短语），必须能精确定位"},
+                        "replace": {"type": "string", "description": "改后文本"},
+                        "reason": {"type": "string", "description": "为什么这样改"},
+                        "replace_all": {"type": "boolean", "description": "是否替换全文所有出现（仅术语统一这类用 true，默认 false）"},
+                    },
+                    "required": ["find", "replace", "reason"],
+                },
+            },
+            "notes": {"type": "array", "items": {"type": "string"}, "description": "无法用 find/replace 自动完成、需作者手动处理的（脚注重排、跨段结构调整等）"},
+        },
+        "required": ["summary", "edits", "notes"],
+    },
+}
+
+_PATCH_SYSTEM = """你是资深学术编辑。通读整篇{type}，**不重写全文**，只产出一份**精确编辑清单**：
+- edits：每条 = find（从原文**逐字照抄**的一小段，通常一句或一短语）+ replace（改后文本）+ reason（为什么）。只改写作层面：清晰度、语法、术语统一、删冗余、用词。
+- 全文统一术语（如「人工智能」→「AI」）的那条，把 replace_all 设为 true。
+- **find 必须能在原文中精确定位**：逐字复制（含标点），不要先改写再当 find，否则无法套用。每条 find 尽量唯一。
+- notes：无法靠 find/replace 自动完成的（脚注去重/重排、跨段结构调整），写成给作者的建议。
+- 绝不编造内容，保留作者的观点、论据、数据与语气。
+{depth}
+{lang}
+{fmt}
+只通过 report_patch 返回。"""
+
+
+def _apply_edit(text: str, find: str, replace: str, replace_all: bool) -> Tuple[str, bool]:
+    """Apply one find→replace. Exact first, then whitespace-tolerant. Returns
+    (new_text, applied?)."""
+    if find in text:
+        return (text.replace(find, replace) if replace_all else text.replace(find, replace, 1)), True
+    # whitespace-tolerant (handles minor spacing differences; CJK has no spaces so this
+    # degrades to an exact escape match)
+    pattern = _re.compile(r"\s+".join(_re.escape(tok) for tok in find.split()))
+    if pattern.search(text):
+        return pattern.sub(lambda _m: replace, text, count=0 if replace_all else 1), True
+    return text, False
+
+
+def patch(text: str, paper_type: str, output_lang: str, depth: str, anthropic_api_key: str, model: str) -> Dict[str, Any]:
+    """Patch-style improve: model returns precise find/replace edits over the WHOLE
+    doc (input ≤60k, output only the changes), applied programmatically. Returns
+    {patched, summary, applied, unapplied, notes}."""
+    text = (text or "").strip()
+    if len(text) < _MIN_CHARS:
+        raise ValueError(f"正文太短，至少贴入约 {_MIN_CHARS} 字。")
+    if len(text) > _MAX_CHARS:
+        text = text[:_MAX_CHARS]
+    type_label = PAPER_TYPES.get(paper_type, PAPER_TYPES["research"])
+    result = _run_tool(
+        anthropic_api_key, model, max_tokens=8000,
+        system=_PATCH_SYSTEM.format(type=type_label, depth=_DEPTH.get(depth, _DEPTH["medium"]), lang=_lang_instr(output_lang), fmt=_FMT),
+        user=f"全文：\n\n{text}", tool=_PATCH_TOOL, fail_msg="改进失败",
+    )
+    raw_edits = [e for e in _as_list(result.get("edits")) if isinstance(e, dict) and str(e.get("find", "")).strip()]
+    # Apply specific (first-occurrence) edits before global term sweeps to reduce conflicts.
+    raw_edits.sort(key=lambda e: _as_bool(e.get("replace_all")))
+    working = text
+    applied: List[Dict[str, Any]] = []
+    unapplied: List[Dict[str, Any]] = []
+    for e in raw_edits:
+        find = str(e.get("find", ""))
+        replace = str(e.get("replace", ""))
+        working, ok = _apply_edit(working, find, replace, _as_bool(e.get("replace_all")))
+        rec = {"find": find, "replace": replace, "reason": str(e.get("reason", ""))}
+        (applied if ok else unapplied).append(rec)
+    return {
+        "patched": working,
+        "summary": result.get("summary") or "",
+        "applied": applied,
+        "unapplied": unapplied,
+        "notes": _as_list(result.get("notes")),
+    }
