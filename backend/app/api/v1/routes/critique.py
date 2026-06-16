@@ -27,6 +27,12 @@ class ReviseRequest(BaseModel):
     output_lang: str = "auto"
 
 
+class DocReviewRequest(BaseModel):
+    text: str
+    paper_type: str = "research"
+    output_lang: str = "auto"
+
+
 @router.post("/extract")
 async def extract(file: UploadFile = File(...)):
     """Parse an uploaded .docx/.pdf/.md/.txt to plain text so the user can review
@@ -83,3 +89,21 @@ def revise(payload: ReviseRequest):
     except Exception:
         logger.exception("Critique revise failed")
         raise HTTPException(status_code=500, detail="改进失败，请稍后重试。")
+
+
+@router.post("/docreview")
+def docreview(payload: DocReviewRequest):
+    """Document-level review of the whole paper (footnotes/consistency/dedup) →
+    an actionable edit list the author applies in their own editor. No rewrite."""
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="审阅服务未配置。")
+    try:
+        return critic.doc_review(
+            payload.text, payload.paper_type, payload.output_lang, settings.anthropic_api_key, settings.ai_model
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        logger.exception("Critique docreview failed")
+        raise HTTPException(status_code=500, detail="审阅失败，请稍后重试。")

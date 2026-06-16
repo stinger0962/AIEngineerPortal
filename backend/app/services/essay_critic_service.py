@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import io
 import json
-from typing import Any, Dict, List
+import zipfile
+from typing import Any, Dict, List, Tuple
+from xml.etree import ElementTree as ET
 
 _MIN_CHARS = 200
 _MAX_CHARS = 60000  # cap input to keep token cost / latency sane (~ a long paper)
@@ -73,14 +75,45 @@ def _as_bool(v: Any) -> bool:
     return bool(v)
 
 
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _docx_footnotes(raw: bytes) -> List[Tuple[str, str]]:
+    """Pull (id, text) footnotes from a .docx — python-docx omits them. They live
+    in word/footnotes.xml; skip the separator/continuationSeparator placeholders."""
+    out: List[Tuple[str, str]] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            if "word/footnotes.xml" not in z.namelist():
+                return out
+            xml = z.read("word/footnotes.xml")
+        root = ET.fromstring(xml)
+        for fn in root.findall(f"{_W}footnote"):
+            if fn.get(f"{_W}type") in ("separator", "continuationSeparator"):
+                continue
+            fid = fn.get(f"{_W}id") or "?"
+            text = "".join(t.text or "" for t in fn.iter(f"{_W}t")).strip()
+            if text:
+                out.append((fid, text))
+    except (zipfile.BadZipFile, ET.ParseError, KeyError):
+        return []
+    return out
+
+
 def extract_text(filename: str, raw: bytes) -> str:
-    """Extract plain text from an uploaded file. Supports .docx / .pdf / .md / .txt."""
+    """Extract plain text from an uploaded file. Supports .docx / .pdf / .md / .txt.
+    For .docx, footnotes are appended (labeled) since they're part of the paper and
+    document-level review needs to see them."""
     name = (filename or "").lower()
     if name.endswith(".docx"):
         import docx  # python-docx
 
         doc = docx.Document(io.BytesIO(raw))
-        return "\n".join(p.text for p in doc.paragraphs).strip()
+        body = "\n".join(p.text for p in doc.paragraphs).strip()
+        notes = _docx_footnotes(raw)
+        if notes:
+            body += "\n\n【脚注 Footnotes】\n" + "\n".join(f"[{fid}] {text}" for fid, text in notes)
+        return body.strip()
     if name.endswith(".pdf"):
         from pypdf import PdfReader
 
@@ -305,3 +338,67 @@ def judge_pair(original: str, revised: str, paper_type: str, output_lang: str, a
         "reason": result.get("reason") or "",
         "dimensions_improved": _as_list(result.get("dimensions_improved")),
     }
+
+
+# ── 文档级审阅：通读全文 → 定位明确的编辑建议清单（不重写全文）─────────────
+
+_DOCREVIEW_TOOL = {
+    "name": "report_doc_findings",
+    "description": "Document-level review findings the author applies in their own editor.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string", "description": "一句话总体说明（如：发现 3 处重复脚注、2 处术语不一致）"},
+            "findings": {
+                "type": "array",
+                "description": "逐条文档级问题，按严重度排序",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "category": {"type": "string", "description": "类别：脚注引用 / 术语一致性 / 重复冗余 / 结构 / 格式 / 其它"},
+                        "severity": {"type": "string", "description": "严重度：高 / 中 / 低"},
+                        "location": {"type": "string", "description": "定位：脚注编号、章节、或一小段引用片段，便于作者找到"},
+                        "issue": {"type": "string", "description": "问题是什么"},
+                        "recommendation": {"type": "string", "description": "具体动作，如『删除脚注 7（与脚注 2 重复）』"},
+                    },
+                    "required": ["category", "severity", "location", "issue", "recommendation"],
+                },
+            },
+        },
+        "required": ["summary", "findings"],
+    },
+}
+
+_DOCREVIEW_SYSTEM = """你是资深的文档级审阅编辑。通读整篇{type}（含末尾【脚注】区，若有），找出需要作者处理的**文档级**问题，重点：
+- **脚注/引用**：重复或多余的脚注、可合并的脚注、编号或格式不一致、引文与正文对不上。
+- **术语一致性**：同一概念前后用词不一（如 AI / 人工智能混用）、缩写未统一。
+- **重复冗余**：内容/论点重复、可删的赘述。
+- **结构**：段落顺序、标题层级、过渡缺失。
+- **格式**：明显的体例不一致。
+
+每条给出：类别 / 严重度（高·中·低）/ 定位（脚注编号或一小段引用，便于作者定位）/ 问题 / **具体动作建议**（例如『删除脚注 7，与脚注 2 内容重复』『将全文“人工智能”统一为“AI”』）。
+这是**给作者执行的清单**——你只诊断与建议，绝不重写全文、绝不编造原文没有的内容。按严重度从高到低排列；没问题的类别就不列。
+{lang}
+{fmt}
+只通过 report_doc_findings 工具返回。"""
+
+
+def doc_review(text: str, paper_type: str, output_lang: str, anthropic_api_key: str, model: str) -> Dict[str, Any]:
+    """Document-level review: read the whole doc, return an actionable edit list
+    (NOT a rewrite). Returns {summary, findings:[{category,severity,location,issue,recommendation}]}."""
+    text = (text or "").strip()
+    if len(text) < _MIN_CHARS:
+        raise ValueError(f"正文太短，至少贴入约 {_MIN_CHARS} 字再审阅。")
+    if len(text) > _MAX_CHARS:
+        text = text[:_MAX_CHARS]
+    type_label = PAPER_TYPES.get(paper_type, PAPER_TYPES["research"])
+    result = _run_tool(
+        anthropic_api_key,
+        model,
+        max_tokens=8000,
+        system=_DOCREVIEW_SYSTEM.format(type=type_label, lang=_lang_instr(output_lang), fmt=_FMT),
+        user=f"论文类型：{type_label}\n\n全文（含脚注，若有）：\n\n{text}",
+        tool=_DOCREVIEW_TOOL,
+        fail_msg="审阅失败",
+    )
+    return {"summary": result.get("summary") or "", "findings": _as_list(result.get("findings"))}
