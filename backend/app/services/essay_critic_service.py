@@ -699,8 +699,10 @@ def probe(text: str, paper_type: str, output_lang: str, anthropic_api_key: str, 
         system=_PROBE_SYSTEM.format(type=type_label, lang=_lang_instr(output_lang), fmt=_FMT),
         user=f"全文：\n\n{text}", tool=_PROBE_TOOL, fail_msg="提问失败",
     )
+    raw_qs = _as_list(result.get("questions"))
     questions: List[Dict[str, Any]] = []
-    for q in _as_list(result.get("questions")):
+    for q in raw_qs:
+        q = _maybe_json(q)  # the model sometimes returns each item as a JSON string
         if isinstance(q, dict) and str(q.get("question", "")).strip():
             questions.append({
                 "location": str(q.get("location", "")),
@@ -708,7 +710,10 @@ def probe(text: str, paper_type: str, output_lang: str, anthropic_api_key: str, 
                 "question": str(q.get("question", "")),
             })
     if not questions:
-        raise ValueError("提问失败：模型未返回问题，请重试。")
+        # Enrich so a prod-only failure is diagnosable without server logs.
+        keys = list(result.keys()) if isinstance(result, dict) else type(result).__name__
+        sample = repr(raw_qs[:1])[:200]
+        raise ValueError(f"提问失败：未解析到问题（keys={keys}, n={len(raw_qs)}, sample={sample}）")
     return {"questions": questions}
 
 
