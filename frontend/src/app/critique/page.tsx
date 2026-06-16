@@ -12,7 +12,6 @@ import {
 } from "@/lib/critique/api";
 import type {
   Evaluation,
-  Patch,
   PatchEdit,
   DocReview,
   Finding,
@@ -225,28 +224,72 @@ function PatchEditCard({ edit, variant = "applied" }: { edit: PatchEdit; variant
   );
 }
 
-// ── Patch results panel ───────────────────────────────────────────────────────
+// ── Improvement worktop ───────────────────────────────────────────────────────
+// One evolving draft that BOTH 改写作 (writing) and 深挖融入 (substance) edit in
+// place — they stack onto the same text instead of producing two rival results.
 
-type PatchPanelProps = {
-  patch: Patch;
-  onAdopt: (text: string) => void;
+type WorkEntry = {
+  source: "writing" | "substance";
+  summary: string;
+  applied: PatchEdit[];
+  unapplied: PatchEdit[];
+  notes: string[];
 };
 
-function PatchPanel({ patch, onAdopt }: PatchPanelProps) {
+function WorkLogGroup({
+  title,
+  count,
+  accent,
+  edits,
+}: {
+  title: string;
+  count: number;
+  accent: string;
+  edits: PatchEdit[];
+}) {
+  return (
+    <details className="rounded-xl border border-ink/10 bg-white/70">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[13px]">
+        <span className="font-semibold" style={{ color: accent }}>{title}</span>
+        <span className="text-ink/45">{count} 处</span>
+        <span className="ml-auto text-ink/35 text-[11px]">展开查看</span>
+      </summary>
+      <div className="space-y-2 px-3 pb-3">
+        {edits.map((edit, i) => (
+          <PatchEditCard key={i} edit={edit} variant="applied" />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function WorktopPanel({
+  draft,
+  worklog,
+  busy,
+  onAdopt,
+  onReset,
+}: {
+  draft: string;
+  worklog: WorkEntry[];
+  busy: boolean;
+  onAdopt: (text: string) => void;
+  onReset: () => void;
+}) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(patch.patched);
+      await navigator.clipboard.writeText(draft);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
-      // clipboard not available; silently ignore
+      /* clipboard unavailable */
     }
   }
 
   function handleDownload() {
-    const blob = new Blob([patch.patched], { type: "text/markdown;charset=utf-8" });
+    const blob = new Blob([draft], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -255,45 +298,47 @@ function PatchPanel({ patch, onAdopt }: PatchPanelProps) {
     URL.revokeObjectURL(url);
   }
 
+  const writingEdits = worklog.filter((e) => e.source === "writing").flatMap((e) => e.applied);
+  const substanceEdits = worklog.filter((e) => e.source === "substance").flatMap((e) => e.applied);
+  const allUnapplied = worklog.flatMap((e) => e.unapplied);
+  const allNotes = worklog.flatMap((e) => e.notes);
+
   return (
     <div
-      className="rounded-[20px] p-5 space-y-5"
-      style={{ background: "rgba(95,179,163,0.06)", border: "1px solid rgba(95,179,163,0.22)" }}
+      className="rounded-[20px] p-5 space-y-4"
+      style={{ background: "rgba(95,179,163,0.05)", border: `2px solid ${WRITING}` }}
     >
-      {/* Summary */}
-      <p className="text-sm leading-6 text-ink/75">{patch.summary}</p>
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <span className="text-base font-semibold text-ink">改进工作稿</span>
+        <span className="ml-auto text-[11px] text-ink/45">写作 + 实质 已叠加</span>
+      </div>
 
-      {/* Applied edits */}
-      {patch.applied.length > 0 && (
-        <div className="space-y-3">
-          <p
-            className="text-[10px] font-semibold uppercase tracking-[0.28em]"
-            style={{ color: WRITING }}
-          >
-            已应用 ({patch.applied.length})
-          </p>
-          <div className="space-y-2">
-            {patch.applied.map((edit, i) => (
-              <PatchEditCard key={i} edit={edit} variant="applied" />
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Edit log, grouped by source */}
+      <div className="space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-ink/45">已做的改进</p>
+        {writingEdits.length > 0 && (
+          <WorkLogGroup title="写作改进" count={writingEdits.length} accent={WRITING_DARK} edits={writingEdits} />
+        )}
+        {substanceEdits.length > 0 && (
+          <WorkLogGroup title="实质融入" count={substanceEdits.length} accent={SUBSTANCE_DARK} edits={substanceEdits} />
+        )}
+        {writingEdits.length === 0 && substanceEdits.length === 0 && (
+          <p className="text-xs text-ink/45">本轮没有可自动套用的精确编辑（见下方需手动建议）。</p>
+        )}
+      </div>
 
-      {/* Unapplied edits */}
-      {patch.unapplied.length > 0 && (
+      {/* Unapplied */}
+      {allUnapplied.length > 0 && (
         <div
-          className="rounded-xl p-4 space-y-3"
-          style={{
-            background: "rgba(160,106,48,0.06)",
-            border: "1px solid rgba(160,106,48,0.22)",
-          }}
+          className="rounded-xl p-4 space-y-2"
+          style={{ background: "rgba(160,106,48,0.06)", border: "1px solid rgba(160,106,48,0.22)" }}
         >
           <p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: "#a06a30" }}>
-            未能自动定位 ({patch.unapplied.length}) · 请手动处理
+            未能自动定位 ({allUnapplied.length}) · 请手动处理
           </p>
           <div className="space-y-2">
-            {patch.unapplied.map((edit, i) => (
+            {allUnapplied.map((edit, i) => (
               <PatchEditCard key={i} edit={edit} variant="unapplied" />
             ))}
           </div>
@@ -301,16 +346,13 @@ function PatchPanel({ patch, onAdopt }: PatchPanelProps) {
       )}
 
       {/* Notes */}
-      {patch.notes.length > 0 && (
+      {allNotes.length > 0 && (
         <div className="space-y-2">
-          <p
-            className="text-[10px] font-semibold uppercase tracking-[0.28em]"
-            style={{ color: WRITING }}
-          >
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: WRITING }}>
             建议（需手动）
           </p>
           <ul className="space-y-1.5">
-            {patch.notes.map((note, i) => (
+            {allNotes.map((note, i) => (
               <li key={i} className="flex gap-2 text-[13px] text-ink/75 leading-5">
                 <span className="shrink-0 font-semibold" style={{ color: WRITING }}>→</span>
                 <span>{note}</span>
@@ -320,57 +362,51 @@ function PatchPanel({ patch, onAdopt }: PatchPanelProps) {
         </div>
       )}
 
-      {/* Full improved text */}
+      {/* Full draft */}
       <div className="space-y-2">
-        <p
-          className="text-[10px] font-semibold uppercase tracking-[0.28em]"
-          style={{ color: WRITING }}
-        >
+        <p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: WRITING }}>
           改后全文
         </p>
-        <div
-          className="max-h-[420px] overflow-auto bg-white border border-ink/10 rounded-xl p-4 text-[13px] leading-6 whitespace-pre-wrap text-ink/80"
-        >
-          {patch.patched}
+        <div className="max-h-[420px] overflow-auto bg-white border border-ink/10 rounded-xl p-4 text-[13px] leading-6 whitespace-pre-wrap text-ink/80">
+          {draft}
         </div>
       </div>
 
-      {/* Action buttons */}
-      <div className="flex flex-wrap gap-3">
-        {/* 采纳 */}
+      {/* Single action bar */}
+      <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={() => onAdopt(patch.patched)}
+          onClick={() => onAdopt(draft)}
+          disabled={busy}
           className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
           style={{
-            background: "linear-gradient(135deg, #7fcab9 0%, #5fb3a3 50%, #3f8a7d 100%)",
-            color: "white",
+            background: busy ? "rgba(20,33,61,0.08)" : "linear-gradient(135deg, #7fcab9 0%, #5fb3a3 50%, #3f8a7d 100%)",
+            color: busy ? "rgba(20,33,61,0.30)" : "white",
+            cursor: busy ? "not-allowed" : "pointer",
           }}
         >
-          采纳改后版（替换编辑框）
+          采纳为新原文并重新诊断
         </button>
-        {/* 复制 */}
         <button
           onClick={handleCopy}
           className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
-          style={{
-            background: "transparent",
-            color: WRITING_DARK,
-            border: "1px solid rgba(95,179,163,0.40)",
-          }}
+          style={{ background: "transparent", color: WRITING_DARK, border: "1px solid rgba(95,179,163,0.40)" }}
         >
           {copied ? "已复制" : "复制"}
         </button>
-        {/* 下载 */}
         <button
           onClick={handleDownload}
           className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
-          style={{
-            background: "transparent",
-            color: "rgba(20,33,61,0.55)",
-            border: "1px solid rgba(20,33,61,0.15)",
-          }}
+          style={{ background: "transparent", color: "rgba(20,33,61,0.55)", border: "1px solid rgba(20,33,61,0.15)" }}
         >
           下载 .md
+        </button>
+        <button
+          onClick={onReset}
+          disabled={busy}
+          className="ml-auto rounded-[14px] px-3 py-2.5 text-[13px] font-medium transition-all"
+          style={{ background: "transparent", color: "rgba(20,33,61,0.45)", cursor: busy ? "not-allowed" : "pointer" }}
+        >
+          重置工作稿
         </button>
       </div>
     </div>
@@ -469,16 +505,16 @@ function DeepDivePanel({
   questions,
   integrating,
   integrateError,
-  patch,
+  integratedCount,
   onIntegrate,
-  onAdopt,
+  onReprobe,
 }: {
   questions: ProbeQuestion[];
   integrating: boolean;
   integrateError: string | null;
-  patch: Patch | null;
+  integratedCount: number;
   onIntegrate: (answers: { question: string; answer: string; stance: ProbeStance }[]) => void;
-  onAdopt: (text: string) => void;
+  onReprobe: () => void;
 }) {
   const [answers, setAnswers] = useState<Record<number, DeepDiveAnswer>>(() =>
     Object.fromEntries(questions.map((_, i) => [i, { answer: "", stance: "evidence" as ProbeStance }])),
@@ -571,41 +607,66 @@ function DeepDivePanel({
         })}
       </div>
 
-      {/* Integrate button */}
-      <button
-        onClick={handleIntegrate}
-        disabled={!canIntegrate}
-        className="flex w-full items-center justify-center gap-2 rounded-[16px] py-3 text-sm font-semibold transition-all"
-        style={{
-          background: canIntegrate ? "rgba(176,125,46,0.12)" : "rgba(20,33,61,0.08)",
-          color: canIntegrate ? SUBSTANCE_DARK : "rgba(20,33,61,0.30)",
-          border: canIntegrate ? "1px solid rgba(176,125,46,0.38)" : "1px solid rgba(20,33,61,0.10)",
-          cursor: canIntegrate ? "pointer" : "not-allowed",
-        }}
-      >
-        {integrating ? (
-          <>
-            <Loader2 size={15} className="animate-spin" />
-            融入中…（据实补强 / 弱化推测，约 20–40 秒）
-          </>
-        ) : (
-          <>
+      {/* Integrate / done */}
+      {integratedCount > 0 ? (
+        <>
+          <div
+            className="rounded-[14px] px-4 py-3 text-[13px] flex items-center gap-2"
+            style={{ background: "rgba(176,125,46,0.10)", color: SUBSTANCE_DARK, border: "1px solid rgba(176,125,46,0.30)" }}
+          >
             <Compass size={15} />
-            把我的回答融入论文
-          </>
-        )}
-      </button>
-      <p className="text-[11px] text-ink/40 leading-5 text-center -mt-1">
-        AI 只用你给的真材料补强；标「推测」的会被弱化；「跳过」的不动——绝不替你编造。
-      </p>
+            已融入工作稿（{integratedCount} 处）—— 见下方「改进工作稿」。
+          </div>
+          <button
+            onClick={onReprobe}
+            disabled={integrating}
+            className="flex w-full items-center justify-center gap-2 rounded-[16px] py-2.5 text-[13px] font-medium transition-all"
+            style={{
+              background: "transparent",
+              color: SUBSTANCE_DARK,
+              border: "1px solid rgba(176,125,46,0.30)",
+              cursor: integrating ? "not-allowed" : "pointer",
+            }}
+          >
+            重新提问（基于当前工作稿）
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            onClick={handleIntegrate}
+            disabled={!canIntegrate}
+            className="flex w-full items-center justify-center gap-2 rounded-[16px] py-3 text-sm font-semibold transition-all"
+            style={{
+              background: canIntegrate ? "rgba(176,125,46,0.12)" : "rgba(20,33,61,0.08)",
+              color: canIntegrate ? SUBSTANCE_DARK : "rgba(20,33,61,0.30)",
+              border: canIntegrate ? "1px solid rgba(176,125,46,0.38)" : "1px solid rgba(20,33,61,0.10)",
+              cursor: canIntegrate ? "pointer" : "not-allowed",
+            }}
+          >
+            {integrating ? (
+              <>
+                <Loader2 size={15} className="animate-spin" />
+                融入中…（据实补强 / 弱化推测，约 20–40 秒）
+              </>
+            ) : (
+              <>
+                <Compass size={15} />
+                把我的回答融入工作稿
+              </>
+            )}
+          </button>
+          <p className="text-[11px] text-ink/40 leading-5 text-center -mt-1">
+            AI 只用你给的真材料补强；标「推测」的会被弱化；「跳过」的不动——绝不替你编造。
+          </p>
+        </>
+      )}
 
       {integrateError && (
         <p className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-600">
           {integrateError}
         </p>
       )}
-
-      {patch && <PatchPanel patch={patch} onAdopt={onAdopt} />}
     </div>
   );
 }
@@ -623,10 +684,17 @@ export default function CritiquePage() {
   const [evalError, setEvalError] = useState<string | null>(null);
   const [result, setResult] = useState<Evaluation | null>(null);
 
-  // Patch/improve state
+  // Full-width tabbed layout (not split-screen): 原文 editor ↔ 打磨 flow.
+  const [activeTab, setActiveTab] = useState<"source" | "polish">("source");
+
+  // Improvement worktop: one evolving draft + a log of what each op applied.
+  // Both 改写作 and 深挖融入 edit `draft` in place and append to `worklog`.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [worklog, setWorklog] = useState<WorkEntry[]>([]);
+
+  // 改写作 (writing-layer patch) state
   const [improving, setImproving] = useState(false);
   const [improveError, setImproveError] = useState<string | null>(null);
-  const [patch, setPatch] = useState<Patch | null>(null);
 
   // Doc-review state
   const [docReviewing, setDocReviewing] = useState(false);
@@ -639,7 +707,6 @@ export default function CritiquePage() {
   const [questions, setQuestions] = useState<ProbeQuestion[] | null>(null);
   const [integrating, setIntegrating] = useState(false);
   const [integrateError, setIntegrateError] = useState<string | null>(null);
-  const [deepPatch, setDeepPatch] = useState<Patch | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -676,14 +743,15 @@ export default function CritiquePage() {
     setEvalError(null);
     setEvaluating(true);
     // Clear all downstream when re-diagnosing
-    setPatch(null);
     setImproveError(null);
     setDocReviewResult(null);
     setDocReviewError(null);
+    resetWorktop();
     resetDeepDive();
     try {
       const evaluation = await evaluateEssay(text, paperType, outputLang);
       setResult(evaluation);
+      setActiveTab("polish"); // move into the polish flow once diagnosed
     } catch (err) {
       setEvalError(err instanceof Error ? err.message : "诊断失败");
     } finally {
@@ -706,14 +774,19 @@ export default function CritiquePage() {
     }
   }
 
+  // Both improve & integrate edit the SAME evolving draft (current draft, or the
+  // original text on the first op) and append what they applied to the worklog.
   async function handleImprove() {
     if (!canImprove) return;
     setImproveError(null);
-    setPatch(null);
     setImproving(true);
     try {
-      const result = await patchEssay(text, paperType, outputLang);
-      setPatch(result);
+      const result = await patchEssay(draft ?? text, paperType, outputLang);
+      setDraft(result.patched);
+      setWorklog((w) => [
+        ...w,
+        { source: "writing", summary: result.summary, applied: result.applied, unapplied: result.unapplied, notes: result.notes },
+      ]);
     } catch (err) {
       setImproveError(err instanceof Error ? err.message : "改进失败");
     } finally {
@@ -721,10 +794,15 @@ export default function CritiquePage() {
     }
   }
 
+  function resetWorktop() {
+    setDraft(null);
+    setWorklog([]);
+    setImproveError(null);
+  }
+
   function resetDeepDive() {
     setQuestions(null);
     setProbeError(null);
-    setDeepPatch(null);
     setIntegrateError(null);
   }
 
@@ -732,11 +810,10 @@ export default function CritiquePage() {
     if (busy || !hasEnough) return;
     setProbeError(null);
     setQuestions(null);
-    setDeepPatch(null);
     setIntegrateError(null);
     setProbing(true);
     try {
-      const qs = await probeEssay(text, paperType, outputLang);
+      const qs = await probeEssay(draft ?? text, paperType, outputLang);
       setQuestions(qs);
     } catch (err) {
       setProbeError(err instanceof Error ? err.message : "提问失败");
@@ -750,11 +827,16 @@ export default function CritiquePage() {
   ) {
     if (busy) return;
     setIntegrateError(null);
-    setDeepPatch(null);
     setIntegrating(true);
     try {
-      const result = await integrateAnswers(text, answers, paperType, outputLang);
-      setDeepPatch(result);
+      const result = await integrateAnswers(draft ?? text, answers, paperType, outputLang);
+      setDraft(result.patched);
+      setWorklog((w) => [
+        ...w,
+        { source: "substance", summary: result.summary, applied: result.applied, unapplied: result.unapplied, notes: result.notes },
+      ]);
+      // Lock this Q&A round; further substance work goes through a fresh re-probe.
+      setQuestions(null);
     } catch (err) {
       setIntegrateError(err instanceof Error ? err.message : "融入失败");
     } finally {
@@ -764,13 +846,13 @@ export default function CritiquePage() {
 
   function handleAdopt(improved: string) {
     setText(improved);
-    // Clear downstream so the user re-diagnoses the new version
+    // The draft becomes the new source → clear everything; back to the editor.
     setResult(null);
-    setPatch(null);
-    setImproveError(null);
     setDocReviewResult(null);
     setDocReviewError(null);
+    resetWorktop();
     resetDeepDive();
+    setActiveTab("source");
   }
 
   // ── Derived ─────────────────────────────────────────────────────────────────
@@ -778,15 +860,19 @@ export default function CritiquePage() {
   const writingDims: Dimension[] = result?.dimensions.filter((d) => d.layer === "writing") ?? [];
   const substanceDims: Dimension[] = result?.dimensions.filter((d) => d.layer === "substance") ?? [];
 
+  const writingApplied = worklog.filter((e) => e.source === "writing").reduce((n, e) => n + e.applied.length, 0);
+  const substanceApplied = worklog.filter((e) => e.source === "substance").reduce((n, e) => n + e.applied.length, 0);
+  const hasWritingWork = worklog.some((e) => e.source === "writing");
+
   const steps: { label: string; state: StepState }[] = [
     { label: "诊断", state: result ? "done" : "active" },
     {
       label: "改写作",
-      state: !result ? "todo" : patch ? "done" : "active",
+      state: !result ? "todo" : hasWritingWork ? "done" : "active",
     },
     {
       label: "深挖实质",
-      state: !result ? "todo" : deepPatch ? "done" : "active",
+      state: !result ? "todo" : substanceApplied > 0 ? "done" : "active",
     },
     {
       label: "文档审阅",
@@ -831,10 +917,44 @@ export default function CritiquePage() {
         </div>
       </div>
 
-      {/* ── Two-column layout ── */}
-      <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
-        {/* ── LEFT: Input panel ── */}
-        <div className="rounded-[28px] border border-ink/10 bg-white/85 shadow-panel p-6 space-y-5 self-start">
+      {/* ── Tabs (full-width, not split-screen) ── */}
+      <div className="flex items-center gap-1 border-b border-ink/10">
+        <button
+          onClick={() => setActiveTab("source")}
+          className="relative px-4 py-2.5 text-sm font-semibold transition-colors"
+          style={{ color: activeTab === "source" ? WRITING_DARK : "rgba(20,33,61,0.45)" }}
+        >
+          原文 · {charCount} 字
+          {activeTab === "source" && (
+            <span className="absolute left-0 right-0 -bottom-px h-0.5" style={{ background: WRITING }} />
+          )}
+        </button>
+        <button
+          onClick={() => {
+            if (result || hasEnough) setActiveTab("polish");
+          }}
+          disabled={!result && !hasEnough}
+          className="relative px-4 py-2.5 text-sm font-semibold transition-colors"
+          style={{
+            color:
+              activeTab === "polish"
+                ? WRITING_DARK
+                : result || hasEnough
+                  ? "rgba(20,33,61,0.45)"
+                  : "rgba(20,33,61,0.25)",
+            cursor: result || hasEnough ? "pointer" : "not-allowed",
+          }}
+        >
+          打磨{result ? "" : "（先诊断）"}
+          {activeTab === "polish" && (
+            <span className="absolute left-0 right-0 -bottom-px h-0.5" style={{ background: WRITING }} />
+          )}
+        </button>
+      </div>
+
+      {/* ── 原文 tab: the editor ── */}
+      {activeTab === "source" && (
+        <div className="rounded-[28px] border border-ink/10 bg-white/85 shadow-panel p-6 space-y-5">
           {/* Paper type selector */}
           <div className="space-y-2">
             <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-ink/45">
@@ -988,7 +1108,7 @@ export default function CritiquePage() {
             )}
           </button>
           <p className="text-[11px] text-ink/40 leading-5 text-center">
-            一次诊断给出逐维度评分，并分出写作层与实质层；改写作 / 文档审阅在右侧按需触发。
+            诊断后自动进入「打磨」：逐维度评分 + 写作层/实质层，改写作 / 深挖 / 审阅一条龙，最后一次采纳回到这里。
           </p>
 
           {/* Eval error */}
@@ -998,8 +1118,10 @@ export default function CritiquePage() {
             </p>
           )}
         </div>
+      )}
 
-        {/* ── RIGHT: Flow panel ── */}
+      {/* ── 打磨 tab: diagnose → improve → deep-dive → review → adopt ── */}
+      {activeTab === "polish" && (
         <div className="rounded-[28px] border border-ink/10 bg-white/85 shadow-panel p-6 space-y-6">
           {/* Progress rail */}
           <ProgressRail steps={steps} />
@@ -1008,12 +1130,19 @@ export default function CritiquePage() {
 
           {/* Empty state */}
           {!result && (
-            <div className="flex min-h-[280px] items-center justify-center">
+            <div className="flex min-h-[280px] flex-col items-center justify-center gap-4">
               <p className="text-center text-sm text-ink/40 px-8 leading-7">
-                贴入论文后点「开始打磨 · 诊断」，
+                还没有诊断结果。
                 <br />
-                这里会按写作层 / 实质层分组展示诊断结果。
+                到「原文」标签贴入论文并诊断，结果会显示在这里。
               </p>
+              <button
+                onClick={() => setActiveTab("source")}
+                className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
+                style={{ background: "rgba(95,179,163,0.12)", color: WRITING_DARK, border: "1px solid rgba(95,179,163,0.35)" }}
+              >
+                ← 去「原文」诊断
+              </button>
             </div>
           )}
 
@@ -1067,7 +1196,7 @@ export default function CritiquePage() {
                   </div>
                 )}
 
-                {/* 一键改写作 CTA */}
+                {/* 一键改写作 CTA — edits the shared worktop */}
                 <button
                   onClick={handleImprove}
                   disabled={!canImprove}
@@ -1089,12 +1218,14 @@ export default function CritiquePage() {
                   ) : (
                     <>
                       <Sparkles size={15} />
-                      一键改写作
+                      {hasWritingWork ? "再改一轮（在工作稿上）" : "一键改写作"}
                     </>
                   )}
                 </button>
                 <p className="text-[11px] text-ink/40 leading-5 text-center -mt-1">
-                  AI 按写作问题给出改后全文 + 逐条 diff；只改写作，不编造内容。
+                  {hasWritingWork
+                    ? `已写入工作稿 ${writingApplied} 处 · 改动汇总见下方「改进工作稿」。`
+                    : "AI 按写作问题改写，结果汇入下方「改进工作稿」；只改写作，不编造内容。"}
                 </p>
 
                 {improveError && (
@@ -1102,8 +1233,6 @@ export default function CritiquePage() {
                     {improveError}
                   </p>
                 )}
-
-                {patch && <PatchPanel patch={patch} onAdopt={handleAdopt} />}
               </div>
 
               <div className="border-t border-ink/8" />
@@ -1165,9 +1294,9 @@ export default function CritiquePage() {
                     questions={questions}
                     integrating={integrating}
                     integrateError={integrateError}
-                    patch={deepPatch}
+                    integratedCount={substanceApplied}
                     onIntegrate={handleIntegrate}
-                    onAdopt={handleAdopt}
+                    onReprobe={handleProbe}
                   />
                 )}
 
@@ -1177,6 +1306,20 @@ export default function CritiquePage() {
                   </p>
                 )}
               </div>
+
+              {/* ── 改进工作稿（写作 + 实质 汇总，唯一导出/采纳处）── */}
+              {draft !== null && (
+                <>
+                  <div className="border-t border-ink/8" />
+                  <WorktopPanel
+                    draft={draft}
+                    worklog={worklog}
+                    busy={busy}
+                    onAdopt={handleAdopt}
+                    onReset={resetWorktop}
+                  />
+                </>
+              )}
 
               <div className="border-t border-ink/8" />
 
@@ -1225,7 +1368,7 @@ export default function CritiquePage() {
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
