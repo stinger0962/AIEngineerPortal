@@ -402,3 +402,132 @@ def doc_review(text: str, paper_type: str, output_lang: str, anthropic_api_key: 
         fail_msg="审阅失败",
     )
     return {"summary": result.get("summary") or "", "findings": _as_list(result.get("findings"))}
+
+
+# ── 深度改进管线（原型）：计划 → 分块带全局上下文改写 → 拼接 ──────────────
+
+_DEPTH = {
+    "light": "深度：轻润色——清晰度、语法、术语统一、删冗余，结构与内容基本不动。",
+    "medium": "深度：中度——上面 + 调整段落组织、补过渡、重写表达薄弱处。",
+    "deep": "深度：深度——上面 + 写作层结构性重排（合并/拆分段落、强化论证组织），但绝不编造内容。",
+}
+
+
+def _chunk_text(text: str, max_chars: int = 4200) -> List[str]:
+    """Greedy split by blank-line paragraphs into chunks <= max_chars (keeps
+    paragraph boundaries so revision context stays coherent)."""
+    paras = [p for p in text.split("\n\n")]
+    chunks: List[str] = []
+    cur = ""
+    for p in paras:
+        if cur and len(cur) + len(p) + 2 > max_chars:
+            chunks.append(cur.strip())
+            cur = p
+        else:
+            cur = f"{cur}\n\n{p}" if cur else p
+    if cur.strip():
+        chunks.append(cur.strip())
+    return chunks or [text]
+
+
+_PLAN_TOOL = {
+    "name": "report_plan",
+    "description": "A document-level revision plan (NOT a rewrite).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "goals": {"type": "array", "items": {"type": "string"}, "description": "3–5 条总体改写目标"},
+            "terminology": {"type": "array", "items": {"type": "string"}, "description": "术语统一决定，如『人工智能 → AI』"},
+            "footnotes": {"type": "array", "items": {"type": "string"}, "description": "脚注处理，如『删除脚注4（与1重复）』；没有就空数组"},
+            "cautions": {"type": "array", "items": {"type": "string"}, "description": "红线/必须保留项（作者观点、语气、数据、不编造）"},
+        },
+        "required": ["goals", "terminology", "footnotes", "cautions"],
+    },
+}
+
+_PLAN_SYSTEM = """你是资深学术编辑。通读整篇{type}，产出一份**改写计划**（只规划，绝不改写正文）：
+- goals：总体改写目标 3–5 条。
+- terminology：全文术语/缩写统一决定（如『人工智能 → AI』）。
+- footnotes：脚注的处理（删除重复、合并）；没有就空数组。
+- cautions：红线——必须保留作者的观点、论据、数据与语气，绝不编造内容。
+{depth}
+{lang}
+{fmt}
+只通过 report_plan 返回。"""
+
+
+def make_plan(text: str, paper_type: str, output_lang: str, depth: str, anthropic_api_key: str, model: str) -> Dict[str, Any]:
+    text = (text or "").strip()
+    if len(text) < _MIN_CHARS:
+        raise ValueError(f"正文太短，至少贴入约 {_MIN_CHARS} 字。")
+    if len(text) > _MAX_CHARS:
+        text = text[:_MAX_CHARS]
+    type_label = PAPER_TYPES.get(paper_type, PAPER_TYPES["research"])
+    r = _run_tool(
+        anthropic_api_key, model, max_tokens=2000,
+        system=_PLAN_SYSTEM.format(type=type_label, depth=_DEPTH.get(depth, _DEPTH["medium"]), lang=_lang_instr(output_lang), fmt=_FMT),
+        user=f"全文：\n\n{text}", tool=_PLAN_TOOL, fail_msg="出计划失败",
+    )
+    return {k: _as_list(r.get(k)) for k in ("goals", "terminology", "footnotes", "cautions")}
+
+
+_CHUNK_TOOL = {
+    "name": "report_chunk_revision",
+    "description": "Revised text of this chunk + what changed in it.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "revised": {"type": "string", "description": "本块改后正文"},
+            "changes": {"type": "array", "items": {"type": "string"}, "description": "本块改动要点（0–4 条）"},
+        },
+        "required": ["revised", "changes"],
+    },
+}
+
+_CHUNK_SYSTEM = """你在分块改写一篇{type}的第 {i}/{n} 块。严格遵循下面的【改写计划】（尤其术语统一与红线），保证与全文一致。
+只改写作层面，保留作者实质内容与语气，绝不编造。正文语言与原文一致。
+{depth}
+
+【改写计划】
+{plan}
+
+{lang}
+{fmt}
+只通过 report_chunk_revision 返回本块结果。"""
+
+
+def _plan_str(plan: Dict[str, Any]) -> str:
+    def block(label: str, items: List[Any]) -> str:
+        return f"{label}：" + ("；".join(str(x) for x in items) if items else "（无）")
+    return "\n".join([
+        block("总体目标", plan.get("goals", [])),
+        block("术语统一", plan.get("terminology", [])),
+        block("脚注处理", plan.get("footnotes", [])),
+        block("红线", plan.get("cautions", [])),
+    ])
+
+
+def polish(text: str, paper_type: str, output_lang: str, depth: str, anthropic_api_key: str, model: str) -> Dict[str, Any]:
+    """Prototype deep-improve pipeline: plan → chunk → revise each chunk with the
+    global plan injected → stitch. Returns {plan, revised, changes, chunk_count}."""
+    text = (text or "").strip()
+    if len(text) < _MIN_CHARS:
+        raise ValueError(f"正文太短，至少贴入约 {_MIN_CHARS} 字。")
+    if len(text) > _MAX_CHARS:
+        text = text[:_MAX_CHARS]
+    type_label = PAPER_TYPES.get(paper_type, PAPER_TYPES["research"])
+    plan = make_plan(text, paper_type, output_lang, depth, anthropic_api_key, model)
+    plan_text = _plan_str(plan)
+    chunks = _chunk_text(text)
+    parts: List[str] = []
+    changes: List[str] = []
+    for i, ch in enumerate(chunks, 1):
+        r = _run_tool(
+            anthropic_api_key, model, max_tokens=8000,
+            system=_CHUNK_SYSTEM.format(type=type_label, i=i, n=len(chunks), depth=_DEPTH.get(depth, _DEPTH["medium"]), plan=plan_text, lang=_lang_instr(output_lang), fmt=_FMT),
+            user=f"本块（第 {i}/{len(chunks)} 块）原文：\n\n{ch}", tool=_CHUNK_TOOL, fail_msg="改写失败",
+        )
+        rev = _maybe_json(r.get("revised"))
+        parts.append(rev if isinstance(rev, str) and rev.strip() else ch)
+        changes += [f"[第{i}块] {c}" for c in _as_list(r.get("changes"))]
+    return {"plan": plan, "revised": "\n\n".join(parts), "changes": changes, "chunk_count": len(chunks)}

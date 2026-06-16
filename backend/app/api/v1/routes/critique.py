@@ -33,6 +33,13 @@ class DocReviewRequest(BaseModel):
     output_lang: str = "auto"
 
 
+class PolishRequest(BaseModel):
+    text: str
+    paper_type: str = "research"
+    output_lang: str = "auto"
+    depth: str = "medium"  # light | medium | deep
+
+
 @router.post("/extract")
 async def extract(file: UploadFile = File(...)):
     """Parse an uploaded .docx/.pdf/.md/.txt to plain text so the user can review
@@ -107,3 +114,22 @@ def docreview(payload: DocReviewRequest):
     except Exception:
         logger.exception("Critique docreview failed")
         raise HTTPException(status_code=500, detail="审阅失败，请稍后重试。")
+
+
+@router.post("/polish")
+def polish(payload: PolishRequest):
+    """[PROTOTYPE] Deep-improve pipeline: plan → chunk → revise each chunk with the
+    global plan injected → stitch. Synchronous (the SSE + plan-gate UI come later)."""
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="改进服务未配置。")
+    try:
+        return critic.polish(
+            payload.text, payload.paper_type, payload.output_lang, payload.depth,
+            settings.anthropic_api_key, settings.ai_model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        logger.exception("Critique polish failed")
+        raise HTTPException(status_code=500, detail="深度改进失败，请稍后重试。")
