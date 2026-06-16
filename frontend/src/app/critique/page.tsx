@@ -2,8 +2,8 @@
 
 import { useRef, useState } from "react";
 import { ClipboardCheck, Upload, Loader2 } from "lucide-react";
-import { extractFile, evaluateEssay, reviseEssay } from "@/lib/critique/api";
-import type { Evaluation, Revision } from "@/lib/critique/api";
+import { extractFile, evaluateEssay, reviseEssay, docReview as callDocReview } from "@/lib/critique/api";
+import type { Evaluation, Revision, DocReview, Finding } from "@/lib/critique/api";
 
 // ── Paper type config ─────────────────────────────────────────────────────────
 
@@ -79,6 +79,100 @@ function DimensionCard({
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+// ── Doc-review severity pill styles ──────────────────────────────────────────
+
+function severityStyle(severity: string): React.CSSProperties {
+  if (severity === "高") {
+    return { background: "rgba(163,50,45,0.10)", color: "#a3322d", border: "1px solid rgba(163,50,45,0.25)" };
+  }
+  if (severity === "中") {
+    return { background: "rgba(160,106,48,0.10)", color: "#a06a30", border: "1px solid rgba(160,106,48,0.25)" };
+  }
+  // 低 or unknown
+  return { background: "rgba(20,33,61,0.08)", color: "rgba(20,33,61,0.55)", border: "1px solid rgba(20,33,61,0.15)" };
+}
+
+// ── Finding card ──────────────────────────────────────────────────────────────
+
+function FindingCard({ finding }: { finding: Finding }) {
+  return (
+    <div className="bg-white border border-ink/10 rounded-xl p-4 space-y-2.5">
+      {/* Top row: severity pill + category chip */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+          style={severityStyle(finding.severity)}
+        >
+          {finding.severity || "低"}
+        </span>
+        <span
+          className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium"
+          style={{
+            background: "rgba(95,179,163,0.12)",
+            color: "#3f8a7d",
+          }}
+        >
+          {finding.category}
+        </span>
+      </div>
+
+      {/* Location */}
+      {finding.location && (
+        <p className="font-mono text-[12px] text-ink/50">
+          定位：{finding.location}
+        </p>
+      )}
+
+      {/* Issue */}
+      <p className="text-sm leading-6 text-ink/80">{finding.issue}</p>
+
+      {/* Recommendation */}
+      <div
+        className="rounded-lg p-2.5 text-[13px] text-ink/85"
+        style={{
+          background: "rgba(95,179,163,0.08)",
+          border: "1px solid rgba(95,179,163,0.20)",
+        }}
+      >
+        <span className="font-semibold" style={{ color: "#5fb3a3" }}>→ </span>
+        {finding.recommendation}
+      </div>
+    </div>
+  );
+}
+
+// ── Doc-review results panel ──────────────────────────────────────────────────
+
+function DocReviewPanel({ review }: { review: DocReview }) {
+  return (
+    <div className="rounded-[28px] border border-ink/10 bg-white/85 shadow-panel p-6 space-y-5">
+      {/* Section header */}
+      <div className="space-y-1.5">
+        <p
+          className="text-[10px] font-semibold uppercase tracking-[0.28em]"
+          style={{ color: "#5fb3a3" }}
+        >
+          文档审阅 · Doc review
+        </p>
+        <p className="text-sm leading-6 text-ink/75">{review.summary}</p>
+      </div>
+
+      <div className="border-t border-ink/8" />
+
+      {/* Findings list */}
+      {review.findings.length === 0 ? (
+        <p className="text-sm text-ink/50 leading-6">未发现明显的文档级问题。</p>
+      ) : (
+        <div className="space-y-3">
+          {review.findings.map((f, i) => (
+            <FindingCard key={i} finding={f} />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -376,10 +470,16 @@ export default function CritiquePage() {
   const [revision, setRevision] = useState<Revision | null>(null);
   const [originalSnapshot, setOriginalSnapshot] = useState("");
 
+  // Doc-review state
+  const [docReviewing, setDocReviewing] = useState(false);
+  const [docReviewError, setDocReviewError] = useState<string | null>(null);
+  const [docReviewResult, setDocReviewResult] = useState<DocReview | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const charCount = text.length;
   const canEvaluate = charCount >= 200 && !evaluating;
+  const canDocReview = charCount >= 200 && !docReviewing && !evaluating;
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -406,9 +506,11 @@ export default function CritiquePage() {
     if (!canEvaluate) return;
     setEvalError(null);
     setEvaluating(true);
-    // Clear any prior revision when re-evaluating
+    // Clear any prior revision and doc-review when re-evaluating
     setRevision(null);
     setReviseError(null);
+    setDocReviewResult(null);
+    setDocReviewError(null);
     try {
       const evaluation = await evaluateEssay(text, paperType, outputLang);
       setResult(evaluation);
@@ -416,6 +518,21 @@ export default function CritiquePage() {
       setEvalError(err instanceof Error ? err.message : "评估失败");
     } finally {
       setEvaluating(false);
+    }
+  }
+
+  async function handleDocReview() {
+    if (!canDocReview) return;
+    setDocReviewError(null);
+    setDocReviewResult(null);
+    setDocReviewing(true);
+    try {
+      const review = await callDocReview(text, paperType, outputLang);
+      setDocReviewResult(review);
+    } catch (err) {
+      setDocReviewError(err instanceof Error ? err.message : "审阅失败");
+    } finally {
+      setDocReviewing(false);
     }
   }
 
@@ -439,10 +556,12 @@ export default function CritiquePage() {
 
   function handleAdopt(revised: string) {
     setText(revised);
-    // Clear eval + revision so user is prompted to re-evaluate
+    // Clear eval + revision + doc-review so user is prompted to re-evaluate
     setResult(null);
     setRevision(null);
     setReviseError(null);
+    setDocReviewResult(null);
+    setDocReviewError(null);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -613,28 +732,60 @@ export default function CritiquePage() {
             )}
           </div>
 
-          {/* Evaluate button */}
-          <button
-            onClick={handleEvaluate}
-            disabled={!canEvaluate}
-            className="flex w-full items-center justify-center gap-2 rounded-[16px] py-3 text-sm font-semibold text-white transition-all"
-            style={{
-              background: canEvaluate
-                ? "linear-gradient(135deg, #7fcab9 0%, #5fb3a3 50%, #3f8a7d 100%)"
-                : "rgba(20,33,61,0.08)",
-              color: canEvaluate ? "white" : "rgba(20,33,61,0.30)",
-              cursor: canEvaluate ? "pointer" : "not-allowed",
-            }}
-          >
-            {evaluating ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                评估中…（约 10–30 秒）
-              </>
-            ) : (
-              "评估 Evaluate"
-            )}
-          </button>
+          {/* Action buttons row */}
+          <div className="space-y-3">
+            {/* Primary: Evaluate */}
+            <button
+              onClick={handleEvaluate}
+              disabled={!canEvaluate}
+              className="flex w-full items-center justify-center gap-2 rounded-[16px] py-3 text-sm font-semibold text-white transition-all"
+              style={{
+                background: canEvaluate
+                  ? "linear-gradient(135deg, #7fcab9 0%, #5fb3a3 50%, #3f8a7d 100%)"
+                  : "rgba(20,33,61,0.08)",
+                color: canEvaluate ? "white" : "rgba(20,33,61,0.30)",
+                cursor: canEvaluate ? "pointer" : "not-allowed",
+              }}
+            >
+              {evaluating ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  评估中…（约 10–30 秒）
+                </>
+              ) : (
+                "评估 Evaluate"
+              )}
+            </button>
+
+            {/* Secondary: Doc review */}
+            <button
+              onClick={handleDocReview}
+              disabled={!canDocReview}
+              className="flex w-full items-center justify-center gap-2 rounded-[16px] py-3 text-sm font-semibold transition-all"
+              style={{
+                background: "transparent",
+                color: canDocReview ? "#3f8a7d" : "rgba(20,33,61,0.28)",
+                border: canDocReview
+                  ? "1px solid rgba(95,179,163,0.45)"
+                  : "1px solid rgba(20,33,61,0.10)",
+                cursor: canDocReview ? "pointer" : "not-allowed",
+              }}
+            >
+              {docReviewing ? (
+                <>
+                  <Loader2 size={15} className="animate-spin" />
+                  审阅中…（约 20–40 秒，长文更久）
+                </>
+              ) : (
+                "文档审阅 Doc review"
+              )}
+            </button>
+
+            {/* Helper text */}
+            <p className="text-[11px] text-ink/40 leading-5 text-center">
+              文档审阅生成可在自己编辑器中执行的修改清单，不重写文件。
+            </p>
+          </div>
 
           {/* Eval error */}
           {evalError && (
@@ -642,19 +793,43 @@ export default function CritiquePage() {
               {evalError}
             </p>
           )}
+
+          {/* Doc-review error */}
+          {docReviewError && (
+            <p className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-600">
+              {docReviewError}
+            </p>
+          )}
         </div>
 
         {/* ── RIGHT: Results panel ── */}
-        <div>
-          <ResultsPanel
-            result={result}
-            onRevise={handleRevise}
-            revising={revising}
-            reviseError={reviseError}
-            revision={revision}
-            originalSnapshot={originalSnapshot}
-            onAdopt={handleAdopt}
-          />
+        <div className="space-y-6">
+          {/* Doc-review results (shown when present; replaces placeholder) */}
+          {docReviewResult ? (
+            <DocReviewPanel review={docReviewResult} />
+          ) : (
+            <ResultsPanel
+              result={result}
+              onRevise={handleRevise}
+              revising={revising}
+              reviseError={reviseError}
+              revision={revision}
+              originalSnapshot={originalSnapshot}
+              onAdopt={handleAdopt}
+            />
+          )}
+          {/* If both doc-review AND evaluation results exist, show eval below */}
+          {docReviewResult && result && (
+            <ResultsPanel
+              result={result}
+              onRevise={handleRevise}
+              revising={revising}
+              reviseError={reviseError}
+              revision={revision}
+              originalSnapshot={originalSnapshot}
+              onAdopt={handleAdopt}
+            />
+          )}
         </div>
       </div>
     </div>

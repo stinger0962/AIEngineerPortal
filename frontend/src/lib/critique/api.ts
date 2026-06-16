@@ -30,6 +30,19 @@ export type Revision = {
   verdict: Verdict;
 };
 
+export type Finding = {
+  category: string;
+  severity: string;
+  location: string;
+  issue: string;
+  recommendation: string;
+};
+
+export type DocReview = {
+  summary: string;
+  findings: Finding[];
+};
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function handleError(res: Response, fallback: string): Promise<never> {
@@ -81,6 +94,20 @@ function normalizeEvaluation(raw: unknown): Evaluation {
       score: Number(d.score ?? 0),
       critique: String(d.critique ?? ""),
       suggestions: asArray<string>(d.suggestions).map((s) => String(s)),
+    })),
+  };
+}
+
+function normalizeDocReview(raw: unknown): DocReview {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  return {
+    summary: String(r.summary ?? ""),
+    findings: asArray<Record<string, unknown>>(r.findings).map((f) => ({
+      category: String(f.category ?? ""),
+      severity: String(f.severity ?? ""),
+      location: String(f.location ?? ""),
+      issue: String(f.issue ?? ""),
+      recommendation: String(f.recommendation ?? ""),
     })),
   };
 }
@@ -145,6 +172,30 @@ export async function evaluateEssay(
   }
 
   return normalizeEvaluation(await res.json());
+}
+
+/**
+ * Send full paper text for document-level review.
+ * Returns a DocReview object (summary + findings list).
+ * Handles up to ~60 000 chars; no length cap on the frontend.
+ */
+export async function docReview(
+  text: string,
+  paperType: string,
+  outputLang: string,
+): Promise<DocReview> {
+  const res = await fetch(`${API_BASE}/critique/docreview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, paper_type: paperType, output_lang: outputLang }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    await handleError(res, "审阅失败");
+  }
+
+  return normalizeDocReview(await res.json());
 }
 
 /**
