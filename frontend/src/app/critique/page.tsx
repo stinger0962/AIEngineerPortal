@@ -765,7 +765,8 @@ export default function CritiquePage() {
     setDocReviewResult(null);
     setDocReviewing(true);
     try {
-      const review = await callDocReview(text, paperType, outputLang);
+      // Review the latest version (the worktop draft if any improvements ran).
+      const review = await callDocReview(draft ?? text, paperType, outputLang);
       setDocReviewResult(review);
     } catch (err) {
       setDocReviewError(err instanceof Error ? err.message : "审阅失败");
@@ -835,8 +836,8 @@ export default function CritiquePage() {
         ...w,
         { source: "substance", summary: result.summary, applied: result.applied, unapplied: result.unapplied, notes: result.notes },
       ]);
-      // Lock this Q&A round; further substance work goes through a fresh re-probe.
-      setQuestions(null);
+      // Keep `questions` so the panel stays on its "已融入 N 处 + 重新提问" done
+      // state (clearing it would unmount the panel and hide that a round ran).
     } catch (err) {
       setIntegrateError(err instanceof Error ? err.message : "融入失败");
     } finally {
