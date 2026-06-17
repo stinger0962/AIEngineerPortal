@@ -783,3 +783,45 @@ def integrate(text: str, answers: List[Dict[str, Any]], paper_type: str, output_
         "unapplied": unapplied,
         "notes": _as_list(result.get("notes")),
     }
+
+
+# ── 按指示改写：作者下明确指令 → patch 式改（改的是传入文本=当前工作稿）─────────
+
+_INSTRUCT_SYSTEM = """你是资深学术编辑。按作者的**明确指示**修改这篇{type}，用补丁式 find/replace 编辑（不重写全文）。
+- 只做指示要求的改动：压缩 / 扩展、改语气与语域、重组段落、替换措辞、删减、统一称谓等，都照做。
+- find 必须从原文**逐字照抄**、能精确定位；只动与指示相关的部分，保留其余内容与作者语气。
+- 全文统一替换类（如改称谓、统一术语）把 replace_all 设为 true。
+- **绝不编造**作者没有提供的事实、数据、引用、实验结果或新观点。指示若需要新的真材料（如「补一段关于 X 的文献综述」「加一个对照实验」），不要凭空生成——文字层面能做的先做，需要真材料的写进 notes 提醒作者补充。
+- 指示无法用 find/replace 自动完成的（需新增整段、跨结构重排），写进 notes。
+{lang}
+{fmt}
+只通过 report_patch 返回 {{summary, edits, notes}}。"""
+
+
+def instruct(text: str, instruction: str, paper_type: str, output_lang: str, anthropic_api_key: str, model: str) -> Dict[str, Any]:
+    """Modify the paper per the author's explicit instruction, as patch-style edits
+    over the passed-in text (= the caller's current worktop draft). Never fabricates.
+    Returns the same shape as patch(): {patched, summary, applied, unapplied, notes}."""
+    text = (text or "").strip()
+    instruction = (instruction or "").strip()
+    if len(text) < _MIN_CHARS:
+        raise ValueError(f"正文太短，至少贴入约 {_MIN_CHARS} 字。")
+    if not instruction:
+        raise ValueError("请先写下你想怎么改。")
+    if len(text) > _MAX_CHARS:
+        text = text[:_MAX_CHARS]
+    type_label = PAPER_TYPES.get(paper_type, PAPER_TYPES["research"])
+    result = _run_tool(
+        anthropic_api_key, model, max_tokens=8000,
+        system=_INSTRUCT_SYSTEM.format(type=type_label, lang=_lang_instr(output_lang), fmt=_FMT),
+        user=f"作者的修改指示：\n\n{instruction}\n\n———\n\n论文全文：\n\n{text}",
+        tool=_PATCH_TOOL, fail_msg="按指示修改失败",
+    )
+    working, applied, unapplied = _apply_edits(text, _as_list(result.get("edits")))
+    return {
+        "patched": working,
+        "summary": result.get("summary") or "",
+        "applied": applied,
+        "unapplied": unapplied,
+        "notes": _as_list(result.get("notes")),
+    }

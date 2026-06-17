@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useRef, useState } from "react";
-import { ClipboardCheck, Upload, Loader2, Sparkles, FileSearch, Compass } from "lucide-react";
+import { ClipboardCheck, Upload, Loader2, Sparkles, FileSearch, Compass, Wand2 } from "lucide-react";
 import {
   extractFile,
   evaluateEssay,
@@ -9,6 +9,7 @@ import {
   docReview as callDocReview,
   probeEssay,
   integrateAnswers,
+  instructEssay,
 } from "@/lib/critique/api";
 import type {
   Evaluation,
@@ -25,6 +26,8 @@ const WRITING = "#5fb3a3"; // 写作层 — celadon (AI 可代改)
 const WRITING_DARK = "#3f8a7d";
 const SUBSTANCE = "#b07d2e"; // 实质层 — copper/amber (需作者补料)
 const SUBSTANCE_DARK = "#9a6a30";
+const INSTRUCT = "#5b73a8"; // 按需修改 — slate blue (用户下指令)
+const INSTRUCT_DARK = "#3f5a8a";
 
 // ── Paper type config ─────────────────────────────────────────────────────────
 
@@ -229,7 +232,7 @@ function PatchEditCard({ edit, variant = "applied" }: { edit: PatchEdit; variant
 // place — they stack onto the same text instead of producing two rival results.
 
 type WorkEntry = {
-  source: "writing" | "substance";
+  source: "writing" | "substance" | "instruction";
   summary: string;
   applied: PatchEdit[];
   unapplied: PatchEdit[];
@@ -300,6 +303,7 @@ function WorktopPanel({
 
   const writingEdits = worklog.filter((e) => e.source === "writing").flatMap((e) => e.applied);
   const substanceEdits = worklog.filter((e) => e.source === "substance").flatMap((e) => e.applied);
+  const instructEdits = worklog.filter((e) => e.source === "instruction").flatMap((e) => e.applied);
   const allUnapplied = worklog.flatMap((e) => e.unapplied);
   const allNotes = worklog.flatMap((e) => e.notes);
 
@@ -323,7 +327,10 @@ function WorktopPanel({
         {substanceEdits.length > 0 && (
           <WorkLogGroup title="实质融入" count={substanceEdits.length} accent={SUBSTANCE_DARK} edits={substanceEdits} />
         )}
-        {writingEdits.length === 0 && substanceEdits.length === 0 && (
+        {instructEdits.length > 0 && (
+          <WorkLogGroup title="按指示修改" count={instructEdits.length} accent={INSTRUCT_DARK} edits={instructEdits} />
+        )}
+        {writingEdits.length === 0 && substanceEdits.length === 0 && instructEdits.length === 0 && (
           <p className="text-xs text-ink/45">本轮没有可自动套用的精确编辑（见下方需手动建议）。</p>
         )}
       </div>
@@ -671,6 +678,80 @@ function DeepDivePanel({
   );
 }
 
+// ── Instruction-driven edit card (按我的要求改) ───────────────────────────────
+
+function InstructCard({
+  hasDraft,
+  busy,
+  instructing,
+  instructError,
+  onInstruct,
+}: {
+  hasDraft: boolean;
+  busy: boolean;
+  instructing: boolean;
+  instructError: string | null;
+  onInstruct: (instruction: string) => void;
+}) {
+  const [instruction, setInstruction] = useState("");
+  const canRun = !busy && instruction.trim().length > 0;
+
+  return (
+    <div className="rounded-[16px] p-4 space-y-3" style={{ background: "rgba(91,115,168,0.05)", border: "1px solid rgba(91,115,168,0.22)" }}>
+      <div className="flex items-center gap-2">
+        <span className="text-base font-semibold text-ink">按我的要求改</span>
+        <span
+          className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold"
+          style={{ background: "rgba(91,115,168,0.14)", color: INSTRUCT_DARK, border: "1px solid rgba(91,115,168,0.40)" }}
+        >
+          你说怎么改
+        </span>
+        <span className="ml-auto text-[11px]" style={{ color: INSTRUCT_DARK }}>
+          {hasDraft ? "改当前工作稿" : "基于原文 · 生成工作稿"}
+        </span>
+      </div>
+      <textarea
+        value={instruction}
+        onChange={(e) => setInstruction(e.target.value)}
+        placeholder="想怎么改直接说，例如：把第二节压缩一半 / 全文换成更学术的语气 / 强化结论的说服力 / 删掉引言里关于 X 的段落"
+        className="w-full resize-y rounded-[12px] border border-ink/12 bg-white/75 p-3 text-[13px] leading-6 text-ink placeholder:text-ink/35 focus:outline-none focus:ring-2"
+        style={{ minHeight: 72, ...({ "--tw-ring-color": "rgba(91,115,168,0.45)" } as React.CSSProperties) }}
+      />
+      <button
+        onClick={() => {
+          if (canRun) onInstruct(instruction);
+        }}
+        disabled={!canRun}
+        className="flex w-full items-center justify-center gap-2 rounded-[16px] py-3 text-sm font-semibold transition-all"
+        style={{
+          background: canRun ? "rgba(91,115,168,0.12)" : "rgba(20,33,61,0.08)",
+          color: canRun ? INSTRUCT_DARK : "rgba(20,33,61,0.30)",
+          border: canRun ? "1px solid rgba(91,115,168,0.40)" : "1px solid rgba(20,33,61,0.10)",
+          cursor: canRun ? "pointer" : "not-allowed",
+        }}
+      >
+        {instructing ? (
+          <>
+            <Loader2 size={15} className="animate-spin" />
+            按指示修改中…（约 20–40 秒）
+          </>
+        ) : (
+          <>
+            <Wand2 size={15} />
+            按我说的改
+          </>
+        )}
+      </button>
+      <p className="text-[11px] text-ink/40 leading-5">
+        改的是{hasDraft ? "当前工作稿（叠加在已有改动上）" : "原文（并生成工作稿第一版）"}；只做你要求的改动，绝不编造新事实 / 数据 / 引用。
+      </p>
+      {instructError && (
+        <p className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-xs text-red-600">{instructError}</p>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function CritiquePage() {
@@ -696,6 +777,10 @@ export default function CritiquePage() {
   const [improving, setImproving] = useState(false);
   const [improveError, setImproveError] = useState<string | null>(null);
 
+  // 按我的要求改 (instruction-driven edit) state
+  const [instructing, setInstructing] = useState(false);
+  const [instructError, setInstructError] = useState<string | null>(null);
+
   // Doc-review state
   const [docReviewing, setDocReviewing] = useState(false);
   const [docReviewError, setDocReviewError] = useState<string | null>(null);
@@ -712,7 +797,7 @@ export default function CritiquePage() {
 
   const charCount = text.length;
   const hasEnough = charCount >= 200;
-  const busy = evaluating || improving || docReviewing || probing || integrating;
+  const busy = evaluating || improving || docReviewing || probing || integrating || instructing;
   const canEvaluate = hasEnough && !busy;
   const canDocReview = hasEnough && !busy;
   const canImprove = hasEnough && !busy;
@@ -795,10 +880,29 @@ export default function CritiquePage() {
     }
   }
 
+  async function handleInstruct(instruction: string) {
+    if (busy || !hasEnough) return;
+    setInstructError(null);
+    setInstructing(true);
+    try {
+      const result = await instructEssay(draft ?? text, instruction, paperType, outputLang);
+      setDraft(result.patched);
+      setWorklog((w) => [
+        ...w,
+        { source: "instruction", summary: result.summary, applied: result.applied, unapplied: result.unapplied, notes: result.notes },
+      ]);
+    } catch (err) {
+      setInstructError(err instanceof Error ? err.message : "按指示修改失败");
+    } finally {
+      setInstructing(false);
+    }
+  }
+
   function resetWorktop() {
     setDraft(null);
     setWorklog([]);
     setImproveError(null);
+    setInstructError(null);
   }
 
   function resetDeepDive() {
@@ -1129,22 +1233,24 @@ export default function CritiquePage() {
 
           <div className="border-t border-ink/8" />
 
-          {/* Empty state */}
+          {/* 按我的要求改 — standalone lever, works without a diagnosis */}
+          <InstructCard
+            hasDraft={draft !== null}
+            busy={busy}
+            instructing={instructing}
+            instructError={instructError}
+            onInstruct={handleInstruct}
+          />
+
+          {/* No diagnosis yet — 改写作 / 深挖 need one */}
           {!result && (
-            <div className="flex min-h-[280px] flex-col items-center justify-center gap-4">
-              <p className="text-center text-sm text-ink/40 px-8 leading-7">
-                还没有诊断结果。
-                <br />
-                到「原文」标签贴入论文并诊断，结果会显示在这里。
-              </p>
-              <button
-                onClick={() => setActiveTab("source")}
-                className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
-                style={{ background: "rgba(95,179,163,0.12)", color: WRITING_DARK, border: "1px solid rgba(95,179,163,0.35)" }}
-              >
-                ← 去「原文」诊断
+            <p className="text-center text-[13px] text-ink/45 leading-6 px-4">
+              想让 AI 找问题（写作层 / 实质层）再用「一键改写作」「深挖实质」，到{" "}
+              <button onClick={() => setActiveTab("source")} className="underline font-medium" style={{ color: WRITING_DARK }}>
+                「原文」诊断
               </button>
-            </div>
+              ；只想直接下指令改，用上面的「按我的要求改」即可。
+            </p>
           )}
 
           {/* Diagnosis flow */}
@@ -1307,24 +1413,26 @@ export default function CritiquePage() {
                   </p>
                 )}
               </div>
+            </div>
+          )}
 
-              {/* ── 改进工作稿（写作 + 实质 汇总，唯一导出/采纳处）── */}
-              {draft !== null && (
-                <>
-                  <div className="border-t border-ink/8" />
-                  <WorktopPanel
-                    draft={draft}
-                    worklog={worklog}
-                    busy={busy}
-                    onAdopt={handleAdopt}
-                    onReset={resetWorktop}
-                  />
-                </>
-              )}
-
+          {/* ── 改进工作稿（写作 + 实质 + 按需 汇总，唯一导出/采纳处）── */}
+          {draft !== null && (
+            <>
               <div className="border-t border-ink/8" />
+              <WorktopPanel
+                draft={draft}
+                worklog={worklog}
+                busy={busy}
+                onAdopt={handleAdopt}
+                onReset={resetWorktop}
+              />
+            </>
+          )}
 
-              {/* ── 文档审阅 ── */}
+          <div className="border-t border-ink/8" />
+
+          {/* ── 文档审阅 ── */}
               <div className="space-y-4">
                 <LayerHeader
                   title="文档审阅"
@@ -1366,8 +1474,6 @@ export default function CritiquePage() {
 
                 {docReviewResult && <DocReviewPanel review={docReviewResult} />}
               </div>
-            </div>
-          )}
         </div>
       )}
     </div>

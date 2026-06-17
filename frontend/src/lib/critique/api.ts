@@ -337,6 +337,30 @@ export async function probeEssay(
 }
 
 /**
+ * 按需修改: modify the latest version (worktop draft if any, else original text)
+ * per the user's free-form instruction. Returns a Patch object. Never fabricates.
+ */
+export async function instructEssay(
+  text: string,
+  instruction: string,
+  paperType: string,
+  outputLang: string,
+): Promise<Patch> {
+  const res = await fetch(`${API_BASE}/critique/instruct`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, instruction, paper_type: paperType, output_lang: outputLang }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    await handleError(res, "按指示修改失败");
+  }
+
+  return normalizePatch(await res.json());
+}
+
+/**
  * 深挖实质 step 2: weave the author's answers into the paper. Returns a Patch object
  * (full updated text + applied/unapplied edits + notes). Never fabricates.
  */

@@ -66,6 +66,13 @@ class IntegrateRequest(BaseModel):
     answers: list[ProbeAnswer] = []
 
 
+class InstructRequest(BaseModel):
+    text: str
+    instruction: str = ""
+    paper_type: str = "research"
+    output_lang: str = "auto"
+
+
 @router.post("/extract")
 async def extract(file: UploadFile = File(...)):
     """Parse an uploaded .docx/.pdf/.md/.txt to plain text so the user can review
@@ -222,3 +229,27 @@ def integrate(payload: IntegrateRequest):
     except Exception:
         logger.exception("Critique integrate failed")
         raise HTTPException(status_code=500, detail="融入失败，请稍后重试。")
+
+
+@router.post("/instruct")
+def instruct(payload: InstructRequest):
+    """Instruction-driven edit: modify the passed-in text (the caller's current
+    worktop draft) per the author's explicit instruction, as patch-style edits.
+    Never fabricates. Returns the same shape as /patch."""
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="按需修改服务未配置。")
+    try:
+        return critic.instruct(
+            payload.text,
+            payload.instruction,
+            payload.paper_type,
+            payload.output_lang,
+            settings.anthropic_api_key,
+            settings.critique_model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception:
+        logger.exception("Critique instruct failed")
+        raise HTTPException(status_code=500, detail="按指示修改失败，请稍后重试。")
