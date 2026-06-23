@@ -21,6 +21,23 @@ export function ReadingNode({ content, onDone }: { content: ReadingContent; onDo
           ))}
         </div>
       </section>
+      {content.blocks.length > 0 && (
+        <section>
+          <h3 className="mb-2 text-sm uppercase opacity-60">Syllable blocks — tap to hear</h3>
+          <div className="flex flex-wrap gap-2">
+            {content.blocks.map((b) => (
+              <button
+                key={b.ko}
+                onClick={() => speak(b.ko)}
+                className="rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-xl hover:bg-white/10"
+              >
+                {b.ko}
+                <span className="ml-1 text-xs opacity-50">{b.romaji}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <section>
         <h3 className="mb-2 text-sm uppercase opacity-60">Read these words</h3>
         <div className="flex flex-wrap gap-3">
