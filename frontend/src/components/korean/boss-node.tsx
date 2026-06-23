@@ -1,11 +1,24 @@
 "use client";
+
 import { useRef, useState } from "react";
 import { koreanApi } from "@/lib/korean/api";
 import { useSpeech } from "@/lib/korean/use-speech";
 import { useTts } from "@/lib/korean/use-tts";
 import type { BossContent } from "@/lib/korean/types";
+import { PrimaryButton, Stars } from "./ui";
 
 type Msg = { role: "user" | "assistant"; content: string };
+const BOSS = "var(--kr-boss)";
+
+function TypingDots() {
+  return (
+    <div className="flex items-center gap-1 pl-1 text-ink/40">
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:0ms]" />
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
+    </div>
+  );
+}
 
 export function BossNode({
   slug,
@@ -61,28 +74,51 @@ export function BossNode({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-emerald-400/40 bg-emerald-400/5 p-3 text-sm">
-        🎯 Goal: {content.goal_en}
+      {/* goal */}
+      <div className="k-card flex items-center gap-3 rounded-2xl px-4 py-3" style={{ borderColor: "rgba(54,64,122,0.3)" }}>
+        <span className="font-kr-serif flex h-9 w-9 items-center justify-center rounded-full text-white" style={{ background: BOSS }}>
+          왕
+        </span>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em]" style={{ color: BOSS }}>
+            목표 · Goal
+          </p>
+          <p className="text-sm text-ink/80">{content.goal_en}</p>
+        </div>
       </div>
-      <div className="min-h-[180px] space-y-2 rounded-xl bg-white/5 p-3">
+
+      {/* chat */}
+      <div className="k-card min-h-[210px] space-y-2.5 rounded-2xl p-4">
+        {messages.length === 0 && !busy && (
+          <p className="font-kr text-sm text-ink/40">인사로 시작해 보세요 — say hello to begin.</p>
+        )}
         {messages.map((m, i) => (
-          <div key={i} className={m.role === "user" ? "text-right" : "text-left"}>
+          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <span
-              className={`inline-block rounded-xl px-3 py-1.5 text-sm ${
-                m.role === "user" ? "bg-emerald-400/20" : "bg-white/10"
+              className={`max-w-[82%] rounded-2xl px-3.5 py-2 text-[15px] ${
+                m.role === "user" ? "rounded-br-md text-white" : "k-card rounded-bl-md font-kr-serif text-ink"
               }`}
+              style={m.role === "user" ? { background: "linear-gradient(180deg,var(--celadon-500),var(--celadon-600))" } : undefined}
             >
               {m.content}
             </span>
           </div>
         ))}
-        {busy && <div className="text-xs opacity-50">…</div>}
+        {busy && <TypingDots />}
       </div>
 
       {won ? (
-        <button onClick={() => onDone(3)} className="rounded-lg bg-emerald-500/80 px-5 py-2 font-medium hover:bg-emerald-500">
-          Goal cleared — claim ★★★
-        </button>
+        <div className="k-card k-pop rounded-2xl p-5 text-center">
+          <p className="font-kr-serif text-xl text-ink">통과! Goal cleared</p>
+          <div className="mt-2 flex justify-center">
+            <Stars value={3} />
+          </div>
+          <div className="mt-4">
+            <PrimaryButton tone="gold" onClick={() => onDone(3)}>
+              별 받기 · Claim ★★★
+            </PrimaryButton>
+          </div>
+        </div>
       ) : (
         <div className="flex gap-2">
           <form
@@ -96,18 +132,20 @@ export function BossNode({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={busy}
-              className="flex-1 rounded-lg border border-white/15 bg-transparent px-3 py-2"
+              className="font-kr-serif flex-1 rounded-2xl border border-ink/12 bg-white/70 px-4 py-2.5 text-ink outline-none focus:border-[var(--celadon-500)] disabled:opacity-60"
               placeholder="한국어로 말해보세요…"
             />
-            <button disabled={busy} className="rounded-lg bg-emerald-400/30 px-4 py-2">
-              Send
-            </button>
+            <PrimaryButton type="submit" disabled={busy}>
+              보내기
+            </PrimaryButton>
           </form>
           {supported && (
             <button
               onClick={onMic}
               disabled={busy}
-              className={`rounded-lg px-4 py-2 ${listening ? "bg-amber-500/40" : "bg-amber-500/20 hover:bg-amber-500/30"}`}
+              aria-label="speak"
+              className="k-press rounded-2xl px-4 text-lg text-white disabled:opacity-50"
+              style={{ background: listening ? "#4a57a0" : BOSS }}
             >
               🎤
             </button>

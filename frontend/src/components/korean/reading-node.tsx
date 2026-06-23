@@ -1,57 +1,64 @@
 "use client";
+
 import { useTts } from "@/lib/korean/use-tts";
 import type { ReadingContent } from "@/lib/korean/types";
+import { PrimaryButton, SectionLabel, SpeakTile } from "./ui";
+
+const A = "var(--kr-reading)";
 
 export function ReadingNode({ content, onDone }: { content: ReadingContent; onDone: (stars: number) => void }) {
   const { speak } = useTts();
+
   return (
-    <div className="space-y-6">
-      <section>
-        <h3 className="mb-2 text-sm uppercase opacity-60">Letters — tap to hear</h3>
-        <div className="flex flex-wrap gap-2">
+    <div className="space-y-7">
+      <section className="space-y-3">
+        <SectionLabel>자모 · Letters — tap to hear</SectionLabel>
+        <div className="flex flex-wrap gap-2.5">
           {content.letters.map((l) => (
-            <button
-              key={l.jamo}
-              onClick={() => speak(l.jamo)}
-              className="rounded-lg border border-white/15 px-4 py-3 text-2xl hover:bg-white/10"
-            >
-              {l.jamo}
-              <span className="ml-1 text-xs opacity-50">{l.sound}</span>
-            </button>
+            <SpeakTile
+              key={l.audio_key}
+              ko={l.jamo}
+              sub={l.sound}
+              onSpeak={() => speak(l.jamo)}
+              accent={A}
+              className="min-w-[80px]"
+              koClassName="text-3xl"
+            />
           ))}
         </div>
       </section>
+
       {content.blocks.length > 0 && (
-        <section>
-          <h3 className="mb-2 text-sm uppercase opacity-60">Syllable blocks — tap to hear</h3>
-          <div className="flex flex-wrap gap-2">
+        <section className="space-y-3">
+          <SectionLabel>글자 만들기 · Build syllable blocks</SectionLabel>
+          <div className="flex flex-wrap gap-2.5">
             {content.blocks.map((b) => (
-              <button
+              <SpeakTile
                 key={b.ko}
-                onClick={() => speak(b.ko)}
-                className="rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-xl hover:bg-white/10"
-              >
-                {b.ko}
-                <span className="ml-1 text-xs opacity-50">{b.romaji}</span>
-              </button>
+                ko={b.ko}
+                sub={b.romaji}
+                onSpeak={() => speak(b.ko)}
+                accent={A}
+                className="min-w-[88px]"
+                koClassName="text-3xl"
+              />
             ))}
           </div>
         </section>
       )}
-      <section>
-        <h3 className="mb-2 text-sm uppercase opacity-60">Read these words</h3>
-        <div className="flex flex-wrap gap-3">
+
+      <section className="space-y-3">
+        <SectionLabel>읽어 보기 · Read these words</SectionLabel>
+        <div className="flex flex-wrap gap-2.5">
           {content.words.map((w) => (
-            <button key={w.ko} onClick={() => speak(w.ko)} className="rounded-lg bg-white/5 px-4 py-2 hover:bg-white/10">
-              <span className="text-lg">{w.ko}</span>
-              <span className="ml-2 text-xs opacity-60">{w.en}</span>
-            </button>
+            <SpeakTile key={w.ko} ko={w.ko} sub={w.en} onSpeak={() => speak(w.ko)} accent={A} koClassName="text-2xl" />
           ))}
         </div>
       </section>
-      <button onClick={() => onDone(3)} className="rounded-lg bg-emerald-500/80 px-5 py-2 font-medium hover:bg-emerald-500">
-        I can read these ✓
-      </button>
+
+      <div className="pt-1">
+        <PrimaryButton onClick={() => onDone(3)}>다 읽었어요 · I can read these ✓</PrimaryButton>
+      </div>
     </div>
   );
 }

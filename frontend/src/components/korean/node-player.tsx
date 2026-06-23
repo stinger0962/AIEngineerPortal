@@ -1,6 +1,7 @@
 "use client";
+
 import { useRouter } from "next/navigation";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { koreanApi } from "@/lib/korean/api";
 import type {
   BossContent,
@@ -9,6 +10,8 @@ import type {
   ReadingContent,
   SceneContent,
 } from "@/lib/korean/types";
+import { KIND_THEME } from "@/lib/korean/theme";
+import { KindSeal } from "./ui";
 import { ReadingNode } from "./reading-node";
 import { SceneNode } from "./scene-node";
 import { DrillNode } from "./drill-node";
@@ -29,20 +32,44 @@ export function NodePlayer({ slug }: { slug: string }) {
     },
   });
 
-  if (isLoading || !node) return <div className="p-8 opacity-60">Loading…</div>;
-
   const onDone = (stars: number) => complete.mutate(stars);
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
-      <button className="mb-4 text-sm opacity-60 hover:opacity-100" onClick={() => router.push("/korean")}>
-        ← Map
-      </button>
-      <h1 className="mb-4 text-xl font-semibold">{node.title}</h1>
-      {node.kind === "reading" && <ReadingNode content={node.content_json as ReadingContent} onDone={onDone} />}
-      {node.kind === "scene" && <SceneNode content={node.content_json as SceneContent} onDone={onDone} />}
-      {node.kind === "drill" && <DrillNode content={node.content_json as DrillContent} onDone={onDone} />}
-      {node.kind === "boss" && <BossNode slug={slug} content={node.content_json as BossContent} onDone={onDone} />}
+    <div className="k-hanji k-grain min-h-screen">
+      <div className="relative mx-auto max-w-2xl px-5 py-9 sm:px-8">
+        <button
+          className="k-press font-kr mb-6 inline-flex items-center gap-1.5 rounded-full border border-ink/12 bg-white/55 px-3 py-1.5 text-xs text-ink/55 hover:text-ink"
+          onClick={() => router.push("/korean")}
+        >
+          <span aria-hidden>←</span> 지도 · Map
+        </button>
+
+        {isLoading || !node ? (
+          <p className="font-kr text-sm text-ink/40">불러오는 중…</p>
+        ) : (
+          <>
+            <header className="k-rise mb-7 flex items-center gap-4">
+              <KindSeal kind={node.kind} size={52} />
+              <div>
+                <p
+                  className="text-[11px] font-semibold uppercase tracking-[0.22em]"
+                  style={{ color: KIND_THEME[node.kind].accent }}
+                >
+                  {KIND_THEME[node.kind].label}
+                </p>
+                <h1 className="font-kr-serif text-2xl text-ink sm:text-3xl">{node.title}</h1>
+              </div>
+            </header>
+
+            <div className="k-rise" style={{ animationDelay: "80ms" }}>
+              {node.kind === "reading" && <ReadingNode content={node.content_json as ReadingContent} onDone={onDone} />}
+              {node.kind === "scene" && <SceneNode content={node.content_json as SceneContent} onDone={onDone} />}
+              {node.kind === "drill" && <DrillNode content={node.content_json as DrillContent} onDone={onDone} />}
+              {node.kind === "boss" && <BossNode slug={slug} content={node.content_json as BossContent} onDone={onDone} />}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
