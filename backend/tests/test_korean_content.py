@@ -40,3 +40,15 @@ def test_all_seeded_content_is_valid():
 def test_regions_cover_0_through_2():
     slugs = {r["slug"] for r in REGIONS}
     assert {"hangul-island", "arrival", "cafe-food"} <= slugs
+
+
+def test_region_node_counts():
+    by_slug = {r["slug"]: r for r in REGIONS}
+    assert len(by_slug["hangul-island"]["nodes"]) == 5
+    assert len(by_slug["arrival"]["nodes"]) == 7
+    assert len(by_slug["cafe-food"]["nodes"]) == 7
+
+
+def test_node_slugs_globally_unique():
+    slugs = [n["slug"] for r in REGIONS for n in r["nodes"]]
+    assert len(slugs) == len(set(slugs))
