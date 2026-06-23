@@ -407,6 +407,9 @@ class DubVideo(Base):
 
 class KoreanRegion(Base):
     __tablename__ = "korean_regions"
+    __table_args__ = (
+        Index("ix_korean_regions_slug", "slug", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     slug: Mapped[str] = mapped_column(String(120), unique=True)

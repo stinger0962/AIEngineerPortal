@@ -90,6 +90,12 @@ INDEX_PATCHES = [
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_knowledge_articles_slug ON knowledge_articles (slug)",
     "CREATE INDEX IF NOT EXISTS ix_memory_cards_category ON memory_cards (category)",
     "CREATE INDEX IF NOT EXISTS ix_memory_cards_next_review ON memory_cards (next_review_at)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_korean_regions_slug ON korean_regions (slug)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_korean_nodes_slug ON korean_nodes (slug)",
+    "CREATE INDEX IF NOT EXISTS ix_korean_nodes_region ON korean_nodes (region_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_korean_progress_user_node ON korean_progress (user_id, node_id)",
+    "CREATE INDEX IF NOT EXISTS ix_korean_conv_user_node ON korean_conversations (user_id, node_id)",
+    "CREATE INDEX IF NOT EXISTS ix_korean_msg_conv ON korean_messages (conversation_id)",
 ]
 
 
