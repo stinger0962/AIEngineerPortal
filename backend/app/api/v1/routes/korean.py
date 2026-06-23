@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
@@ -101,7 +100,14 @@ def boss_turn(slug: str, payload: BossTurn, db: Session = Depends(get_db)):
     conv_id = payload.conversation_id
     if conv_id is None:
         conv = KoreanConversation(user_id=user_id, node_id=node.id)
-        db.add(conv); db.commit(); db.refresh(conv); conv_id = conv.id
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+        conv_id = conv.id
+    else:
+        conv = db.get(KoreanConversation, conv_id)
+        if conv is None or conv.node_id != node.id or conv.user_id != user_id:
+            raise HTTPException(404, "Conversation not found")
     db.add(KoreanMessage(conversation_id=conv_id, role="user", content=payload.message))
     db.commit()
 
@@ -130,6 +136,7 @@ def boss_turn(slug: str, payload: BossTurn, db: Session = Depends(get_db)):
         oracle = KoreanOracle(client=svc.client, model=svc.model)
         result = oracle.run(boss=boss, messages=history)
         if result is None:
+            logger.warning("korean boss oracle returned None for node %s", slug)
             yield {"data": json.dumps({"type": "error"}, ensure_ascii=False)}
             return
         reply, goal_met = result["response"], result["goal_met"]
