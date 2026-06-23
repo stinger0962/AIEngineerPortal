@@ -42,7 +42,7 @@ const DOMAINS: Domain[] = [
     char: "学",
     enLabel: "Grow",
     verticalName: "学 · 工程成长",
-    index: "学 · 练 · 复习 · 面试 · 求职",
+    index: "学 · 练 · 复习 · 面试 · 求职 · 한국어",
     accent: "#5fb3a3",
     accentLight: "#9fe0d2",
     nameColor: "#cdbd8e",
