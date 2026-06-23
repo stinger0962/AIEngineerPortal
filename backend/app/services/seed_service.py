@@ -9,6 +9,8 @@ from app.models import (
     InterviewQuestion,
     JobPosting,
     KnowledgeArticle,
+    KoreanNode,
+    KoreanRegion,
     LearningPath,
     Lesson,
     LessonCompletion,
@@ -31,6 +33,7 @@ from app.seed.data import (
     seed_memory_cards,
 )
 from app.services.jobs_service import ensure_seed_jobs
+from app.services.korean.content import REGIONS as KOREAN_REGIONS
 from app.services.news_service import ensure_seed_news
 
 
@@ -53,6 +56,7 @@ def seed_database(db: Session) -> None:
     ensure_seed_news(db)
     ensure_seed_jobs(db)
     seed_memory_cards(db)
+    sync_korean_content(db)
 
     snapshot = db.scalar(
         select(ProgressSnapshot).where(ProgressSnapshot.user_id == user.id).order_by(ProgressSnapshot.id.asc())
@@ -196,6 +200,29 @@ def sync_interview_questions(db: Session) -> None:
         question.difficulty = payload["difficulty"]
         question.answer_outline_md = payload["answer_outline_md"]
         question.tags_json = payload["tags_json"]
+
+
+def sync_korean_content(db: Session) -> None:
+    for r in KOREAN_REGIONS:
+        region = db.scalar(select(KoreanRegion).where(KoreanRegion.slug == r["slug"]))
+        if not region:
+            region = KoreanRegion(
+                slug=r["slug"], title=r["title"], theme=r.get("theme", ""),
+                order_index=r["order_index"], is_active=True,
+            )
+            db.add(region)
+            db.flush()
+        for n in r["nodes"]:
+            node = db.scalar(select(KoreanNode).where(KoreanNode.slug == n["slug"]))
+            if not node:
+                node = KoreanNode(region_id=region.id, slug=n["slug"])
+                db.add(node)
+            node.region_id = region.id
+            node.kind = n["kind"]
+            node.title = n["title"]
+            node.order_index = n["order_index"]
+            node.content_json = n["content_json"]
+    db.commit()
 
 
 def seed_project_templates(db: Session) -> None:
