@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Brain, Briefcase, ClipboardCheck, Compass, FileText, GraduationCap, Home, Menu, MessageSquare, Search, Settings, SquareTerminal, BookOpen, X } from "lucide-react";
+import { Brain, Briefcase, ClipboardCheck, Compass, FileText, GraduationCap, Home, Languages, Menu, MessageSquare, Search, Settings, SquareTerminal, BookOpen, X } from "lucide-react";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 type NavGroup = { key: string; label: string; accent: string; items: NavItem[] };
@@ -25,6 +25,7 @@ const groups: NavGroup[] = [
     items: [
       { href: "/grow", label: "学域总览", icon: Compass },
       { href: "/learn", label: "Learn", icon: GraduationCap },
+      { href: "/korean", label: "한국어 Korean", icon: Languages },
       { href: "/practice", label: "Practice", icon: SquareTerminal },
       { href: "/review", label: "Review", icon: Brain },
       { href: "/critique", label: "Critique", icon: ClipboardCheck },
