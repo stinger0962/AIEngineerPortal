@@ -50,7 +50,7 @@ def test_complete_node_unlocks_next_and_seeds_cards():
         db.close()
 
 
-def test_reset_progress_clears_only_this_user():
+def test_reset_clears_this_users_progress_and_korean_cards():
     db = _setup()
     try:
         uid = db.scalar(select(User.id))
@@ -60,5 +60,31 @@ def test_reset_progress_clears_only_this_user():
         assert db.scalars(select(KoreanProgress).where(KoreanProgress.user_id == uid)).all() == []
         assert db.scalars(select(MemoryCard).where(MemoryCard.category == "korean")).all() == []
         assert ksvc.get_map(db, uid)[0]["nodes"][0]["status"] == "unlocked"
+    finally:
+        db.close()
+
+
+def test_reset_keeps_other_users_progress():
+    from app.models import KoreanNode, User
+
+    db = _setup()
+    try:
+        uid = db.scalar(select(User.id))
+        other = User(name="Other", email="other@example.com", target_role="learner")
+        db.add(other)
+        db.flush()
+        node_id = db.scalar(select(KoreanNode.id))
+        db.add(KoreanProgress(user_id=other.id, node_id=node_id, status="completed", stars=2))
+        db.commit()
+
+        first_slug = ksvc.get_map(db, uid)[0]["nodes"][0]["slug"]
+        ksvc.complete_node(db, uid, first_slug, score=1.0, stars=3)
+        ksvc.reset_progress(db, uid)
+
+        # The other user's progress must survive a reset scoped to uid.
+        survivors = db.scalars(
+            select(KoreanProgress).where(KoreanProgress.user_id == other.id)
+        ).all()
+        assert len(survivors) == 1
     finally:
         db.close()
