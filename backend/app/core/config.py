@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # model just here, independent of the shared ai_model (keeps high-frequency tools
     # like dub translation / podcast on cheaper Sonnet).
     critique_model: str = "claude-opus-4-8"
+    # Korean course: cheap conversational model for the roleplay boss + a Korean TTS voice.
+    korean_model: str = "claude-sonnet-4-6"
+    minimax_korean_voice_id: str = "Korean_SweetGirl"  # override via env MINIMAX_KOREAN_VOICE_ID
     ai_daily_token_budget: int = 100_000
 
     @field_validator("ai_model")
