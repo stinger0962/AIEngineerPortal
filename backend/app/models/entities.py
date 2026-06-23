@@ -403,3 +403,66 @@ class DubVideo(Base):
     video_path: Mapped[str] = mapped_column(Text, nullable=False)
     duration_secs: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class KoreanRegion(Base):
+    __tablename__ = "korean_regions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(120), unique=True)
+    title: Mapped[str] = mapped_column(String(200))
+    theme: Mapped[str] = mapped_column(String(120), default="")
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class KoreanNode(Base):
+    __tablename__ = "korean_nodes"
+    __table_args__ = (
+        Index("ix_korean_nodes_slug", "slug", unique=True),
+        Index("ix_korean_nodes_region", "region_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    region_id: Mapped[int] = mapped_column(ForeignKey("korean_regions.id"))
+    slug: Mapped[str] = mapped_column(String(160), unique=True)
+    kind: Mapped[str] = mapped_column(String(20))  # reading | scene | drill | boss
+    title: Mapped[str] = mapped_column(String(200))
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    content_json: Mapped[Dict] = mapped_column(JSON, default=dict)
+
+
+class KoreanProgress(Base):
+    __tablename__ = "korean_progress"
+    __table_args__ = (
+        Index("ix_korean_progress_user_node", "user_id", "node_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    node_id: Mapped[int] = mapped_column(ForeignKey("korean_nodes.id"))
+    status: Mapped[str] = mapped_column(String(20), default="locked")  # locked|unlocked|completed
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    stars: Mapped[int] = mapped_column(Integer, default=0)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class KoreanConversation(Base):
+    __tablename__ = "korean_conversations"
+    __table_args__ = (Index("ix_korean_conv_user_node", "user_id", "node_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    node_id: Mapped[int] = mapped_column(ForeignKey("korean_nodes.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class KoreanMessage(Base):
+    __tablename__ = "korean_messages"
+    __table_args__ = (Index("ix_korean_msg_conv", "conversation_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)  # user | assistant
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
