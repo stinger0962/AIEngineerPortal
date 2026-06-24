@@ -187,13 +187,24 @@ pre {
 .font-kr-serif { font-family: var(--kr-serif); }
 .font-kr { font-family: var(--kr-sans); }
 
-/* Hanji paper surface: layered celadon/ember haze + warm paper, faint grain. */
+/* Hanji paper surface: layered celadon/persimmon/gold glows on warm paper. */
 .k-hanji {
   background:
-    radial-gradient(120% 70% at 0% -5%, rgba(95, 179, 163, 0.12), transparent 55%),
-    radial-gradient(120% 80% at 100% -10%, rgba(247, 127, 0, 0.05), transparent 50%),
-    linear-gradient(180deg, #f8f3e8 0%, #f2ebdb 100%);
+    radial-gradient(85% 55% at 10% -6%, rgba(95, 179, 163, 0.26), transparent 55%),
+    radial-gradient(70% 55% at 102% -4%, rgba(247, 170, 80, 0.20), transparent 55%),
+    radial-gradient(80% 70% at 50% 118%, rgba(185, 83, 43, 0.10), transparent 60%),
+    linear-gradient(180deg, #fbf6ec 0%, #f2e9d6 100%);
   position: relative;
+}
+/* 전통 문양 — faint seigaiha (청해파) wave motif tiled over the paper. */
+.k-pattern::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='28' viewBox='0 0 56 28'%3E%3Cg fill='none' stroke='%235fb3a3' stroke-width='1.1' stroke-opacity='0.16'%3E%3Cpath d='M0 28c0-7.7 6.3-14 14-14s14 6.3 14 14M28 28c0-7.7 6.3-14 14-14s14 6.3 14 14'/%3E%3Cpath d='M-14 28c0-7.7 6.3-14 14-14s14 6.3 14 14M14 28c0-7.7 6.3-14 14-14s14 6.3 14 14M42 28c0-7.7 6.3-14 14-14s14 6.3 14 14'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 56px 28px;
 }
 .k-grain::after {
   content: "";
@@ -231,3 +242,54 @@ pre {
 /* Tactile press for speakable tiles */
 .k-press { transition: transform 0.12s ease, box-shadow 0.2s ease, border-color 0.2s ease; }
 .k-press:active { transform: translateY(1px) scale(0.985); }
+
+/* ---- playful glaze tiles (colorful, glossy, springy) ---- */
+.k-tile {
+  position: relative;
+  border-radius: 18px;
+  border: 1.5px solid var(--tile-edge, rgba(63, 143, 128, 0.35));
+  background: var(--tile-bg, linear-gradient(160deg, #ffffff 0%, #ecf7f1 55%, #d9ede4 100%));
+  box-shadow: 0 12px 22px -14px var(--tile-shadow, rgba(47, 111, 100, 0.55)), inset 0 1.5px 0 rgba(255, 255, 255, 0.85);
+  transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease, filter 0.2s ease;
+  overflow: hidden;
+}
+.k-tile::before {
+  /* glossy top sheen */
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 42%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), transparent);
+  pointer-events: none;
+}
+.k-tile:hover { transform: translateY(-3px) rotate(-1deg); box-shadow: 0 18px 30px -14px var(--tile-shadow, rgba(47, 111, 100, 0.6)); filter: saturate(1.08); }
+.k-tile:active { transform: translateY(0) scale(0.96); }
+
+.k-glaze-celadon { --tile-bg: linear-gradient(160deg, #ffffff, #e6f4ee 55%, #cfe9df); --tile-edge: rgba(47, 111, 100, 0.4); --tile-shadow: rgba(47, 111, 100, 0.55); }
+.k-glaze-warm { --tile-bg: linear-gradient(160deg, #fffaf3, #fdeede 55%, #f7dcc2); --tile-edge: rgba(176, 123, 34, 0.4); --tile-shadow: rgba(176, 123, 34, 0.5); }
+.k-glaze-clay { --tile-bg: linear-gradient(160deg, #fff7f3, #fbe6dc 55%, #f3cdbb); --tile-edge: rgba(185, 83, 43, 0.4); --tile-shadow: rgba(185, 83, 43, 0.5); }
+
+/* ---- richer motion ---- */
+@keyframes k-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes k-shine { 0% { transform: translateX(-130%) skewX(-18deg); } 55%, 100% { transform: translateX(260%) skewX(-18deg); } }
+@keyframes k-bounce-in { 0% { opacity: 0; transform: translateY(20px) scale(0.94); } 60% { transform: translateY(-4px) scale(1.015); } 100% { opacity: 1; transform: none; } }
+@keyframes k-poptile { 0% { transform: scale(1); } 40% { transform: scale(1.14) rotate(-2deg); } 100% { transform: scale(1); } }
+@keyframes k-blink { 0%, 92%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.12); } }
+.k-bob { animation: k-bob 3.4s ease-in-out infinite; }
+.k-bounce-in { animation: k-bounce-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.k-poptile { animation: k-poptile 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
+.k-shine-sweep { position: relative; overflow: hidden; }
+.k-shine-sweep::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  transform: translateX(-130%) skewX(-18deg);
+}
+.k-shine-sweep:hover::after { animation: k-shine 0.9s ease; }
+.k-blink { transform-origin: center; animation: k-blink 5s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .k-bob, .k-bounce-in, .k-poptile, .k-blink { animation: none; }
+  .k-shine-sweep:hover::after { animation: none; }
+}

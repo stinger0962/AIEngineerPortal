@@ -6,6 +6,7 @@ import { useSpeech } from "@/lib/korean/use-speech";
 import { useTts } from "@/lib/korean/use-tts";
 import type { BossContent } from "@/lib/korean/types";
 import { PrimaryButton, Stars } from "./ui";
+import { Mascot } from "./mascot";
 
 type Msg = { role: "user" | "assistant"; content: string };
 const BOSS = "var(--kr-boss)";
@@ -109,6 +110,9 @@ export function BossNode({
 
       {won ? (
         <div className="k-card k-pop rounded-2xl p-5 text-center">
+          <div className="mb-1 flex justify-center">
+            <Mascot size={84} />
+          </div>
           <p className="font-kr-serif text-xl text-ink">통과! Goal cleared</p>
           <div className="mt-2 flex justify-center">
             <Stars value={3} />

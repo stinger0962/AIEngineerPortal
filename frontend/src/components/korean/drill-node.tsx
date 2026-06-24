@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTts } from "@/lib/korean/use-tts";
 import type { DrillContent, DrillItem } from "@/lib/korean/types";
 import { PrimaryButton, SectionLabel, Stars } from "./ui";
+import { Mascot } from "./mascot";
 
 const A = "var(--kr-drill)";
 
@@ -37,6 +38,9 @@ export function DrillNode({ content, onDone }: { content: DrillContent; onDone: 
     const stars = wrong === 0 ? 3 : wrong <= 2 ? 2 : 1;
     return (
       <div className="k-card k-pop rounded-3xl p-7 text-center">
+        <div className="mb-1 flex justify-center">
+          <Mascot size={88} />
+        </div>
         <p className="font-kr-serif text-2xl text-ink">잘했어요!</p>
         <p className="mt-1 text-sm text-ink/55">Drill complete</p>
         <div className="mt-3 flex justify-center">
