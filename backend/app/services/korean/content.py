@@ -21,7 +21,7 @@ def validate_node_content(kind: str, content: dict[str, Any]) -> None:
         raise ValueError(f"{kind} node missing fields: {sorted(missing)}")
     if kind == "drill":
         for item in content["items"]:
-            if item.get("type") not in {"match", "listen", "fill", "type"}:
+            if item.get("type") not in {"match", "listen"}:
                 raise ValueError(f"drill item has invalid type: {item.get('type')!r}")
 
 
@@ -261,14 +261,16 @@ REGIONS: list[dict[str, Any]] = [
                             "choices": ["감사합니다", "안녕하세요", "아니요"],
                         },
                         {
-                            "type": "fill",
-                            "prompt": "Say 'no' in Korean: ___",
+                            "type": "listen",
+                            "audio_key": "d_no",
                             "answer": "아니요",
+                            "choices": ["아니요", "안녕하세요", "감사합니다"],
                         },
                         {
-                            "type": "type",
-                            "prompt_en": "Type the Korean for 'thank you'.",
-                            "answer": "감사합니다",
+                            "type": "match",
+                            "ko": "감사합니다",
+                            "answer": "thank you",
+                            "choices": ["thank you", "hello", "sorry"],
                         },
                     ]
                 },
@@ -347,14 +349,16 @@ REGIONS: list[dict[str, Any]] = [
                             "choices": ["여행이요", "여권이요", "관광이요"],
                         },
                         {
-                            "type": "fill",
-                            "prompt": "Purpose of visit: travel → ___이요",
-                            "answer": "여행",
+                            "type": "match",
+                            "ko": "여행",
+                            "answer": "travel",
+                            "choices": ["travel", "passport", "sightseeing"],
                         },
                         {
-                            "type": "type",
-                            "prompt_en": "Type the Korean for 'passport'.",
+                            "type": "listen",
+                            "audio_key": "d_passport",
                             "answer": "여권",
+                            "choices": ["여권", "여행", "관광"],
                         },
                     ]
                 },
@@ -434,14 +438,16 @@ REGIONS: list[dict[str, Any]] = [
                             "choices": ["어디 가세요?", "얼마예요?", "여권이요"],
                         },
                         {
-                            "type": "fill",
-                            "prompt": "To the hotel: 호텔___",
-                            "answer": "이요",
+                            "type": "listen",
+                            "audio_key": "d_hotel",
+                            "answer": "호텔이요",
+                            "choices": ["호텔이요", "시내요", "얼마예요?"],
                         },
                         {
-                            "type": "type",
-                            "prompt_en": "Type the Korean for 'downtown'.",
-                            "answer": "시내",
+                            "type": "match",
+                            "ko": "시내",
+                            "answer": "downtown",
+                            "choices": ["downtown", "hotel", "how much?"],
                         },
                     ]
                 },
@@ -556,14 +562,16 @@ REGIONS: list[dict[str, Any]] = [
                             "choices": ["뭐 드릴까요?", "어서 오세요!", "얼마예요?"],
                         },
                         {
-                            "type": "fill",
-                            "prompt": "An americano, please: 아메리카노 ___",
+                            "type": "listen",
+                            "audio_key": "d_juseyo",
                             "answer": "주세요",
+                            "choices": ["주세요", "뭐 드릴까요?", "얼마예요?"],
                         },
                         {
-                            "type": "type",
-                            "prompt_en": "Type the Korean for 'americano'.",
-                            "answer": "아메리카노",
+                            "type": "match",
+                            "ko": "아메리카노",
+                            "answer": "americano",
+                            "choices": ["americano", "please give", "what"],
                         },
                     ]
                 },
@@ -644,14 +652,16 @@ REGIONS: list[dict[str, Any]] = [
                             "choices": ["두 잔 주세요", "한 잔 주세요", "얼마예요?"],
                         },
                         {
-                            "type": "fill",
-                            "prompt": "One cup, please: ___ 잔 주세요",
-                            "answer": "한",
+                            "type": "match",
+                            "ko": "한 잔",
+                            "answer": "one cup",
+                            "choices": ["one cup", "two cups", "cup (counter)"],
                         },
                         {
-                            "type": "type",
-                            "prompt_en": "Type the native Korean number for 'two'.",
+                            "type": "listen",
+                            "audio_key": "d_dul",
                             "answer": "둘",
+                            "choices": ["둘", "하나", "잔"],
                         },
                     ]
                 },
@@ -732,14 +742,16 @@ REGIONS: list[dict[str, Any]] = [
                             "choices": ["카드요", "현금이요", "얼마예요?"],
                         },
                         {
-                            "type": "fill",
-                            "prompt": "How much is it? → ___",
-                            "answer": "얼마예요?",
+                            "type": "match",
+                            "ko": "얼마예요?",
+                            "answer": "how much?",
+                            "choices": ["how much?", "by card", "by cash"],
                         },
                         {
-                            "type": "type",
-                            "prompt_en": "Type the Korean for 'card'.",
+                            "type": "listen",
+                            "audio_key": "d_card",
                             "answer": "카드",
+                            "choices": ["카드", "현금", "원"],
                         },
                     ]
                 },

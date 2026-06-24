@@ -52,3 +52,11 @@ def test_region_node_counts():
 def test_node_slugs_globally_unique():
     slugs = [n["slug"] for r in REGIONS for n in r["nodes"]]
     assert len(slugs) == len(set(slugs))
+
+
+def test_drills_are_tap_only_no_writing():
+    for region in REGIONS:
+        for node in region["nodes"]:
+            if node["kind"] == "drill":
+                for item in node["content_json"]["items"]:
+                    assert item["type"] in {"match", "listen"}, f"writing-style drill item: {item}"
