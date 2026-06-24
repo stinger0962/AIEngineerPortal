@@ -38,11 +38,10 @@ export type SceneContent = {
   new_vocab: { ko: string; en: string; romaji: string }[];
 };
 
+// Drills are tap-only (no writing): match the meaning, or listen and pick.
 export type DrillItem =
   | { type: "match"; ko: string; answer: string; choices: string[] }
-  | { type: "listen"; audio_key: string; answer: string; choices: string[] }
-  | { type: "fill"; prompt: string; answer: string }
-  | { type: "type"; prompt_en: string; answer: string };
+  | { type: "listen"; audio_key: string; answer: string; choices: string[] };
 export type DrillContent = { items: DrillItem[] };
 
 export type BossContent = {
