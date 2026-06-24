@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
 import subprocess
@@ -12,6 +13,25 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from pydub import AudioSegment
+
+logger = logging.getLogger(__name__)
+
+# Known-good narration voice used as a safety net if a chosen voice is rejected.
+_DUB_FALLBACK_VOICE = "Chinese (Mandarin)_Radio_Host"
+
+
+def _resolve_dub_voice(voice_id: str, mm_key: str, mm_group: str, mm_model: str, mm_base: str) -> str:
+    """Probe the chosen narration voice once (tiny TTS). If MiniMax rejects it
+    (unknown/invalid id), fall back to a known-good voice so a bad selection never
+    fails the whole dub job. Negligible next to the full transcribe→dub pipeline."""
+    from app.services.podcast_service import _tts_bytes
+
+    try:
+        _tts_bytes("你好", voice_id, mm_key, mm_group, mm_model, mm_base)
+        return voice_id
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("dub: voice %r rejected (%s); falling back to %r", voice_id, exc, _DUB_FALLBACK_VOICE)
+        return _DUB_FALLBACK_VOICE
 
 _TTS_CONCURRENCY = 5   # fire N MiniMax TTS calls at once (I/O-bound) — ~5x faster than sequential
 _TTS_RETRIES = 3       # per-segment retry (parallel bursts can trip transient 429s)
@@ -234,6 +254,7 @@ def build_voice_track(
     from app.services.podcast_service import _tts_bytes
 
     base_speed = compute_base_speed(zh_texts, video_ms)
+    voice_id = _resolve_dub_voice(voice_id, mm_key, mm_group, mm_model, mm_base)
 
     def _synth(zh: str) -> Optional[AudioSegment]:
         if not zh.strip():

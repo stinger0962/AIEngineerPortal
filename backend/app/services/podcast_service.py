@@ -64,6 +64,8 @@ def validate_youtube_url(url: str) -> bool:
 NARRATION_CATALOG: List[Dict[str, str]] = [
     # Female
     {"voice_id": "Chinese (Mandarin)_News_Anchor", "name": "新闻女主播 News Anchor", "gender": "female"},
+    {"voice_id": "Chinese (Mandarin)_Mature_Woman", "name": "成熟御姐(正式) Mature Woman", "gender": "female"},
+    {"voice_id": "Arrogant_Miss", "name": "傲娇御姐(偏凶) Arrogant Miss", "gender": "female"},
     {"voice_id": "Chinese (Mandarin)_Wise_Women", "name": "智慧女声 Wise Woman", "gender": "female"},
     {"voice_id": "Chinese (Mandarin)_ExplorativeGirl", "name": "好奇女孩 Explorative Girl", "gender": "female"},
     {"voice_id": "Chinese (Mandarin)_HK_Flight_Attendant", "name": "港风空姐 HK Flight Attendant", "gender": "female"},
@@ -71,6 +73,9 @@ NARRATION_CATALOG: List[Dict[str, str]] = [
     # Male
     {"voice_id": "Chinese (Mandarin)_Radio_Host", "name": "电台主持 Radio Host", "gender": "male"},
     {"voice_id": "Chinese (Mandarin)_Male_Announcer", "name": "播音男声 Male Announcer", "gender": "male"},
+    {"voice_id": "Chinese (Mandarin)_Reliable_Executive", "name": "沉稳高管(正式) Reliable Executive", "gender": "male"},
+    {"voice_id": "Chinese (Mandarin)_Gentleman", "name": "绅士男声 Gentleman", "gender": "male"},
+    {"voice_id": "Chinese (Mandarin)_Unrestrained_Young_Man", "name": "不羁青年 Unrestrained Young Man", "gender": "male"},
     {"voice_id": "Chinese (Mandarin)_Gentle_Youth", "name": "温柔青年 Gentle Youth", "gender": "male"},
 ]
 
