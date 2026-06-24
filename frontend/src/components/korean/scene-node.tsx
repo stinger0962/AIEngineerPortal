@@ -1,13 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTts } from "@/lib/korean/use-tts";
 import { useSpeech, matchesIntent } from "@/lib/korean/use-speech";
 import { useRomaji } from "./romanization-toggle";
 import { PrimaryButton, SectionLabel } from "./ui";
+import { MascotCoach, useMascot } from "./mascot";
 import type { SceneContent } from "@/lib/korean/types";
-
-const SCENE = "#b9532b"; // 적 persimmon
 
 function SpeakIcon({ onClick }: { onClick: () => void }) {
   return (
@@ -25,35 +24,43 @@ export function SceneNode({ content, onDone }: { content: SceneContent; onDone: 
   const { supported, listening, listen } = useSpeech();
   const [romajiOn, setRomajiOn] = useRomaji();
   const [turnIdx, setTurnIdx] = useState(0);
-  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const m = useMascot();
 
   const turn = content.your_turns[turnIdx];
   const done = turnIdx >= content.your_turns.length;
 
-  const advance = () => {
-    setFeedback(null);
-    setTurnIdx((i) => i + 1);
-  };
+  useEffect(() => {
+    m.say("잘 듣고 따라 해보세요!");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const tryAnswer = (text: string) => {
     if (matchesIntent(text, turn.accepted) || turn.options.includes(text)) {
-      setFeedback({ ok: true, text: "좋아요! ✓" });
-      setTimeout(advance, 650);
+      m.correct();
+      window.setTimeout(() => setTurnIdx((i) => i + 1), 700);
     } else {
-      setFeedback({ ok: false, text: "다시 한 번 — try again, or tap an option." });
+      m.wrong();
     }
   };
   const onMic = async () => {
+    m.listening();
     const heard = await listen();
     if (heard) tryAnswer(heard);
+    else m.rest();
+  };
+  const finish = () => {
+    m.cheer("장면 완료! 🎉");
+    window.setTimeout(() => onDone(3), 950);
   };
 
   return (
     <div className="space-y-5">
-      {/* romanization toggle */}
-      <div className="flex justify-end">
+      {/* coach + romaji toggle */}
+      <div className="flex items-center justify-between gap-3">
+        <MascotCoach mood={m.mood} bubble={m.bubble} size={60} />
         <button
           onClick={() => setRomajiOn(!romajiOn)}
-          className="k-press inline-flex items-center gap-2 rounded-full border border-ink/12 bg-white/55 px-3 py-1.5 text-xs text-ink/60"
+          className="k-press inline-flex shrink-0 items-center gap-2 rounded-full border border-ink/12 bg-white/55 px-3 py-1.5 text-xs text-ink/60"
         >
           <span className={`relative h-3.5 w-6 rounded-full transition-colors ${romajiOn ? "bg-[var(--celadon-500)]" : "bg-ink/15"}`}>
             <span className={`absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white transition-all ${romajiOn ? "left-3" : "left-0.5"}`} />
@@ -113,14 +120,9 @@ export function SceneNode({ content, onDone }: { content: SceneContent; onDone: 
               🎤 {listening ? "듣는 중… Listening" : "말해 보기 · Say it"}
             </button>
           )}
-          {feedback && (
-            <p className="mt-3 text-sm font-medium" style={{ color: feedback.ok ? "var(--celadon-700)" : SCENE }}>
-              {feedback.text}
-            </p>
-          )}
         </div>
       ) : (
-        <PrimaryButton onClick={() => onDone(3)}>장면 완료 · Scene complete ✓</PrimaryButton>
+        <PrimaryButton onClick={finish}>장면 완료 · Scene complete ✓</PrimaryButton>
       )}
     </div>
   );

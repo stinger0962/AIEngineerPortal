@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTts } from "@/lib/korean/use-tts";
 import type { DrillContent, DrillItem } from "@/lib/korean/types";
 import { PrimaryButton, SectionLabel, Stars } from "./ui";
-import { Mascot } from "./mascot";
+import { Mascot, MascotCoach, useMascot } from "./mascot";
 
 const A = "var(--kr-drill)";
 
@@ -19,15 +19,23 @@ export function DrillNode({ content, onDone }: { content: DrillContent; onDone: 
   const [typed, setTyped] = useState("");
   const [wrong, setWrong] = useState(0);
   const [miss, setMiss] = useState(false);
+  const m = useMascot();
   const item = content.items[idx];
   const finished = idx >= content.items.length;
 
+  useEffect(() => {
+    m.say("뜻을 맞혀 보세요!");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const submit = (value: string) => {
     if (value.replace(/\s+/g, "") === item.answer.replace(/\s+/g, "")) {
+      m.correct();
       setTyped("");
       setMiss(false);
       setIdx(idx + 1);
     } else {
+      m.wrong();
       setWrong((w) => w + 1);
       setMiss(true);
       window.setTimeout(() => setMiss(false), 500);
@@ -39,7 +47,7 @@ export function DrillNode({ content, onDone }: { content: DrillContent; onDone: 
     return (
       <div className="k-card k-pop rounded-3xl p-7 text-center">
         <div className="mb-1 flex justify-center">
-          <Mascot size={88} />
+          <Mascot mood="cheer" size={94} />
         </div>
         <p className="font-kr-serif text-2xl text-ink">잘했어요!</p>
         <p className="mt-1 text-sm text-ink/55">Drill complete</p>
@@ -56,6 +64,8 @@ export function DrillNode({ content, onDone }: { content: DrillContent; onDone: 
   const choices = choicesFor(item);
   return (
     <div className="space-y-5">
+      <MascotCoach mood={m.mood} bubble={m.bubble} size={60} />
+
       {/* progress */}
       <div className="flex items-center gap-3">
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink/8">
@@ -119,7 +129,6 @@ export function DrillNode({ content, onDone }: { content: DrillContent; onDone: 
             <PrimaryButton type="submit">확인</PrimaryButton>
           </form>
         )}
-        {miss && <p className="mt-3 text-sm font-medium text-[#b9532b]">다시 한 번 · Not quite</p>}
       </div>
     </div>
   );

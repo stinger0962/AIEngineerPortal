@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import { useTts } from "@/lib/korean/use-tts";
 import type { ReadingContent } from "@/lib/korean/types";
 import { PrimaryButton, SectionLabel, SpeakTile } from "./ui";
-import { Mascot } from "./mascot";
+import { MascotCoach, useMascot } from "./mascot";
 
 function Stagger({ children }: { children: React.ReactNode[] }) {
   return (
@@ -19,6 +20,18 @@ function Stagger({ children }: { children: React.ReactNode[] }) {
 
 export function ReadingNode({ content, onDone }: { content: ReadingContent; onDone: (stars: number) => void }) {
   const { speak } = useTts();
+  const m = useMascot();
+
+  // greet on entry
+  useEffect(() => {
+    m.say("한 글자씩 눌러 보세요!");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const finish = () => {
+    m.cheer("다 읽었어요! 🎉");
+    window.setTimeout(() => onDone(3), 950);
+  };
 
   return (
     <div className="space-y-8">
@@ -51,14 +64,10 @@ export function ReadingNode({ content, onDone }: { content: ReadingContent; onDo
         </Stagger>
       </section>
 
-      {/* finish — mascot cheers you on */}
-      <div className="flex items-center gap-4 pt-2">
-        <Mascot size={68} />
-        <div>
-          <p className="font-kr-serif text-lg text-ink">다 읽었나요?</p>
-          <p className="font-kr mb-2 text-xs text-ink/50">Tap each one, then claim your stars.</p>
-          <PrimaryButton onClick={() => onDone(3)}>다 읽었어요 · I can read these ✓</PrimaryButton>
-        </div>
+      {/* finish — 랑이 cheers you on */}
+      <div className="flex flex-col gap-3 pt-2">
+        <MascotCoach mood={m.mood} bubble={m.bubble} size={76} />
+        <PrimaryButton onClick={finish}>다 읽었어요 · I can read these ✓</PrimaryButton>
       </div>
     </div>
   );

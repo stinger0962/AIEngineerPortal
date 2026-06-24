@@ -1,12 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { koreanApi } from "@/lib/korean/api";
 import { useSpeech } from "@/lib/korean/use-speech";
 import { useTts } from "@/lib/korean/use-tts";
 import type { BossContent } from "@/lib/korean/types";
 import { PrimaryButton, Stars } from "./ui";
-import { Mascot } from "./mascot";
+import { Mascot, MascotCoach, useMascot } from "./mascot";
 
 type Msg = { role: "user" | "assistant"; content: string };
 const BOSS = "var(--kr-boss)";
@@ -37,12 +37,19 @@ export function BossNode({
   const [busy, setBusy] = useState(false);
   const [won, setWon] = useState(false);
   const convId = useRef<number | undefined>(undefined);
+  const m = useMascot();
+
+  useEffect(() => {
+    m.say("인사부터 해볼까요?");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const send = async (text: string) => {
     if (!text || busy) return;
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: text }]);
+    setMessages((prev) => [...prev, { role: "user", content: text }]);
     setBusy(true);
+    m.thinking();
     let reply = "";
     await koreanApi.streamBoss(
       slug,
@@ -54,14 +61,20 @@ export function BossNode({
         onDone: (cid, goalMet) => {
           convId.current = cid;
           if (reply) {
-            setMessages((m) => [...m, { role: "assistant", content: reply }]);
+            setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
             speak(reply);
           }
-          if (goalMet) setWon(true);
+          if (goalMet) {
+            setWon(true);
+            m.cheer("통과! 🎉");
+          } else {
+            m.rest();
+          }
           setBusy(false);
         },
         onError: () => {
-          setMessages((m) => [...m, { role: "assistant", content: "(연결 오류 — 다시 시도하세요)" }]);
+          setMessages((prev) => [...prev, { role: "assistant", content: "(연결 오류 — 다시 시도하세요)" }]);
+          m.rest();
           setBusy(false);
         },
       },
@@ -69,12 +82,16 @@ export function BossNode({
   };
 
   const onMic = async () => {
+    m.listening();
     const heard = await listen();
     if (heard) send(heard);
+    else m.rest();
   };
 
   return (
     <div className="space-y-4">
+      <MascotCoach mood={m.mood} bubble={m.bubble} size={60} />
+
       {/* goal */}
       <div className="k-card flex items-center gap-3 rounded-2xl px-4 py-3" style={{ borderColor: "rgba(54,64,122,0.3)" }}>
         <span className="font-kr-serif flex h-9 w-9 items-center justify-center rounded-full text-white" style={{ background: BOSS }}>
@@ -89,19 +106,19 @@ export function BossNode({
       </div>
 
       {/* chat */}
-      <div className="k-card min-h-[210px] space-y-2.5 rounded-2xl p-4">
+      <div className="k-card min-h-[200px] space-y-2.5 rounded-2xl p-4">
         {messages.length === 0 && !busy && (
           <p className="font-kr text-sm text-ink/40">인사로 시작해 보세요 — say hello to begin.</p>
         )}
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+        {messages.map((msg, i) => (
+          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             <span
               className={`max-w-[82%] rounded-2xl px-3.5 py-2 text-[15px] ${
-                m.role === "user" ? "rounded-br-md text-white" : "k-card rounded-bl-md font-kr-serif text-ink"
+                msg.role === "user" ? "rounded-br-md text-white" : "k-card rounded-bl-md font-kr-serif text-ink"
               }`}
-              style={m.role === "user" ? { background: "linear-gradient(180deg,var(--celadon-500),var(--celadon-600))" } : undefined}
+              style={msg.role === "user" ? { background: "linear-gradient(180deg,var(--celadon-500),var(--celadon-600))" } : undefined}
             >
-              {m.content}
+              {msg.content}
             </span>
           </div>
         ))}
@@ -111,7 +128,7 @@ export function BossNode({
       {won ? (
         <div className="k-card k-pop rounded-2xl p-5 text-center">
           <div className="mb-1 flex justify-center">
-            <Mascot size={84} />
+            <Mascot mood="cheer" size={88} />
           </div>
           <p className="font-kr-serif text-xl text-ink">통과! Goal cleared</p>
           <div className="mt-2 flex justify-center">

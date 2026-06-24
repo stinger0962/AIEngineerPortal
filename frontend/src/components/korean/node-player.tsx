@@ -12,7 +12,6 @@ import type {
 } from "@/lib/korean/types";
 import { KIND_THEME } from "@/lib/korean/theme";
 import { KindSeal } from "./ui";
-import { Mascot } from "./mascot";
 import { ReadingNode } from "./reading-node";
 import { SceneNode } from "./scene-node";
 import { DrillNode } from "./drill-node";
@@ -60,7 +59,6 @@ export function NodePlayer({ slug }: { slug: string }) {
                 </p>
                 <h1 className="font-kr-serif text-2xl text-ink sm:text-3xl">{node.title}</h1>
               </div>
-              <Mascot size={56} className="hidden shrink-0 sm:block" />
             </header>
 
             <div className="k-rise" style={{ animationDelay: "80ms" }}>
