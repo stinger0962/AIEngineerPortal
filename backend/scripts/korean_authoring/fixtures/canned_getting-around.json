@@ -1,0 +1,53 @@
+{"nodes": [
+  {"slug": "getting-around-subway", "kind": "scene", "title": "Subway", "content_json": {
+    "setting": "subway", "character": "staff",
+    "lines": [
+      {"speaker": "staff", "ko": "어디 가세요?", "romaji": "eodi gaseyo", "en": "Where are you going?", "audio_key": "ga_sub_1"},
+      {"speaker": "you", "ko": "시청역이요.", "romaji": "sicheong-yeok-iyo", "en": "City Hall Station.", "audio_key": "ga_sub_2"}
+    ],
+    "your_turns": [{"prompt_en": "Say you're going to City Hall Station.", "options": ["시청역이요", "버스요"], "accepted": [{"ko": "시청역이요", "intents": ["city hall station"]}]}],
+    "new_vocab": [{"ko": "지하철", "en": "subway", "romaji": "jihacheol"}, {"ko": "역", "en": "station", "romaji": "yeok"}]
+  }},
+  {"slug": "getting-around-subway-drill", "kind": "drill", "title": "Subway Drill", "content_json": {
+    "items": [
+      {"type": "match", "ko": "지하철", "answer": "subway", "choices": ["subway", "bus", "station"]},
+      {"type": "listen", "audio_key": "ga_d_yeok", "answer": "역", "choices": ["역", "버스", "지하철"]}
+    ]
+  }},
+  {"slug": "getting-around-directions", "kind": "scene", "title": "Directions", "content_json": {
+    "setting": "station", "character": "passerby",
+    "lines": [
+      {"speaker": "you", "ko": "화장실 어디예요?", "romaji": "hwajangsil eodiyeyo", "en": "Where is the restroom?", "audio_key": "ga_dir_1"},
+      {"speaker": "passerby", "ko": "저기예요.", "romaji": "jeogiyeyo", "en": "It's over there.", "audio_key": "ga_dir_2"}
+    ],
+    "your_turns": [{"prompt_en": "Ask where the exit is.", "options": ["출구 어디예요?", "감사합니다"], "accepted": [{"ko": "출구 어디예요?", "intents": ["where is the exit"]}]}],
+    "new_vocab": [{"ko": "어디", "en": "where", "romaji": "eodi"}, {"ko": "출구", "en": "exit", "romaji": "chulgu"}]
+  }},
+  {"slug": "getting-around-directions-drill", "kind": "drill", "title": "Directions Drill", "content_json": {
+    "items": [
+      {"type": "match", "ko": "어디", "answer": "where", "choices": ["where", "exit", "station"]},
+      {"type": "listen", "audio_key": "ga_d_chulgu", "answer": "출구", "choices": ["출구", "어디", "역"]}
+    ]
+  }},
+  {"slug": "getting-around-bus", "kind": "scene", "title": "Bus", "content_json": {
+    "setting": "bus", "character": "driver",
+    "lines": [
+      {"speaker": "you", "ko": "티머니 돼요?", "romaji": "timeoni dwaeyo", "en": "Can I use T-money?", "audio_key": "ga_bus_1"},
+      {"speaker": "driver", "ko": "네, 돼요.", "romaji": "ne, dwaeyo", "en": "Yes, you can.", "audio_key": "ga_bus_2"}
+    ],
+    "your_turns": [{"prompt_en": "Ask if you can use T-money.", "options": ["티머니 돼요?", "버스요"], "accepted": [{"ko": "티머니 돼요?", "intents": ["can i use t-money"]}]}],
+    "new_vocab": [{"ko": "버스", "en": "bus", "romaji": "beoseu"}, {"ko": "티머니", "en": "T-money card", "romaji": "timeoni"}]
+  }},
+  {"slug": "getting-around-bus-drill", "kind": "drill", "title": "Bus Drill", "content_json": {
+    "items": [
+      {"type": "match", "ko": "버스", "answer": "bus", "choices": ["bus", "subway", "T-money"]},
+      {"type": "listen", "audio_key": "ga_d_timeoni", "answer": "티머니", "choices": ["티머니", "버스", "출구"]}
+    ]
+  }},
+  {"slug": "getting-around-boss", "kind": "boss", "title": "Boss: Across the City", "content_json": {
+    "goal_en": "Get directions to the right subway line and ride one stop",
+    "persona": "taxi_driver", "level": "beginner",
+    "allowed_vocab": ["지하철", "역", "어디", "출구", "버스", "티머니", "감사합니다"],
+    "success_criteria": "Learner asks directions and confirms the stop", "max_turns": 8
+  }}
+]}
