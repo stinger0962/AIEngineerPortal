@@ -202,7 +202,7 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
     messages = [{"role": m.role, "content": m.content} for m in history]
     messages.append({"role": "user", "content": payload.message})
 
-    oracle = ZiweiOracle(client=svc.client, model=svc.model)
+    oracle = ZiweiOracle(client=svc.client, model=settings.oracle_model)
     result = oracle.run(
         chart_json=profile.chart_json, persona=profile.persona, scenario=payload.scenario,
         portrait=profile.portrait_json or {}, messages=messages,
@@ -267,12 +267,12 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
     messages.append({"role": "user", "content": payload.message})
     claude_messages = messages[-10:] if len(messages) > 10 else messages
 
-    oracle = ZiweiOracle(client=svc.client, model=svc.model)
+    oracle = ZiweiOracle(client=svc.client, model=settings.oracle_model)
     system_prompt = oracle._system_prompt(profile.chart_json, profile.persona, payload.scenario, profile.portrait_json or {})
 
     conv_id = conv.id
     client = svc.client
-    model = svc.model
+    model = settings.oracle_model
     user_message = payload.message
     scenario = payload.scenario
     uid = _get_user_id(db)

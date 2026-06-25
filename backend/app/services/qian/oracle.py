@@ -6,7 +6,7 @@ import time
 from typing import Any, Optional
 
 from app.services.qian.personas import persona_prompt
-from app.services.ziwei.oracle_tools import parse_markers
+from app.services.ziwei.oracle_tools import current_date_note, parse_markers
 
 
 class QianOracle:
@@ -23,7 +23,8 @@ class QianOracle:
             f"签诗：{sign['poetry']}\n"
             f"解曰：{sign['meaning']}\n"
             f"圣意：{sign['holy']}\n"
-            "\n## 输出\n先用一句把签诗的意象点出来，再结合求签者的问题给出解读与宽心的建议，"
+            + current_date_note()
+            + "\n\n## 输出\n先用一句把签诗的意象点出来，再结合求签者的问题给出解读与宽心的建议，"
             "约 250-450 字，口语、温和。\n"
             "## 内联标记（会被前端解析、不显示给用户）\n"
             "- 解释签诗里的生僻词或典故时，插入 [[term:词|一句话白话解释]]。\n"

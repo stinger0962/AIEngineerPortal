@@ -7,7 +7,7 @@ import time
 from typing import Any, Optional
 
 from .chart_summary import format_chart_summary
-from .oracle_tools import parse_markers
+from .oracle_tools import current_date_note, parse_markers
 from .personas import persona_prompt
 
 SCENARIO_FRAMES = {
@@ -29,6 +29,7 @@ class ZiweiOracle:
             "\n\n你正在为命主解读一张紫微斗数命盘。下面是排好的盘面与确定性规则检测出的命中格局——"
             "格局部分是程序精确判定的，请务必尊重、不要漏讲或臆造未命中的格局；逐星逐宫的细致论断由你的学养发挥。\n",
             SCENARIO_FRAMES.get(scenario, SCENARIO_FRAMES["natal"]),
+            current_date_note(),
             "\n\n" + format_chart_summary(chart_json),
         ]
         if portrait:

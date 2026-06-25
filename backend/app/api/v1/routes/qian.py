@@ -55,9 +55,9 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db)):
     if sign is None:
         raise HTTPException(404, "签不存在")
 
-    oracle = QianOracle(client=svc.client, model=svc.model)
+    oracle = QianOracle(client=svc.client, model=settings.oracle_model)
     system_prompt = oracle.system_prompt(sign, question)
-    model, client = svc.model, svc.client
+    model, client = settings.oracle_model, svc.client
     uid = _get_user_id(db)
 
     def _persist(clean, cameras, segments, in_tok, out_tok, start):

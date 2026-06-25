@@ -3,6 +3,19 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
+
+
+def current_date_note() -> str:
+    """当前日期注入——模型有知识截止，不注入就会把『今年』当成训练时的年份。
+    用东八区（命主多在中国），年/月粒度对运势判断足够。"""
+    now = datetime.now(timezone(timedelta(hours=8)))
+    return (
+        f"\n\n【当前时间】今天是公历 {now.year} 年 {now.month} 月 {now.day} 日（农历需自行换算）。"
+        "凡涉及『今年 / 今天 / 现在 / 下半年 / 明年 / 近期 / 流年 / 大限应期』等时间判断，一律以此为准；"
+        "切勿凭训练记忆臆断年份（绝不可把当前年份说成往年）。"
+    )
+
 
 VALID_PALACES = {"命宫", "兄弟", "夫妻", "子女", "财帛", "疾厄", "迁移", "仆役", "交友", "官禄", "田宅", "福德", "父母"}
 _PALACE_ALIAS = {"交友": "仆役"}  # iztro 命盘用「仆役」；模型可能说「交友」，归一化到命盘实际宫名

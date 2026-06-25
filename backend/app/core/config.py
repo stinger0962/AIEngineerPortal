@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     # Korean course: cheap conversational model for the roleplay boss + a Korean TTS voice.
     korean_model: str = "claude-sonnet-4-6"
     minimax_korean_voice_id: str = "Korean_SweetGirl"  # override via env MINIMAX_KOREAN_VOICE_ID
+    # 紫微/灵签 解盘也是高价值、低频任务 → 用最强模型（与高频的 ai_model 解耦）。
+    oracle_model: str = "claude-opus-4-8"
     ai_daily_token_budget: int = 100_000
 
     @field_validator("ai_model")
