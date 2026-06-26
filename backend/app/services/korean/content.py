@@ -1764,4 +1764,332 @@ REGIONS: list[dict[str, Any]] = [
             },
         ],
     },
+    # ------------------------------------------------------------------ #
+    # Region 6 — Restaurant                                              #
+    # ------------------------------------------------------------------ #
+    {
+        "slug": "restaurant",
+        "title": "Restaurant",
+        "theme": "restaurant",
+        "order_index": 6,
+        "nodes": [
+            {
+                "slug": "restaurant-seat",
+                "kind": "scene",
+                "title": "Getting a Table",
+                "order_index": 0,
+                "content_json": {
+                    "setting": "restaurant entrance",
+                    "character": "server",
+                    "lines": [
+                        {
+                            "speaker": "server",
+                            "ko": "어서 오세요! 몇 명이세요?",
+                            "romaji": "eoseo oseyo! myeot myeong-iseyo?",
+                            "en": "Welcome! How many people?",
+                            "audio_key": "re_seat_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "두 명이요.",
+                            "romaji": "du myeong-iyo.",
+                            "en": "Two people.",
+                            "audio_key": "re_seat_2",
+                        },
+                        {
+                            "speaker": "server",
+                            "ko": "이쪽으로 오세요.",
+                            "romaji": "ijjok-euro oseyo.",
+                            "en": "This way, please.",
+                            "audio_key": "re_seat_3",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "메뉴 주세요.",
+                            "romaji": "menyu juseyo.",
+                            "en": "The menu, please.",
+                            "audio_key": "re_seat_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "The server asks how many people. You're a party of two.",
+                            "options": ["두 명이요", "한 명이요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "두 명이요", "intents": ["two people", "for two", "table for two"]},
+                                {"ko": "한 명이요", "intents": ["one person", "just me", "table for one"]},
+                            ],
+                        },
+                        {
+                            "prompt_en": "You've sat down. Ask for the menu.",
+                            "options": ["메뉴 주세요", "계산서 주세요", "여기요"],
+                            "accepted": [
+                                {"ko": "메뉴 주세요", "intents": ["the menu please", "can i see the menu", "menu please"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "메뉴", "en": "menu", "romaji": "menyu"},
+                        {"ko": "몇 명", "en": "how many people", "romaji": "myeot myeong"},
+                        {"ko": "여기요", "en": "excuse me (calling the server)", "romaji": "yeogiyo"},
+                    ],
+                },
+            },
+            {
+                "slug": "restaurant-seat-drill",
+                "kind": "drill",
+                "title": "Seating Drill",
+                "order_index": 1,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "메뉴",
+                            "answer": "menu",
+                            "choices": ["menu", "the bill", "water"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "re_seat_1",
+                            "answer": "몇 명이세요?",
+                            "choices": ["몇 명이세요?", "메뉴 주세요", "여기요"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "몇 명",
+                            "answer": "how many people",
+                            "choices": ["how many people", "the menu", "delicious"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "re_d_yeogiyo",
+                            "answer": "여기요",
+                            "choices": ["여기요", "메뉴", "몇 명"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "restaurant-order",
+                "kind": "scene",
+                "title": "Ordering Food",
+                "order_index": 2,
+                "content_json": {
+                    "setting": "restaurant table",
+                    "character": "server",
+                    "lines": [
+                        {
+                            "speaker": "you",
+                            "ko": "여기요, 추천 좀 해 주세요.",
+                            "romaji": "yeogiyo, chucheon jom hae juseyo.",
+                            "en": "Excuse me, please recommend something.",
+                            "audio_key": "re_order_1",
+                        },
+                        {
+                            "speaker": "server",
+                            "ko": "이게 맛있어요. 근데 좀 매워요.",
+                            "romaji": "ige masisseoyo. geunde jom maewoyo.",
+                            "en": "This is delicious. But it's a bit spicy.",
+                            "audio_key": "re_order_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "안 매운 거 주세요.",
+                            "romaji": "an maeun geo juseyo.",
+                            "en": "Give me the not-spicy one, please.",
+                            "audio_key": "re_order_3",
+                        },
+                        {
+                            "speaker": "server",
+                            "ko": "네, 물도 드릴게요.",
+                            "romaji": "ne, mul-do deurilgeyo.",
+                            "en": "Okay, I'll bring water too.",
+                            "audio_key": "re_order_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Ask the server for a recommendation.",
+                            "options": ["추천 좀 해 주세요", "계산서 주세요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "추천 좀 해 주세요", "intents": ["please recommend something", "what do you recommend", "a recommendation please"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "It's too spicy for you. Order the not-spicy one.",
+                            "options": ["안 매운 거 주세요", "물 주세요", "메뉴 주세요"],
+                            "accepted": [
+                                {"ko": "안 매운 거 주세요", "intents": ["the not-spicy one please", "something not spicy", "not spicy please"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "추천", "en": "recommendation", "romaji": "chucheon"},
+                        {"ko": "매워요", "en": "(it's) spicy", "romaji": "maewoyo"},
+                        {"ko": "안 매운 거", "en": "the not-spicy one", "romaji": "an maeun geo"},
+                        {"ko": "물", "en": "water", "romaji": "mul"},
+                    ],
+                },
+            },
+            {
+                "slug": "restaurant-order-drill",
+                "kind": "drill",
+                "title": "Ordering Drill",
+                "order_index": 3,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "추천",
+                            "answer": "recommendation",
+                            "choices": ["recommendation", "the bill", "water"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "매워요",
+                            "answer": "(it's) spicy",
+                            "choices": ["(it's) spicy", "(it's) delicious", "water"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "re_order_3",
+                            "answer": "안 매운 거 주세요",
+                            "choices": ["안 매운 거 주세요", "추천 좀 해 주세요", "물 주세요"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "re_d_mul",
+                            "answer": "물",
+                            "choices": ["물", "추천", "메뉴"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "restaurant-bill",
+                "kind": "scene",
+                "title": "It Was Delicious",
+                "order_index": 4,
+                "content_json": {
+                    "setting": "restaurant table",
+                    "character": "server",
+                    "lines": [
+                        {
+                            "speaker": "server",
+                            "ko": "맛있게 드셨어요?",
+                            "romaji": "masitge deusyeosseoyo?",
+                            "en": "Did you enjoy your meal?",
+                            "audio_key": "re_bill_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "네, 정말 맛있어요!",
+                            "romaji": "ne, jeongmal masisseoyo!",
+                            "en": "Yes, it's really delicious!",
+                            "audio_key": "re_bill_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "계산서 주세요.",
+                            "romaji": "gyesanseo juseyo.",
+                            "en": "The bill, please.",
+                            "audio_key": "re_bill_3",
+                        },
+                        {
+                            "speaker": "server",
+                            "ko": "네, 여기요. 감사합니다!",
+                            "romaji": "ne, yeogiyo. gamsahamnida!",
+                            "en": "Sure, here it is. Thank you!",
+                            "audio_key": "re_bill_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "The server asks if you enjoyed it. Say it was delicious.",
+                            "options": ["맛있어요", "매워요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "맛있어요", "intents": ["it's delicious", "it was delicious", "very good"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "You're done eating. Ask for the bill.",
+                            "options": ["계산서 주세요", "메뉴 주세요", "물 주세요"],
+                            "accepted": [
+                                {"ko": "계산서 주세요", "intents": ["the bill please", "can i get the check", "check please"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "맛있어요", "en": "(it's) delicious", "romaji": "masisseoyo"},
+                        {"ko": "계산서", "en": "the bill", "romaji": "gyesanseo"},
+                        {"ko": "주문", "en": "order", "romaji": "jumun"},
+                    ],
+                },
+            },
+            {
+                "slug": "restaurant-bill-drill",
+                "kind": "drill",
+                "title": "Bill Drill",
+                "order_index": 5,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "계산서",
+                            "answer": "the bill",
+                            "choices": ["the bill", "the menu", "recommendation"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "맛있어요",
+                            "answer": "(it's) delicious",
+                            "choices": ["(it's) delicious", "(it's) spicy", "order"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "re_bill_3",
+                            "answer": "계산서 주세요",
+                            "choices": ["계산서 주세요", "메뉴 주세요", "안 매운 거 주세요"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "re_d_jumun",
+                            "answer": "주문",
+                            "choices": ["주문", "계산서", "물"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "restaurant-boss",
+                "kind": "boss",
+                "title": "Boss: Order & Pay",
+                "order_index": 6,
+                "content_json": {
+                    "goal_en": "Order a dish and ask for the bill",
+                    "persona": "server",
+                    "level": "beginner",
+                    "allowed_vocab": [
+                        "안녕하세요",
+                        "감사합니다",
+                        "네",
+                        "아니요",
+                        "여기요",
+                        "메뉴",
+                        "주문",
+                        "추천",
+                        "매워요",
+                        "안 매운 거",
+                        "물",
+                        "몇 명",
+                        "맛있어요",
+                        "계산서",
+                        "주세요",
+                    ],
+                    "success_criteria": "Learner orders a dish and asks for the bill",
+                    "max_turns": 8,
+                },
+            },
+        ],
+    },
 ]

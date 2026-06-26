@@ -24,4 +24,5 @@ export const REGION_SEAL: Record<string, string> = {
   transit: "역",
   shopping: "돈",
   stay: "방",
+  restaurant: "밥",
 };
