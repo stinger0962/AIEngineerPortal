@@ -1109,4 +1109,332 @@ REGIONS: list[dict[str, Any]] = [
             },
         ],
     },
+    # ------------------------------------------------------------------ #
+    # Region 4 — Shopping                                                #
+    # ------------------------------------------------------------------ #
+    {
+        "slug": "shopping",
+        "title": "Shopping",
+        "theme": "shopping",
+        "order_index": 4,
+        "nodes": [
+            {
+                "slug": "shopping-price",
+                "kind": "scene",
+                "title": "How Much Is This?",
+                "order_index": 0,
+                "content_json": {
+                    "setting": "clothing shop",
+                    "character": "clerk",
+                    "lines": [
+                        {
+                            "speaker": "clerk",
+                            "ko": "어서 오세요!",
+                            "romaji": "eoseo oseyo!",
+                            "en": "Welcome!",
+                            "audio_key": "sh_price_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "이거 얼마예요?",
+                            "romaji": "igeo eolmayeyo?",
+                            "en": "How much is this?",
+                            "audio_key": "sh_price_2",
+                        },
+                        {
+                            "speaker": "clerk",
+                            "ko": "이만 원이에요.",
+                            "romaji": "iman won-ieyo.",
+                            "en": "It's 20,000 won.",
+                            "audio_key": "sh_price_3",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "저거는요?",
+                            "romaji": "jeogeoneunyo?",
+                            "en": "And that one?",
+                            "audio_key": "sh_price_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Point at an item and ask how much this one is.",
+                            "options": ["이거 얼마예요?", "감사합니다", "네"],
+                            "accepted": [
+                                {"ko": "이거 얼마예요?", "intents": ["how much is this", "this price", "what's the price of this"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Now ask about that one over there.",
+                            "options": ["저거 얼마예요?", "이거 얼마예요?", "주세요"],
+                            "accepted": [
+                                {"ko": "저거 얼마예요?", "intents": ["how much is that", "that price", "what's the price of that"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "얼마예요", "en": "how much", "romaji": "eolmayeyo"},
+                        {"ko": "이거", "en": "this (one)", "romaji": "igeo"},
+                        {"ko": "저거", "en": "that (one)", "romaji": "jeogeo"},
+                    ],
+                },
+            },
+            {
+                "slug": "shopping-price-drill",
+                "kind": "drill",
+                "title": "Price Drill",
+                "order_index": 1,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "이거",
+                            "answer": "this (one)",
+                            "choices": ["this (one)", "that (one)", "how much"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "sh_price_2",
+                            "answer": "이거 얼마예요?",
+                            "choices": ["이거 얼마예요?", "저거 얼마예요?", "감사합니다"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "저거",
+                            "answer": "that (one)",
+                            "choices": ["that (one)", "this (one)", "card"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "sh_d_eolma",
+                            "answer": "얼마예요",
+                            "choices": ["얼마예요", "이거", "저거"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "shopping-size",
+                "kind": "scene",
+                "title": "A Different Size",
+                "order_index": 2,
+                "content_json": {
+                    "setting": "clothing shop",
+                    "character": "clerk",
+                    "lines": [
+                        {
+                            "speaker": "you",
+                            "ko": "이거 작아요. 큰 사이즈 있어요?",
+                            "romaji": "igeo jagayo. keun saijeu isseoyo?",
+                            "en": "This is small. Do you have a bigger size?",
+                            "audio_key": "sh_size_1",
+                        },
+                        {
+                            "speaker": "clerk",
+                            "ko": "네, 여기 있어요.",
+                            "romaji": "ne, yeogi isseoyo.",
+                            "en": "Yes, here you go.",
+                            "audio_key": "sh_size_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "다른 색깔도 있어요?",
+                            "romaji": "dareun saekkkal-do isseoyo?",
+                            "en": "Do you have other colors too?",
+                            "audio_key": "sh_size_3",
+                        },
+                        {
+                            "speaker": "clerk",
+                            "ko": "네, 검은색도 있어요.",
+                            "romaji": "ne, geomeunsaek-do isseoyo.",
+                            "en": "Yes, we have black too.",
+                            "audio_key": "sh_size_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "This one is too small. Ask for a bigger size.",
+                            "options": ["큰 사이즈 있어요?", "작은 사이즈 있어요?", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "큰 사이즈 있어요?", "intents": ["bigger size", "do you have a bigger size", "a larger size"]},
+                                {"ko": "작은 사이즈 있어요?", "intents": ["smaller size", "do you have a smaller size"]},
+                            ],
+                        },
+                        {
+                            "prompt_en": "Ask if they have another color.",
+                            "options": ["다른 색깔 있어요?", "큰 사이즈 있어요?", "네"],
+                            "accepted": [
+                                {"ko": "다른 색깔 있어요?", "intents": ["another color", "other colors", "different color"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "사이즈", "en": "size", "romaji": "saijeu"},
+                        {"ko": "색깔", "en": "color", "romaji": "saekkkal"},
+                        {"ko": "작아요", "en": "(it's) small", "romaji": "jagayo"},
+                        {"ko": "커요", "en": "(it's) big", "romaji": "keoyo"},
+                    ],
+                },
+            },
+            {
+                "slug": "shopping-size-drill",
+                "kind": "drill",
+                "title": "Size Drill",
+                "order_index": 3,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "사이즈",
+                            "answer": "size",
+                            "choices": ["size", "color", "card"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "작아요",
+                            "answer": "(it's) small",
+                            "choices": ["(it's) small", "(it's) big", "color"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "sh_d_saekkkal",
+                            "answer": "색깔",
+                            "choices": ["색깔", "사이즈", "커요"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "sh_d_keoyo",
+                            "answer": "커요",
+                            "choices": ["커요", "작아요", "사이즈"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "shopping-pay",
+                "kind": "scene",
+                "title": "Paying & a Bag",
+                "order_index": 4,
+                "content_json": {
+                    "setting": "clothing shop",
+                    "character": "clerk",
+                    "lines": [
+                        {
+                            "speaker": "clerk",
+                            "ko": "이거 주세요? 현금이요, 카드요?",
+                            "romaji": "igeo juseyo? hyeon-geum-iyo, kadeu-yo?",
+                            "en": "You'll take this? Cash or card?",
+                            "audio_key": "sh_pay_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "카드로 할게요.",
+                            "romaji": "kadeu-ro halgeyo.",
+                            "en": "I'll pay by card.",
+                            "audio_key": "sh_pay_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "봉투 주세요.",
+                            "romaji": "bongtu juseyo.",
+                            "en": "A bag, please.",
+                            "audio_key": "sh_pay_3",
+                        },
+                        {
+                            "speaker": "clerk",
+                            "ko": "네, 감사합니다!",
+                            "romaji": "ne, gamsahamnida!",
+                            "en": "Sure, thank you!",
+                            "audio_key": "sh_pay_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "They ask how you'll pay. Say you'll pay by card.",
+                            "options": ["카드요", "현금이요", "네"],
+                            "accepted": [
+                                {"ko": "카드요", "intents": ["by card", "card", "pay by card"]},
+                                {"ko": "현금이요", "intents": ["cash", "by cash", "pay cash"]},
+                            ],
+                        },
+                        {
+                            "prompt_en": "Ask for a bag.",
+                            "options": ["봉투 주세요", "카드요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "봉투 주세요", "intents": ["a bag please", "can i get a bag", "bag please"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "카드", "en": "card", "romaji": "kadeu"},
+                        {"ko": "봉투", "en": "bag", "romaji": "bongtu"},
+                        {"ko": "깎아 주세요", "en": "please give a discount", "romaji": "kkakka juseyo"},
+                    ],
+                },
+            },
+            {
+                "slug": "shopping-pay-drill",
+                "kind": "drill",
+                "title": "Paying Drill",
+                "order_index": 5,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "봉투",
+                            "answer": "bag",
+                            "choices": ["bag", "card", "size"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "sh_pay_3",
+                            "answer": "봉투 주세요",
+                            "choices": ["봉투 주세요", "카드로 할게요", "이거 얼마예요?"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "깎아 주세요",
+                            "answer": "please give a discount",
+                            "choices": ["please give a discount", "a bag please", "by card"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "sh_d_kadeu",
+                            "answer": "카드",
+                            "choices": ["카드", "봉투", "색깔"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "shopping-boss",
+                "kind": "boss",
+                "title": "Boss: Ask & Buy",
+                "order_index": 6,
+                "content_json": {
+                    "goal_en": "Ask the price of an item and buy it",
+                    "persona": "shopkeeper",
+                    "level": "beginner",
+                    "allowed_vocab": [
+                        "안녕하세요",
+                        "감사합니다",
+                        "네",
+                        "아니요",
+                        "이거",
+                        "저거",
+                        "얼마예요?",
+                        "사이즈",
+                        "색깔",
+                        "카드",
+                        "카드요",
+                        "봉투",
+                        "봉투 주세요",
+                        "깎아 주세요",
+                    ],
+                    "success_criteria": "Learner asks the price of an item and completes the purchase",
+                    "max_turns": 8,
+                },
+            },
+        ],
+    },
 ]
