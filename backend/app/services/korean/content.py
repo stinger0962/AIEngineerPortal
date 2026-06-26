@@ -2092,4 +2092,329 @@ REGIONS: list[dict[str, Any]] = [
             },
         ],
     },
+    # ------------------------------------------------------------------ #
+    # Region 7 — Making Friends                                         #
+    # ------------------------------------------------------------------ #
+    {
+        "slug": "making-friends",
+        "title": "Making Friends",
+        "theme": "friends",
+        "order_index": 7,
+        "nodes": [
+            {
+                "slug": "making-friends-intro",
+                "kind": "scene",
+                "title": "Nice to Meet You",
+                "order_index": 0,
+                "content_json": {
+                    "setting": "language exchange meetup",
+                    "character": "friend",
+                    "lines": [
+                        {
+                            "speaker": "friend",
+                            "ko": "안녕하세요! 이름이 뭐예요?",
+                            "romaji": "annyeonghaseyo! ireum-i mwoyeyo?",
+                            "en": "Hi! What's your name?",
+                            "audio_key": "fr_intro_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "저는 마이클이에요. 만나서 반가워요.",
+                            "romaji": "jeoneun maikeul-ieyo. mannaseo bangawoyo.",
+                            "en": "I'm Michael. Nice to meet you.",
+                            "audio_key": "fr_intro_2",
+                        },
+                        {
+                            "speaker": "friend",
+                            "ko": "반가워요! 어느 나라 사람이에요?",
+                            "romaji": "bangawoyo! eoneu nara saram-ieyo?",
+                            "en": "Nice to meet you! Which country are you from?",
+                            "audio_key": "fr_intro_3",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "저는 미국 사람이에요.",
+                            "romaji": "jeoneun miguk saram-ieyo.",
+                            "en": "I'm American.",
+                            "audio_key": "fr_intro_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Your new friend asks your name. Say nice to meet you.",
+                            "options": ["만나서 반가워요", "감사합니다", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "만나서 반가워요", "intents": ["nice to meet you", "pleased to meet you", "good to meet you"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "They ask which country you're from. Say where you're from (e.g. 저는 미국 사람이에요).",
+                            "options": ["저는 미국 사람이에요", "저는 학생이에요", "네"],
+                            "accepted": [
+                                {"ko": "저는 미국 사람이에요", "intents": ["i'm american", "i'm from the usa", "i am from america"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "이름", "en": "name", "romaji": "ireum"},
+                        {"ko": "저는", "en": "I / as for me", "romaji": "jeoneun"},
+                        {"ko": "만나서 반가워요", "en": "nice to meet you", "romaji": "mannaseo bangawoyo"},
+                    ],
+                },
+            },
+            {
+                "slug": "making-friends-intro-drill",
+                "kind": "drill",
+                "title": "Intro Drill",
+                "order_index": 1,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "이름",
+                            "answer": "name",
+                            "choices": ["name", "hobby", "age"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "fr_intro_1",
+                            "answer": "이름이 뭐예요?",
+                            "choices": ["이름이 뭐예요?", "어느 나라 사람이에요?", "취미가 뭐예요?"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "만나서 반가워요",
+                            "answer": "nice to meet you",
+                            "choices": ["nice to meet you", "thank you", "which country"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "fr_d_jeoneun",
+                            "answer": "저는",
+                            "choices": ["저는", "이름", "친구"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "making-friends-hobby",
+                "kind": "scene",
+                "title": "What's Your Hobby?",
+                "order_index": 2,
+                "content_json": {
+                    "setting": "café table",
+                    "character": "friend",
+                    "lines": [
+                        {
+                            "speaker": "friend",
+                            "ko": "취미가 뭐예요?",
+                            "romaji": "chwimi-ga mwoyeyo?",
+                            "en": "What's your hobby?",
+                            "audio_key": "fr_hobby_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "저는 영화를 좋아해요.",
+                            "romaji": "jeoneun yeonghwa-reul joahaeyo.",
+                            "en": "I like movies.",
+                            "audio_key": "fr_hobby_2",
+                        },
+                        {
+                            "speaker": "friend",
+                            "ko": "저도요! 저는 음악을 좋아해요.",
+                            "romaji": "jeodoyo! jeoneun eumak-eul joahaeyo.",
+                            "en": "Me too! I like music.",
+                            "audio_key": "fr_hobby_3",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "와, 우리 친구해요!",
+                            "romaji": "wa, uri chinguhaeyo!",
+                            "en": "Wow, let's be friends!",
+                            "audio_key": "fr_hobby_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "They ask your hobby. Say you like movies.",
+                            "options": ["저는 영화를 좋아해요", "저는 미국 사람이에요", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "저는 영화를 좋아해요", "intents": ["i like movies", "my hobby is movies", "i love films"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Say you like music too.",
+                            "options": ["저는 음악을 좋아해요", "저는 친구예요", "네"],
+                            "accepted": [
+                                {"ko": "저는 음악을 좋아해요", "intents": ["i like music", "i love music", "music too"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "취미", "en": "hobby", "romaji": "chwimi"},
+                        {"ko": "좋아해요", "en": "(I) like", "romaji": "joahaeyo"},
+                        {"ko": "친구", "en": "friend", "romaji": "chingu"},
+                    ],
+                },
+            },
+            {
+                "slug": "making-friends-hobby-drill",
+                "kind": "drill",
+                "title": "Hobby Drill",
+                "order_index": 3,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "취미",
+                            "answer": "hobby",
+                            "choices": ["hobby", "name", "friend"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "좋아해요",
+                            "answer": "(I) like",
+                            "choices": ["(I) like", "nice to meet you", "name"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "fr_hobby_2",
+                            "answer": "저는 영화를 좋아해요",
+                            "choices": ["저는 영화를 좋아해요", "취미가 뭐예요?", "이름이 뭐예요?"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "fr_d_chingu",
+                            "answer": "친구",
+                            "choices": ["친구", "취미", "이름"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "making-friends-kakao",
+                "kind": "scene",
+                "title": "Let's Exchange KakaoTalk",
+                "order_index": 4,
+                "content_json": {
+                    "setting": "café table",
+                    "character": "friend",
+                    "lines": [
+                        {
+                            "speaker": "friend",
+                            "ko": "나이가 어떻게 돼요?",
+                            "romaji": "nai-ga eotteoke dwaeyo?",
+                            "en": "How old are you?",
+                            "audio_key": "fr_kakao_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "저는 스물다섯 살이에요.",
+                            "romaji": "jeoneun seumuldaseot sal-ieyo.",
+                            "en": "I'm twenty-five years old.",
+                            "audio_key": "fr_kakao_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "우리 카톡 해요!",
+                            "romaji": "uri katok haeyo!",
+                            "en": "Let's exchange KakaoTalk!",
+                            "audio_key": "fr_kakao_3",
+                        },
+                        {
+                            "speaker": "friend",
+                            "ko": "좋아요! 카톡 아이디 뭐예요?",
+                            "romaji": "joayo! katok aidi mwoyeyo?",
+                            "en": "Great! What's your KakaoTalk ID?",
+                            "audio_key": "fr_kakao_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "They ask your age. Say how old you are (e.g. 저는 스물다섯 살이에요).",
+                            "options": ["저는 스물다섯 살이에요", "저는 미국 사람이에요", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "저는 스물다섯 살이에요", "intents": ["i'm twenty-five", "i am 25 years old", "my age is twenty-five"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Ask to exchange KakaoTalk.",
+                            "options": ["우리 카톡 해요", "메뉴 주세요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "우리 카톡 해요", "intents": ["let's exchange kakaotalk", "let's add kakao", "let's do kakaotalk"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "나이", "en": "age", "romaji": "nai"},
+                        {"ko": "살", "en": "years (of age)", "romaji": "sal"},
+                        {"ko": "카톡", "en": "KakaoTalk", "romaji": "katok"},
+                    ],
+                },
+            },
+            {
+                "slug": "making-friends-kakao-drill",
+                "kind": "drill",
+                "title": "KakaoTalk Drill",
+                "order_index": 5,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "카톡",
+                            "answer": "KakaoTalk",
+                            "choices": ["KakaoTalk", "hobby", "friend"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "나이",
+                            "answer": "age",
+                            "choices": ["age", "name", "years (of age)"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "fr_kakao_3",
+                            "answer": "우리 카톡 해요!",
+                            "choices": ["우리 카톡 해요!", "나이가 어떻게 돼요?", "취미가 뭐예요?"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "fr_d_sal",
+                            "answer": "살",
+                            "choices": ["살", "나이", "카톡"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "making-friends-boss",
+                "kind": "boss",
+                "title": "Boss: Introduce Yourself",
+                "order_index": 6,
+                "content_json": {
+                    "goal_en": "Introduce yourself and exchange KakaoTalk",
+                    "persona": "friend",
+                    "level": "beginner",
+                    "allowed_vocab": [
+                        "안녕하세요",
+                        "감사합니다",
+                        "네",
+                        "아니요",
+                        "이름",
+                        "저는",
+                        "어느 나라",
+                        "취미",
+                        "좋아해요",
+                        "카톡",
+                        "만나서 반가워요",
+                        "친구",
+                        "나이",
+                        "살",
+                    ],
+                    "success_criteria": "Learner introduces themselves and asks to exchange KakaoTalk",
+                    "max_turns": 8,
+                },
+            },
+        ],
+    },
 ]
