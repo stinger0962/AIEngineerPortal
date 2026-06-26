@@ -784,4 +784,329 @@ REGIONS: list[dict[str, Any]] = [
             },
         ],
     },
+    # ------------------------------------------------------------------ #
+    # Region 3 — Getting Around                                          #
+    # ------------------------------------------------------------------ #
+    {
+        "slug": "getting-around",
+        "title": "Getting Around",
+        "theme": "transit",
+        "order_index": 3,
+        "nodes": [
+            {
+                "slug": "getting-around-tmoney",
+                "kind": "scene",
+                "title": "Buying a T-money Card",
+                "order_index": 0,
+                "content_json": {
+                    "setting": "convenience store",
+                    "character": "clerk",
+                    "lines": [
+                        {
+                            "speaker": "you",
+                            "ko": "티머니 카드 주세요.",
+                            "romaji": "timeoni kadeu juseyo.",
+                            "en": "A T-money card, please.",
+                            "audio_key": "ga_tmoney_1",
+                        },
+                        {
+                            "speaker": "clerk",
+                            "ko": "네, 충전도 해 드릴까요?",
+                            "romaji": "ne, chungjeon-do hae deurilkkayo?",
+                            "en": "Sure, shall I recharge it too?",
+                            "audio_key": "ga_tmoney_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "네, 만 원 충전해 주세요.",
+                            "romaji": "ne, man won chungjeonhae juseyo.",
+                            "en": "Yes, please recharge 10,000 won.",
+                            "audio_key": "ga_tmoney_3",
+                        },
+                        {
+                            "speaker": "clerk",
+                            "ko": "네, 다 됐어요.",
+                            "romaji": "ne, da dwaesseoyo.",
+                            "en": "Okay, all done.",
+                            "audio_key": "ga_tmoney_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Ask the clerk for a T-money card.",
+                            "options": ["티머니 카드 주세요", "얼마예요?", "감사합니다"],
+                            "accepted": [
+                                {"ko": "티머니 카드 주세요", "intents": ["t-money card please", "a t-money card", "buy t-money"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "They ask if you want to recharge it. Say yes, recharge it.",
+                            "options": ["네, 충전해 주세요", "아니요", "어디예요?"],
+                            "accepted": [
+                                {"ko": "네, 충전해 주세요", "intents": ["yes recharge it", "please recharge", "top it up"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "티머니", "en": "T-money card", "romaji": "timeoni"},
+                        {"ko": "충전", "en": "recharge", "romaji": "chungjeon"},
+                        {"ko": "충전해 주세요", "en": "please recharge", "romaji": "chungjeonhae juseyo"},
+                    ],
+                },
+            },
+            {
+                "slug": "getting-around-tmoney-drill",
+                "kind": "drill",
+                "title": "T-money Drill",
+                "order_index": 1,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "티머니",
+                            "answer": "T-money card",
+                            "choices": ["T-money card", "subway", "recharge"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "ga_tmoney_1",
+                            "answer": "티머니 카드 주세요",
+                            "choices": ["티머니 카드 주세요", "충전해 주세요", "얼마예요?"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "충전",
+                            "answer": "recharge",
+                            "choices": ["recharge", "card", "station"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "ga_d_chungjeon",
+                            "answer": "충전",
+                            "choices": ["충전", "티머니", "지하철"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "getting-around-subway",
+                "kind": "scene",
+                "title": "Which Subway Line?",
+                "order_index": 2,
+                "content_json": {
+                    "setting": "subway station",
+                    "character": "passerby",
+                    "lines": [
+                        {
+                            "speaker": "you",
+                            "ko": "저기요, 강남역 가요?",
+                            "romaji": "jeogiyo, gangnamyeok gayo?",
+                            "en": "Excuse me, does this go to Gangnam Station?",
+                            "audio_key": "ga_subway_1",
+                        },
+                        {
+                            "speaker": "passerby",
+                            "ko": "네, 2호선 타세요.",
+                            "romaji": "ne, i-hoseon taseyo.",
+                            "en": "Yes, take Line 2.",
+                            "audio_key": "ga_subway_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "지하철 어디에서 타요?",
+                            "romaji": "jihacheol eodieseo tayo?",
+                            "en": "Where do I catch the subway?",
+                            "audio_key": "ga_subway_3",
+                        },
+                        {
+                            "speaker": "passerby",
+                            "ko": "저기 2번 출구요.",
+                            "romaji": "jeogi i-beon chulguyo.",
+                            "en": "Over there, Exit 2.",
+                            "audio_key": "ga_subway_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Ask whether this goes to Gangnam Station.",
+                            "options": ["강남역 가요?", "얼마예요?", "감사합니다"],
+                            "accepted": [
+                                {"ko": "강남역 가요?", "intents": ["does it go to gangnam station", "to gangnam", "gangnam station"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Ask which line to take.",
+                            "options": ["몇 호선이에요?", "어디예요?", "네"],
+                            "accepted": [
+                                {"ko": "몇 호선이에요?", "intents": ["which line", "what line is it", "which subway line"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "지하철", "en": "subway", "romaji": "jihacheol"},
+                        {"ko": "역", "en": "station", "romaji": "yeok"},
+                        {"ko": "호선", "en": "(subway) line", "romaji": "hoseon"},
+                        {"ko": "어디", "en": "where", "romaji": "eodi"},
+                    ],
+                },
+            },
+            {
+                "slug": "getting-around-subway-drill",
+                "kind": "drill",
+                "title": "Subway Drill",
+                "order_index": 3,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "지하철",
+                            "answer": "subway",
+                            "choices": ["subway", "bus", "station"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "역",
+                            "answer": "station",
+                            "choices": ["station", "line", "where"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "ga_subway_2",
+                            "answer": "2호선 타세요",
+                            "choices": ["2호선 타세요", "강남역 가요?", "어디에서 타요?"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "ga_d_eodi",
+                            "answer": "어디",
+                            "choices": ["어디", "호선", "역"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "getting-around-bus",
+                "kind": "scene",
+                "title": "Where to Get Off the Bus",
+                "order_index": 4,
+                "content_json": {
+                    "setting": "bus",
+                    "character": "driver",
+                    "lines": [
+                        {
+                            "speaker": "you",
+                            "ko": "이 버스 서울역까지 가요?",
+                            "romaji": "i beoseu seoulyeok-kkaji gayo?",
+                            "en": "Does this bus go to Seoul Station?",
+                            "audio_key": "ga_bus_1",
+                        },
+                        {
+                            "speaker": "driver",
+                            "ko": "네, 가요. 타세요.",
+                            "romaji": "ne, gayo. taseyo.",
+                            "en": "Yes, it does. Hop on.",
+                            "audio_key": "ga_bus_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "어디에서 내려요?",
+                            "romaji": "eodieseo naeryeoyo?",
+                            "en": "Where do I get off?",
+                            "audio_key": "ga_bus_3",
+                        },
+                        {
+                            "speaker": "driver",
+                            "ko": "다음 역에서 내려요.",
+                            "romaji": "daeum yeok-eseo naeryeoyo.",
+                            "en": "Get off at the next stop.",
+                            "audio_key": "ga_bus_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Ask if this bus goes all the way to Seoul Station.",
+                            "options": ["서울역까지 가요?", "얼마예요?", "감사합니다"],
+                            "accepted": [
+                                {"ko": "서울역까지 가요?", "intents": ["does it go to seoul station", "to seoul station", "all the way to seoul station"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Ask where you should get off.",
+                            "options": ["어디에서 내려요?", "어디 가세요?", "네"],
+                            "accepted": [
+                                {"ko": "어디에서 내려요?", "intents": ["where do i get off", "where to get off", "which stop"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "버스", "en": "bus", "romaji": "beoseu"},
+                        {"ko": "까지", "en": "to/until", "romaji": "kkaji"},
+                        {"ko": "내려요", "en": "get off", "romaji": "naeryeoyo"},
+                    ],
+                },
+            },
+            {
+                "slug": "getting-around-bus-drill",
+                "kind": "drill",
+                "title": "Bus Drill",
+                "order_index": 5,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "버스",
+                            "answer": "bus",
+                            "choices": ["bus", "subway", "station"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "내려요",
+                            "answer": "get off",
+                            "choices": ["get off", "get on", "to/until"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "ga_bus_3",
+                            "answer": "어디에서 내려요?",
+                            "choices": ["어디에서 내려요?", "서울역까지 가요?", "2호선 타세요"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "ga_d_kkaji",
+                            "answer": "까지",
+                            "choices": ["까지", "내려요", "버스"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "getting-around-boss",
+                "kind": "boss",
+                "title": "Boss: Find Your Line & Stop",
+                "order_index": 6,
+                "content_json": {
+                    "goal_en": "Ask for directions to the right subway line and confirm your stop",
+                    "persona": "transit_staff",
+                    "level": "beginner",
+                    "allowed_vocab": [
+                        "안녕하세요",
+                        "감사합니다",
+                        "네",
+                        "아니요",
+                        "지하철",
+                        "버스",
+                        "역",
+                        "호선",
+                        "어디",
+                        "어디에서 내려요?",
+                        "내려요",
+                        "까지",
+                        "티머니",
+                    ],
+                    "success_criteria": "Learner asks which line to take and confirms where to get off",
+                    "max_turns": 8,
+                },
+            },
+        ],
+    },
 ]

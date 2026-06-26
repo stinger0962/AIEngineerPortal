@@ -41,7 +41,7 @@ BRIEFS: dict[str, RegionBrief] = {
             {"ko": "티머니", "en": "T-money card", "romaji": "timeoni"},
         ],
         target_grammar=["~까지 (to/until a place)", "어디 + 에서/에 (where at/to)"],
-        boss_persona="taxi_driver",
+        boss_persona="transit_staff",
         boss_goal_en="Get directions to the right subway line and ride one stop",
     ),
 }

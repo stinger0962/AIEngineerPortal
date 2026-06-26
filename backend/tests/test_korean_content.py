@@ -47,6 +47,7 @@ def test_region_node_counts():
     assert len(by_slug["hangul-island"]["nodes"]) == 5
     assert len(by_slug["arrival"]["nodes"]) == 7
     assert len(by_slug["cafe-food"]["nodes"]) == 7
+    assert len(by_slug["getting-around"]["nodes"]) == 7
 
 
 def test_node_slugs_globally_unique():
