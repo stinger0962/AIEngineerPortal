@@ -2743,4 +2743,329 @@ REGIONS: list[dict[str, Any]] = [
             },
         ],
     },
+    # ------------------------------------------------------------------ #
+    # Region 9 — Intermediate (capstone: past & future tense)           #
+    # ------------------------------------------------------------------ #
+    {
+        "slug": "intermediate",
+        "title": "Intermediate",
+        "theme": "intermediate",
+        "order_index": 9,
+        "nodes": [
+            {
+                "slug": "intermediate-yesterday",
+                "kind": "scene",
+                "title": "What Did You Do Yesterday?",
+                "order_index": 0,
+                "content_json": {
+                    "setting": "café table",
+                    "character": "friend",
+                    "lines": [
+                        {
+                            "speaker": "friend",
+                            "ko": "어제 뭐 했어요?",
+                            "romaji": "eoje mwo haesseoyo?",
+                            "en": "What did you do yesterday?",
+                            "audio_key": "im_yesterday_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "친구를 만났어요. 영화도 봤어요.",
+                            "romaji": "chingu-reul mannasseoyo. yeonghwa-do bwasseoyo.",
+                            "en": "I met a friend. I watched a movie too.",
+                            "audio_key": "im_yesterday_2",
+                        },
+                        {
+                            "speaker": "friend",
+                            "ko": "와, 재미있었어요?",
+                            "romaji": "wa, jaemiisseosseoyo?",
+                            "en": "Wow, was it fun?",
+                            "audio_key": "im_yesterday_3",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "네, 정말 재미있었어요!",
+                            "romaji": "ne, jeongmal jaemiisseosseoyo!",
+                            "en": "Yes, it was really fun!",
+                            "audio_key": "im_yesterday_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Your friend asks what you did yesterday. Say you went home (past tense).",
+                            "options": ["집에 갔어요", "집에 가요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "집에 갔어요", "intents": ["i went home", "i went back home", "went home"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Tell your friend it was fun.",
+                            "options": ["재미있었어요", "맛있어요", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "재미있었어요", "intents": ["it was fun", "it was enjoyable", "i had fun"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "어제", "en": "yesterday", "romaji": "eoje"},
+                        {"ko": "갔어요", "en": "went", "romaji": "gasseoyo"},
+                        {"ko": "재미있었어요", "en": "it was fun", "romaji": "jaemiisseosseoyo"},
+                    ],
+                },
+            },
+            {
+                "slug": "intermediate-yesterday-drill",
+                "kind": "drill",
+                "title": "Yesterday Drill",
+                "order_index": 1,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "어제",
+                            "answer": "yesterday",
+                            "choices": ["yesterday", "today", "tomorrow"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "im_yesterday_1",
+                            "answer": "어제 뭐 했어요?",
+                            "choices": ["어제 뭐 했어요?", "내일 뭐 해요?", "얼마예요?"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "갔어요",
+                            "answer": "went",
+                            "choices": ["went", "did", "will do"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "im_d_jaemi",
+                            "answer": "재미있었어요",
+                            "choices": ["재미있었어요", "어제", "갔어요"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "intermediate-opinion",
+                "kind": "scene",
+                "title": "How Was It?",
+                "order_index": 2,
+                "content_json": {
+                    "setting": "café table",
+                    "character": "friend",
+                    "lines": [
+                        {
+                            "speaker": "friend",
+                            "ko": "어제 콘서트 어땠어요?",
+                            "romaji": "eoje konseoteu eottaesseoyo?",
+                            "en": "How was the concert yesterday?",
+                            "audio_key": "im_opinion_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "정말 좋았어요. 노래가 좋아요.",
+                            "romaji": "jeongmal joasseoyo. norae-ga joayo.",
+                            "en": "It was really good. The songs are nice.",
+                            "audio_key": "im_opinion_2",
+                        },
+                        {
+                            "speaker": "friend",
+                            "ko": "음식은 어땠어요?",
+                            "romaji": "eumsig-eun eottaesseoyo?",
+                            "en": "How was the food?",
+                            "audio_key": "im_opinion_3",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "음식도 맛있었어요!",
+                            "romaji": "eumsik-do masisseosseoyo!",
+                            "en": "The food was delicious too!",
+                            "audio_key": "im_opinion_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Your friend asks how it was. Say it was good.",
+                            "options": ["좋았어요", "갔어요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "좋았어요", "intents": ["it was good", "it was nice", "it was great"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Ask your friend how their weekend was.",
+                            "options": ["주말 어땠어요?", "어제 갔어요?", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "주말 어땠어요?", "intents": ["how was your weekend", "how was the weekend", "was the weekend good"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "어땠어요", "en": "how was it", "romaji": "eottaesseoyo"},
+                        {"ko": "좋아요", "en": "good / nice", "romaji": "joayo"},
+                        {"ko": "오늘", "en": "today", "romaji": "oneul"},
+                    ],
+                },
+            },
+            {
+                "slug": "intermediate-opinion-drill",
+                "kind": "drill",
+                "title": "Opinion Drill",
+                "order_index": 3,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "어땠어요",
+                            "answer": "how was it",
+                            "choices": ["how was it", "how much", "what time"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "좋아요",
+                            "answer": "good / nice",
+                            "choices": ["good / nice", "it was fun", "spicy"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "im_opinion_1",
+                            "answer": "어땠어요?",
+                            "choices": ["어땠어요?", "뭐 했어요?", "얼마예요?"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "im_d_oneul",
+                            "answer": "오늘",
+                            "choices": ["오늘", "어제", "주말"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "intermediate-plans",
+                "kind": "scene",
+                "title": "Weekend Plans",
+                "order_index": 4,
+                "content_json": {
+                    "setting": "café table",
+                    "character": "friend",
+                    "lines": [
+                        {
+                            "speaker": "friend",
+                            "ko": "주말에 뭐 할 거예요?",
+                            "romaji": "jumar-e mwo hal geoyeyo?",
+                            "en": "What will you do this weekend?",
+                            "audio_key": "im_plans_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "내일 친구를 만날 거예요.",
+                            "romaji": "naeil chingu-reul mannal geoyeyo.",
+                            "en": "Tomorrow I will meet a friend.",
+                            "audio_key": "im_plans_2",
+                        },
+                        {
+                            "speaker": "friend",
+                            "ko": "좋아요! 같이 영화 볼 거예요?",
+                            "romaji": "joayo! gachi yeonghwa bol geoyeyo?",
+                            "en": "Nice! Will you watch a movie together?",
+                            "audio_key": "im_plans_3",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "네, 같이 갈 거예요.",
+                            "romaji": "ne, gachi gal geoyeyo.",
+                            "en": "Yes, we will go together.",
+                            "audio_key": "im_plans_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Your friend asks about your weekend. Say what you will do (future tense).",
+                            "options": ["공부할 거예요", "공부했어요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "공부할 거예요", "intents": ["i will study", "i'm going to study", "study"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Say you will meet a friend tomorrow.",
+                            "options": ["내일 친구를 만날 거예요", "어제 친구를 만났어요", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "내일 친구를 만날 거예요", "intents": ["i will meet a friend tomorrow", "meeting a friend tomorrow", "i'm seeing a friend tomorrow"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "내일", "en": "tomorrow", "romaji": "naeil"},
+                        {"ko": "주말", "en": "weekend", "romaji": "jumal"},
+                        {"ko": "할 거예요", "en": "will do", "romaji": "hal geoyeyo"},
+                    ],
+                },
+            },
+            {
+                "slug": "intermediate-plans-drill",
+                "kind": "drill",
+                "title": "Plans Drill",
+                "order_index": 5,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "내일",
+                            "answer": "tomorrow",
+                            "choices": ["tomorrow", "yesterday", "today"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "주말",
+                            "answer": "weekend",
+                            "choices": ["weekend", "tomorrow", "weekday"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "im_plans_1",
+                            "answer": "주말에 뭐 할 거예요?",
+                            "choices": ["주말에 뭐 할 거예요?", "어제 뭐 했어요?", "어땠어요?"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "im_d_halgeoyeyo",
+                            "answer": "할 거예요",
+                            "choices": ["할 거예요", "했어요", "갔어요"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "intermediate-boss",
+                "kind": "boss",
+                "title": "Boss: Yesterday & Weekend Plans",
+                "order_index": 6,
+                "content_json": {
+                    "goal_en": "Talk about what you did yesterday and your weekend plans",
+                    "persona": "friend",
+                    "level": "intermediate",
+                    "allowed_vocab": [
+                        "안녕하세요",
+                        "감사합니다",
+                        "네",
+                        "아니요",
+                        "어제",
+                        "오늘",
+                        "내일",
+                        "주말",
+                        "갔어요",
+                        "했어요",
+                        "할 거예요",
+                        "어땠어요",
+                        "재미있었어요",
+                        "좋아요",
+                    ],
+                    "success_criteria": "Learner says what they did yesterday and what they will do on the weekend",
+                    "max_turns": 8,
+                },
+            },
+        ],
+    },
 ]

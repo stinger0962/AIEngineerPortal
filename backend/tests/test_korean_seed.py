@@ -23,7 +23,7 @@ def test_seed_creates_regions_and_nodes_idempotently():
         seed_database(db)  # second run must not duplicate
         regions = db.scalars(select(KoreanRegion)).all()
         nodes = db.scalars(select(KoreanNode)).all()
-        assert len(regions) == 9
-        assert len(nodes) == 61  # 5 + 7 + 7 + 7 + 7 + 7 + 7 + 7 + 7
+        assert len(regions) == 10
+        assert len(nodes) == 68  # 5 + 7 + 7 + 7 + 7 + 7 + 7 + 7 + 7 + 7
     finally:
         db.close()

@@ -27,4 +27,5 @@ export const REGION_SEAL: Record<string, string> = {
   restaurant: "밥",
   friends: "친",
   living: "약",
+  intermediate: "중",
 };
