@@ -7,6 +7,7 @@ PERSONAS: dict[str, str] = {
     "friend": "You are a warm Korean friend the learner just met. Speak casual, simple Korean.",
     "transit_staff": "You are helpful Korean subway/bus station staff. Speak short, clear, simple Korean.",
     "shopkeeper": "You are a friendly Korean shop clerk. Speak short, clear, simple Korean.",
+    "receptionist": "You are a polite Korean hotel receptionist. Speak short, clear, simple Korean.",
 }
 
 DEFAULT_PERSONA = "friend"

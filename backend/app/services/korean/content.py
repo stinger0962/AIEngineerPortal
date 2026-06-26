@@ -1437,4 +1437,331 @@ REGIONS: list[dict[str, Any]] = [
             },
         ],
     },
+    # ------------------------------------------------------------------ #
+    # Region 5 — Stay                                                    #
+    # ------------------------------------------------------------------ #
+    {
+        "slug": "stay",
+        "title": "Stay",
+        "theme": "stay",
+        "order_index": 5,
+        "nodes": [
+            {
+                "slug": "stay-checkin",
+                "kind": "scene",
+                "title": "Checking In",
+                "order_index": 0,
+                "content_json": {
+                    "setting": "hotel front desk",
+                    "character": "receptionist",
+                    "lines": [
+                        {
+                            "speaker": "receptionist",
+                            "ko": "안녕하세요, 예약하셨어요?",
+                            "romaji": "annyeonghaseyo, yeyakhasyeosseoyo?",
+                            "en": "Hello, do you have a reservation?",
+                            "audio_key": "st_checkin_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "네, 체크인이요.",
+                            "romaji": "ne, chekeu-in-iyo.",
+                            "en": "Yes, check-in, please.",
+                            "audio_key": "st_checkin_2",
+                        },
+                        {
+                            "speaker": "receptionist",
+                            "ko": "성함이 어떻게 되세요?",
+                            "romaji": "seonghami eotteoke doeseyo?",
+                            "en": "What's your name?",
+                            "audio_key": "st_checkin_3",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "김민수예요. 예약 있어요.",
+                            "romaji": "kim minsu-yeyo. yeyak isseoyo.",
+                            "en": "It's Kim Minsu. I have a reservation.",
+                            "audio_key": "st_checkin_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "The receptionist greets you. Tell them you'd like to check in.",
+                            "options": ["체크인이요", "체크아웃이요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "체크인이요", "intents": ["check in", "i want to check in", "check-in please"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "They ask for your name. Say you have a reservation.",
+                            "options": ["예약 있어요", "예약 없어요", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "예약 있어요", "intents": ["i have a reservation", "yes i have a booking", "there's a reservation"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "체크인", "en": "check-in", "romaji": "chekeu-in"},
+                        {"ko": "예약", "en": "reservation", "romaji": "yeyak"},
+                        {"ko": "있어요", "en": "have / there is", "romaji": "isseoyo"},
+                    ],
+                },
+            },
+            {
+                "slug": "stay-checkin-drill",
+                "kind": "drill",
+                "title": "Check-in Drill",
+                "order_index": 1,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "예약",
+                            "answer": "reservation",
+                            "choices": ["reservation", "check-in", "room"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "st_checkin_2",
+                            "answer": "체크인이요",
+                            "choices": ["체크인이요", "체크아웃이요", "예약 있어요"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "있어요",
+                            "answer": "have / there is",
+                            "choices": ["have / there is", "don't have", "reservation"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "st_d_yeyak",
+                            "answer": "예약",
+                            "choices": ["예약", "체크인", "방"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "stay-wifi",
+                "kind": "scene",
+                "title": "Asking for Wifi",
+                "order_index": 2,
+                "content_json": {
+                    "setting": "hotel front desk",
+                    "character": "receptionist",
+                    "lines": [
+                        {
+                            "speaker": "you",
+                            "ko": "와이파이 있어요?",
+                            "romaji": "waipai isseoyo?",
+                            "en": "Is there wifi?",
+                            "audio_key": "st_wifi_1",
+                        },
+                        {
+                            "speaker": "receptionist",
+                            "ko": "네, 있어요.",
+                            "romaji": "ne, isseoyo.",
+                            "en": "Yes, there is.",
+                            "audio_key": "st_wifi_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "비밀번호 뭐예요?",
+                            "romaji": "bimilbeonho mwoyeyo?",
+                            "en": "What's the password?",
+                            "audio_key": "st_wifi_3",
+                        },
+                        {
+                            "speaker": "receptionist",
+                            "ko": "방 번호예요.",
+                            "romaji": "bang beonho-yeyo.",
+                            "en": "It's your room number.",
+                            "audio_key": "st_wifi_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Ask the receptionist if there is wifi.",
+                            "options": ["와이파이 있어요?", "방 있어요?", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "와이파이 있어요?", "intents": ["is there wifi", "do you have wifi", "wifi"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Now ask for the wifi password.",
+                            "options": ["비밀번호 뭐예요?", "방 번호 뭐예요?", "감사합니다"],
+                            "accepted": [
+                                {"ko": "비밀번호 뭐예요?", "intents": ["what's the password", "the wifi password", "password please"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "와이파이", "en": "wifi", "romaji": "waipai"},
+                        {"ko": "비밀번호", "en": "password", "romaji": "bimilbeonho"},
+                        {"ko": "방", "en": "room", "romaji": "bang"},
+                    ],
+                },
+            },
+            {
+                "slug": "stay-wifi-drill",
+                "kind": "drill",
+                "title": "Wifi Drill",
+                "order_index": 3,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "비밀번호",
+                            "answer": "password",
+                            "choices": ["password", "wifi", "room"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "st_wifi_1",
+                            "answer": "와이파이 있어요?",
+                            "choices": ["와이파이 있어요?", "비밀번호 뭐예요?", "방 번호예요"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "방",
+                            "answer": "room",
+                            "choices": ["room", "password", "reservation"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "st_d_waipai",
+                            "answer": "와이파이",
+                            "choices": ["와이파이", "비밀번호", "수건"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "stay-checkout",
+                "kind": "scene",
+                "title": "Checkout & a Towel",
+                "order_index": 4,
+                "content_json": {
+                    "setting": "hotel front desk",
+                    "character": "receptionist",
+                    "lines": [
+                        {
+                            "speaker": "you",
+                            "ko": "체크아웃 몇 시예요?",
+                            "romaji": "chekeu-aut myeot si-yeyo?",
+                            "en": "What time is checkout?",
+                            "audio_key": "st_checkout_1",
+                        },
+                        {
+                            "speaker": "receptionist",
+                            "ko": "열한 시예요.",
+                            "romaji": "yeolhan si-yeyo.",
+                            "en": "It's eleven o'clock.",
+                            "audio_key": "st_checkout_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "수건 있어요? 수건 더 주세요.",
+                            "romaji": "sugeon isseoyo? sugeon deo juseyo.",
+                            "en": "Are there towels? Please give me more towels.",
+                            "audio_key": "st_checkout_3",
+                        },
+                        {
+                            "speaker": "receptionist",
+                            "ko": "네, 카드키 주세요.",
+                            "romaji": "ne, kadeuki juseyo.",
+                            "en": "Sure, please give me the key card.",
+                            "audio_key": "st_checkout_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "Ask what time checkout is.",
+                            "options": ["체크아웃 몇 시예요?", "체크인 몇 시예요?", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "체크아웃 몇 시예요?", "intents": ["what time is checkout", "checkout time", "when is checkout"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Ask for an extra towel.",
+                            "options": ["수건 더 주세요", "카드키 주세요", "네"],
+                            "accepted": [
+                                {"ko": "수건 더 주세요", "intents": ["more towels please", "an extra towel", "another towel"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "몇 시", "en": "what time", "romaji": "myeot si"},
+                        {"ko": "체크아웃", "en": "checkout", "romaji": "chekeu-aut"},
+                        {"ko": "수건", "en": "towel", "romaji": "sugeon"},
+                        {"ko": "카드키", "en": "key card", "romaji": "kadeuki"},
+                    ],
+                },
+            },
+            {
+                "slug": "stay-checkout-drill",
+                "kind": "drill",
+                "title": "Checkout Drill",
+                "order_index": 5,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "수건",
+                            "answer": "towel",
+                            "choices": ["towel", "key card", "room"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "st_checkout_1",
+                            "answer": "체크아웃 몇 시예요?",
+                            "choices": ["체크아웃 몇 시예요?", "와이파이 있어요?", "수건 더 주세요"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "몇 시",
+                            "answer": "what time",
+                            "choices": ["what time", "checkout", "towel"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "st_d_kadeuki",
+                            "answer": "카드키",
+                            "choices": ["카드키", "수건", "체크아웃"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "stay-boss",
+                "kind": "boss",
+                "title": "Boss: Check In & Wifi",
+                "order_index": 6,
+                "content_json": {
+                    "goal_en": "Check in and ask for the wifi password",
+                    "persona": "receptionist",
+                    "level": "beginner",
+                    "allowed_vocab": [
+                        "안녕하세요",
+                        "감사합니다",
+                        "네",
+                        "아니요",
+                        "체크인",
+                        "체크인이요",
+                        "예약",
+                        "있어요",
+                        "방",
+                        "와이파이",
+                        "비밀번호",
+                        "몇 시",
+                        "체크아웃",
+                        "수건",
+                        "카드키",
+                    ],
+                    "success_criteria": "Learner checks in with their reservation and asks for the wifi password",
+                    "max_turns": 8,
+                },
+            },
+        ],
+    },
 ]
