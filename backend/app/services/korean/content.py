@@ -2417,4 +2417,330 @@ REGIONS: list[dict[str, Any]] = [
             },
         ],
     },
+    # ------------------------------------------------------------------ #
+    # Region 8 — Living Here                                            #
+    # ------------------------------------------------------------------ #
+    {
+        "slug": "living-here",
+        "title": "Living Here",
+        "theme": "living",
+        "order_index": 8,
+        "nodes": [
+            {
+                "slug": "living-here-pharmacy",
+                "kind": "scene",
+                "title": "At the Pharmacy",
+                "order_index": 0,
+                "content_json": {
+                    "setting": "pharmacy",
+                    "character": "pharmacist",
+                    "lines": [
+                        {
+                            "speaker": "pharmacist",
+                            "ko": "어서 오세요. 어디가 아파요?",
+                            "romaji": "eoseo oseyo. eodiga apayo?",
+                            "en": "Welcome. Where does it hurt?",
+                            "audio_key": "lv_pharmacy_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "감기예요. 머리가 아파요.",
+                            "romaji": "gamgi-yeyo. meori-ga apayo.",
+                            "en": "I have a cold. My head hurts.",
+                            "audio_key": "lv_pharmacy_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "감기약 주세요.",
+                            "romaji": "gamgiyak juseyo.",
+                            "en": "Please give me cold medicine.",
+                            "audio_key": "lv_pharmacy_3",
+                        },
+                        {
+                            "speaker": "pharmacist",
+                            "ko": "네, 여기 있어요.",
+                            "romaji": "ne, yeogi isseoyo.",
+                            "en": "Sure, here you go.",
+                            "audio_key": "lv_pharmacy_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "The pharmacist asks where it hurts. Say you have a cold.",
+                            "options": ["감기예요", "택배예요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "감기예요", "intents": ["i have a cold", "it's a cold", "a cold"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Ask the pharmacist for medicine.",
+                            "options": ["약 주세요", "병원 어디예요?", "네"],
+                            "accepted": [
+                                {"ko": "약 주세요", "intents": ["please give me medicine", "medicine please", "i need medicine"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "약", "en": "medicine", "romaji": "yak"},
+                        {"ko": "감기", "en": "cold", "romaji": "gamgi"},
+                        {"ko": "머리", "en": "head", "romaji": "meori"},
+                    ],
+                },
+            },
+            {
+                "slug": "living-here-pharmacy-drill",
+                "kind": "drill",
+                "title": "Pharmacy Drill",
+                "order_index": 1,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "약",
+                            "answer": "medicine",
+                            "choices": ["medicine", "cold", "head"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "lv_pharmacy_3",
+                            "answer": "감기약 주세요",
+                            "choices": ["감기약 주세요", "머리가 아파요", "병원 어디예요?"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "감기",
+                            "answer": "cold",
+                            "choices": ["cold", "medicine", "fever"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "lv_d_meori",
+                            "answer": "머리",
+                            "choices": ["머리", "약", "감기"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "living-here-clinic",
+                "kind": "scene",
+                "title": "At the Clinic",
+                "order_index": 2,
+                "content_json": {
+                    "setting": "clinic",
+                    "character": "nurse",
+                    "lines": [
+                        {
+                            "speaker": "nurse",
+                            "ko": "어디가 아파요?",
+                            "romaji": "eodiga apayo?",
+                            "en": "Where does it hurt?",
+                            "audio_key": "lv_clinic_1",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "배가 아파요. 열도 있어요.",
+                            "romaji": "bae-ga apayo. yeol-do isseoyo.",
+                            "en": "My stomach hurts. I also have a fever.",
+                            "audio_key": "lv_clinic_2",
+                        },
+                        {
+                            "speaker": "nurse",
+                            "ko": "처방전 드릴게요.",
+                            "romaji": "cheobangjeon deurilgeyo.",
+                            "en": "I'll give you a prescription.",
+                            "audio_key": "lv_clinic_3",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "감사합니다.",
+                            "romaji": "gamsahamnida.",
+                            "en": "Thank you.",
+                            "audio_key": "lv_clinic_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "The nurse asks where it hurts. Say your stomach hurts.",
+                            "options": ["배가 아파요", "머리가 아파요", "감사합니다"],
+                            "accepted": [
+                                {"ko": "배가 아파요", "intents": ["my stomach hurts", "stomachache", "my belly hurts"]},
+                                {"ko": "머리가 아파요", "intents": ["my head hurts", "headache"]},
+                            ],
+                        },
+                        {
+                            "prompt_en": "Tell the nurse you have a fever.",
+                            "options": ["열이 있어요", "처방전 있어요", "네"],
+                            "accepted": [
+                                {"ko": "열이 있어요", "intents": ["i have a fever", "i'm running a fever", "fever"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "아파요", "en": "(it) hurts", "romaji": "apayo"},
+                        {"ko": "배", "en": "stomach / belly", "romaji": "bae"},
+                        {"ko": "병원", "en": "hospital / clinic", "romaji": "byeongwon"},
+                        {"ko": "열", "en": "fever", "romaji": "yeol"},
+                    ],
+                },
+            },
+            {
+                "slug": "living-here-clinic-drill",
+                "kind": "drill",
+                "title": "Clinic Drill",
+                "order_index": 3,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "병원",
+                            "answer": "hospital / clinic",
+                            "choices": ["hospital / clinic", "pharmacy", "fever"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "lv_clinic_2",
+                            "answer": "배가 아파요",
+                            "choices": ["배가 아파요", "머리가 아파요", "열도 있어요"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "열",
+                            "answer": "fever",
+                            "choices": ["fever", "stomach / belly", "head"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "lv_d_bae",
+                            "answer": "배",
+                            "choices": ["배", "열", "병원"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "living-here-delivery",
+                "kind": "scene",
+                "title": "A Delivery Arrives",
+                "order_index": 4,
+                "content_json": {
+                    "setting": "apartment door",
+                    "character": "courier",
+                    "lines": [
+                        {
+                            "speaker": "courier",
+                            "ko": "택배 왔어요!",
+                            "romaji": "taekbae wasseoyo!",
+                            "en": "A delivery is here!",
+                            "audio_key": "lv_delivery_1",
+                        },
+                        {
+                            "speaker": "courier",
+                            "ko": "김민수 씨 맞아요?",
+                            "romaji": "kim minsu ssi majayo?",
+                            "en": "Is this Kim Minsu?",
+                            "audio_key": "lv_delivery_2",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "네, 제 거예요.",
+                            "romaji": "ne, je geo-yeyo.",
+                            "en": "Yes, it's mine.",
+                            "audio_key": "lv_delivery_3",
+                        },
+                        {
+                            "speaker": "you",
+                            "ko": "감사합니다!",
+                            "romaji": "gamsahamnida!",
+                            "en": "Thank you!",
+                            "audio_key": "lv_delivery_4",
+                        },
+                    ],
+                    "your_turns": [
+                        {
+                            "prompt_en": "The courier asks if the package is yours. Confirm it's yours.",
+                            "options": ["네, 제 거예요", "아니요", "얼마예요?"],
+                            "accepted": [
+                                {"ko": "네, 제 거예요", "intents": ["yes it's mine", "that's mine", "yes that's me"]}
+                            ],
+                        },
+                        {
+                            "prompt_en": "Thank the courier for the delivery.",
+                            "options": ["감사합니다", "택배예요", "아파요"],
+                            "accepted": [
+                                {"ko": "감사합니다", "intents": ["thank you", "thanks", "thank you for the delivery"]}
+                            ],
+                        },
+                    ],
+                    "new_vocab": [
+                        {"ko": "처방전", "en": "prescription", "romaji": "cheobangjeon"},
+                        {"ko": "택배", "en": "delivery package", "romaji": "taekbae"},
+                    ],
+                },
+            },
+            {
+                "slug": "living-here-delivery-drill",
+                "kind": "drill",
+                "title": "Delivery Drill",
+                "order_index": 5,
+                "content_json": {
+                    "items": [
+                        {
+                            "type": "match",
+                            "ko": "택배",
+                            "answer": "delivery package",
+                            "choices": ["delivery package", "prescription", "medicine"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "lv_delivery_1",
+                            "answer": "택배 왔어요!",
+                            "choices": ["택배 왔어요!", "어디가 아파요?", "처방전 드릴게요"],
+                        },
+                        {
+                            "type": "match",
+                            "ko": "처방전",
+                            "answer": "prescription",
+                            "choices": ["prescription", "delivery package", "fever"],
+                        },
+                        {
+                            "type": "listen",
+                            "audio_key": "lv_d_taekbae",
+                            "answer": "택배",
+                            "choices": ["택배", "처방전", "약"],
+                        },
+                    ]
+                },
+            },
+            {
+                "slug": "living-here-boss",
+                "kind": "boss",
+                "title": "Boss: Buy Cold Medicine",
+                "order_index": 6,
+                "content_json": {
+                    "goal_en": "Buy cold medicine at the pharmacy",
+                    "persona": "pharmacist",
+                    "level": "beginner",
+                    "allowed_vocab": [
+                        "안녕하세요",
+                        "감사합니다",
+                        "네",
+                        "아니요",
+                        "약",
+                        "감기",
+                        "아파요",
+                        "머리",
+                        "배",
+                        "병원",
+                        "열",
+                        "처방전",
+                        "택배",
+                        "주세요",
+                    ],
+                    "success_criteria": "Learner says they have a cold and asks for cold medicine",
+                    "max_turns": 8,
+                },
+            },
+        ],
+    },
 ]
