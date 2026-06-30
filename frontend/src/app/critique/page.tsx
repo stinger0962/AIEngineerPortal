@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ClipboardCheck, Upload, Loader2, Sparkles, FileSearch, Compass, Wand2 } from "lucide-react";
 import {
   extractFile,
@@ -28,6 +28,10 @@ const SUBSTANCE = "#b07d2e"; // 实质层 — copper/amber (需作者补料)
 const SUBSTANCE_DARK = "#9a6a30";
 const INSTRUCT = "#5b73a8"; // 按需修改 — slate blue (用户下指令)
 const INSTRUCT_DARK = "#3f5a8a";
+
+// localStorage key for the whole critique session (survives refresh / leaving the
+// page / VPN toggle — it's per-browser, unrelated to network).
+const STORAGE_KEY = "critique_state_v1";
 
 // ── Paper type config ─────────────────────────────────────────────────────────
 
@@ -272,12 +276,14 @@ function WorktopPanel({
   busy,
   onAdopt,
   onReset,
+  onDraftChange,
 }: {
   draft: string;
   worklog: WorkEntry[];
   busy: boolean;
   onAdopt: (text: string) => void;
   onReset: () => void;
+  onDraftChange: (text: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -369,14 +375,20 @@ function WorktopPanel({
         </div>
       )}
 
-      {/* Full draft */}
+      {/* Full draft — editable: 手动修饰任意一句，再采纳 */}
       <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: WRITING }}>
-          改后全文
-        </p>
-        <div className="max-h-[420px] overflow-auto bg-white border border-ink/10 rounded-xl p-4 text-[13px] leading-6 whitespace-pre-wrap text-ink/80">
-          {draft}
+        <div className="flex items-center gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: WRITING }}>
+            改后全文 · 可直接编辑
+          </p>
+          <span className="text-[11px] text-ink/40">手动修饰后再采纳</span>
         </div>
+        <textarea
+          value={draft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          className="w-full resize-y bg-white border border-ink/10 rounded-xl p-4 text-[13px] leading-6 text-ink/85 focus:outline-none focus:ring-2 focus:ring-[#5fb3a3]/40"
+          style={{ minHeight: 240, maxHeight: 460 }}
+        />
       </div>
 
       {/* Single action bar */}
@@ -414,6 +426,139 @@ function WorktopPanel({
           style={{ background: "transparent", color: "rgba(20,33,61,0.45)", cursor: busy ? "not-allowed" : "pointer" }}
         >
           重置工作稿
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Pending proposal (inform → approve → only then apply) ─────────────────────
+
+type Pending = {
+  source: WorkEntry["source"];
+  summary: string;
+  applied: PatchEdit[];
+  unapplied: PatchEdit[];
+  notes: string[];
+  patched: string;
+};
+
+const SOURCE_META: Record<WorkEntry["source"], { label: string; accent: string }> = {
+  writing: { label: "改写作", accent: WRITING_DARK },
+  substance: { label: "深挖融入", accent: SUBSTANCE_DARK },
+  instruction: { label: "按我的要求改", accent: INSTRUCT_DARK },
+};
+
+function ProposalPanel({
+  pending,
+  busy,
+  onApprove,
+  onDiscard,
+}: {
+  pending: Pending;
+  busy: boolean;
+  onApprove: () => void;
+  onDiscard: () => void;
+}) {
+  const meta = SOURCE_META[pending.source];
+  const noAutoEdits = pending.applied.length === 0;
+  return (
+    <div className="rounded-[20px] p-5 space-y-4" style={{ background: "rgba(20,33,61,0.015)", border: `2px dashed ${meta.accent}` }}>
+      {/* Header */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-base font-semibold text-ink">拟修改 · 待你通过</span>
+        <span
+          className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold"
+          style={{ background: `${meta.accent}1f`, color: meta.accent, border: `1px solid ${meta.accent}40` }}
+        >
+          {meta.label}
+        </span>
+        <span className="ml-auto text-[11px] text-ink/45">通过后才并入工作稿，原文始终不动</span>
+      </div>
+
+      <p className="text-sm leading-6 text-ink/75">{pending.summary}</p>
+
+      {/* Proposed edits — 原句 → 改后 */}
+      {pending.applied.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: meta.accent }}>
+            拟改动 ({pending.applied.length}) · 原句 → 改后
+          </p>
+          <div className="space-y-2">
+            {pending.applied.map((edit, i) => (
+              <PatchEditCard key={i} edit={edit} variant="applied" />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Unapplied */}
+      {pending.unapplied.length > 0 && (
+        <div
+          className="rounded-xl p-4 space-y-2"
+          style={{ background: "rgba(160,106,48,0.06)", border: "1px solid rgba(160,106,48,0.22)" }}
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: "#a06a30" }}>
+            未能自动定位 ({pending.unapplied.length}) · 请手动处理
+          </p>
+          <div className="space-y-2">
+            {pending.unapplied.map((edit, i) => (
+              <PatchEditCard key={i} edit={edit} variant="unapplied" />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Notes */}
+      {pending.notes.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: meta.accent }}>
+            建议（需手动）
+          </p>
+          <ul className="space-y-1.5">
+            {pending.notes.map((note, i) => (
+              <li key={i} className="flex gap-2 text-[13px] text-ink/75 leading-5">
+                <span className="shrink-0 font-semibold" style={{ color: meta.accent }}>→</span>
+                <span>{note}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Collapsible full preview */}
+      {!noAutoEdits && (
+        <details className="rounded-xl border border-ink/10 bg-white/70">
+          <summary className="cursor-pointer list-none px-3 py-2.5 text-[13px] font-medium" style={{ color: meta.accent }}>
+            改后预览（点开看全文）
+          </summary>
+          <div className="max-h-[360px] overflow-auto px-4 pb-4 text-[13px] leading-6 whitespace-pre-wrap text-ink/80">
+            {pending.patched}
+          </div>
+        </details>
+      )}
+
+      {/* Approve / discard */}
+      <div className="flex flex-wrap gap-3">
+        <button
+          onClick={onApprove}
+          disabled={busy}
+          className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
+          style={{
+            background: busy ? "rgba(20,33,61,0.08)" : meta.accent,
+            color: busy ? "rgba(20,33,61,0.30)" : "white",
+            cursor: busy ? "not-allowed" : "pointer",
+          }}
+        >
+          {noAutoEdits ? "✓ 通过（记入工作稿）" : "✓ 通过并应用"}
+        </button>
+        <button
+          onClick={onDiscard}
+          disabled={busy}
+          className="rounded-[14px] px-5 py-2.5 text-sm font-semibold transition-all"
+          style={{ background: "transparent", color: "rgba(20,33,61,0.55)", border: "1px solid rgba(20,33,61,0.18)", cursor: busy ? "not-allowed" : "pointer" }}
+        >
+          ✗ 放弃
         </button>
       </div>
     </div>
@@ -513,6 +658,7 @@ function DeepDivePanel({
   integrating,
   integrateError,
   integratedCount,
+  locked,
   onIntegrate,
   onReprobe,
 }: {
@@ -520,6 +666,7 @@ function DeepDivePanel({
   integrating: boolean;
   integrateError: string | null;
   integratedCount: number;
+  locked: boolean;
   onIntegrate: (answers: { question: string; answer: string; stance: ProbeStance }[]) => void;
   onReprobe: () => void;
 }) {
@@ -534,6 +681,7 @@ function DeepDivePanel({
 
   const canIntegrate =
     !integrating &&
+    !locked &&
     questions.some((_, i) => answers[i].stance !== "skip" && answers[i].answer.trim().length > 0);
 
   function handleIntegrate() {
@@ -772,6 +920,10 @@ export default function CritiquePage() {
   // Both 改写作 and 深挖融入 edit `draft` in place and append to `worklog`.
   const [draft, setDraft] = useState<string | null>(null);
   const [worklog, setWorklog] = useState<WorkEntry[]>([]);
+  // Inform → approve → apply: a modification first lands here as a proposal; it
+  // only enters the worktop (draft/worklog) when the user clicks 通过.
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [hydrated, setHydrated] = useState(false);  // localStorage restore done
 
   // 改写作 (writing-layer patch) state
   const [improving, setImproving] = useState(false);
@@ -798,9 +950,67 @@ export default function CritiquePage() {
   const charCount = text.length;
   const hasEnough = charCount >= 200;
   const busy = evaluating || improving || docReviewing || probing || integrating || instructing;
+  // A pending proposal blocks new modifications until the user 通过/放弃 it.
+  const modLocked = busy || pending !== null;
   const canEvaluate = hasEnough && !busy;
   const canDocReview = hasEnough && !busy;
-  const canImprove = hasEnough && !busy;
+  const canImprove = hasEnough && !modLocked;
+
+  // ── Persistence (localStorage — survives refresh / leaving / VPN toggle) ────
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (typeof s.text === "string") setText(s.text);
+        if (s.paperType) setPaperType(s.paperType);
+        if (s.outputLang) setOutputLang(s.outputLang);
+        if (typeof s.filename === "string") setFilename(s.filename);
+        if (s.result) setResult(s.result);
+        if (typeof s.draft === "string") setDraft(s.draft);
+        if (Array.isArray(s.worklog)) setWorklog(s.worklog);
+        if (s.pending) setPending(s.pending);
+        if (Array.isArray(s.questions)) setQuestions(s.questions);
+        if (s.activeTab === "source" || s.activeTab === "polish") setActiveTab(s.activeTab);
+      }
+    } catch {
+      /* corrupt / unavailable — start fresh */
+    }
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const id = setTimeout(() => {
+      try {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ text, paperType, outputLang, filename, result, draft, worklog, pending, questions, activeTab }),
+        );
+      } catch {
+        /* quota exceeded / unavailable — skip */
+      }
+    }, 400);
+    return () => clearTimeout(id);
+  }, [hydrated, text, paperType, outputLang, filename, result, draft, worklog, pending, questions, activeTab]);
+
+  function clearAll() {
+    setText("");
+    setFilename(null);
+    setResult(null);
+    setDocReviewResult(null);
+    setDocReviewError(null);
+    setEvalError(null);
+    setExtractError(null);
+    resetWorktop();
+    resetDeepDive();
+    setActiveTab("source");
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -860,19 +1070,15 @@ export default function CritiquePage() {
     }
   }
 
-  // Both improve & integrate edit the SAME evolving draft (current draft, or the
-  // original text on the first op) and append what they applied to the worklog.
+  // Modifications (改写作 / 深挖融入 / 按需) all read the latest version (draft ?? text)
+  // and land as a PENDING proposal — they only enter the worktop on 通过.
   async function handleImprove() {
     if (!canImprove) return;
     setImproveError(null);
     setImproving(true);
     try {
-      const result = await patchEssay(draft ?? text, paperType, outputLang);
-      setDraft(result.patched);
-      setWorklog((w) => [
-        ...w,
-        { source: "writing", summary: result.summary, applied: result.applied, unapplied: result.unapplied, notes: result.notes },
-      ]);
+      const r = await patchEssay(draft ?? text, paperType, outputLang);
+      setPending({ source: "writing", summary: r.summary, applied: r.applied, unapplied: r.unapplied, notes: r.notes, patched: r.patched });
     } catch (err) {
       setImproveError(err instanceof Error ? err.message : "改进失败");
     } finally {
@@ -881,16 +1087,12 @@ export default function CritiquePage() {
   }
 
   async function handleInstruct(instruction: string) {
-    if (busy || !hasEnough) return;
+    if (modLocked || !hasEnough) return;
     setInstructError(null);
     setInstructing(true);
     try {
-      const result = await instructEssay(draft ?? text, instruction, paperType, outputLang);
-      setDraft(result.patched);
-      setWorklog((w) => [
-        ...w,
-        { source: "instruction", summary: result.summary, applied: result.applied, unapplied: result.unapplied, notes: result.notes },
-      ]);
+      const r = await instructEssay(draft ?? text, instruction, paperType, outputLang);
+      setPending({ source: "instruction", summary: r.summary, applied: r.applied, unapplied: r.unapplied, notes: r.notes, patched: r.patched });
     } catch (err) {
       setInstructError(err instanceof Error ? err.message : "按指示修改失败");
     } finally {
@@ -898,9 +1100,25 @@ export default function CritiquePage() {
     }
   }
 
+  // 通过：the proposal becomes part of the worktop draft + log. 放弃：discard it.
+  function approvePending() {
+    if (!pending) return;
+    setDraft(pending.patched);
+    setWorklog((w) => [
+      ...w,
+      { source: pending.source, summary: pending.summary, applied: pending.applied, unapplied: pending.unapplied, notes: pending.notes },
+    ]);
+    setPending(null);
+  }
+
+  function discardPending() {
+    setPending(null);
+  }
+
   function resetWorktop() {
     setDraft(null);
     setWorklog([]);
+    setPending(null);
     setImproveError(null);
     setInstructError(null);
   }
@@ -912,7 +1130,7 @@ export default function CritiquePage() {
   }
 
   async function handleProbe() {
-    if (busy || !hasEnough) return;
+    if (modLocked || !hasEnough) return;
     setProbeError(null);
     setQuestions(null);
     setIntegrateError(null);
@@ -930,18 +1148,12 @@ export default function CritiquePage() {
   async function handleIntegrate(
     answers: { question: string; answer: string; stance: ProbeStance }[],
   ) {
-    if (busy) return;
+    if (modLocked) return;
     setIntegrateError(null);
     setIntegrating(true);
     try {
-      const result = await integrateAnswers(draft ?? text, answers, paperType, outputLang);
-      setDraft(result.patched);
-      setWorklog((w) => [
-        ...w,
-        { source: "substance", summary: result.summary, applied: result.applied, unapplied: result.unapplied, notes: result.notes },
-      ]);
-      // Keep `questions` so the panel stays on its "已融入 N 处 + 重新提问" done
-      // state (clearing it would unmount the panel and hide that a round ran).
+      const r = await integrateAnswers(draft ?? text, answers, paperType, outputLang);
+      setPending({ source: "substance", summary: r.summary, applied: r.applied, unapplied: r.unapplied, notes: r.notes, patched: r.patched });
     } catch (err) {
       setIntegrateError(err instanceof Error ? err.message : "融入失败");
     } finally {
@@ -1055,6 +1267,24 @@ export default function CritiquePage() {
             <span className="absolute left-0 right-0 -bottom-px h-0.5" style={{ background: WRITING }} />
           )}
         </button>
+
+        {/* Auto-save indicator + clear */}
+        <div className="ml-auto flex items-center gap-3 pr-1 text-[11px]">
+          {hasEnough && (
+            <span className="text-ink/40">已自动保存 · 刷新/关页都在</span>
+          )}
+          {(text || result || draft) && (
+            <button
+              onClick={() => {
+                if (window.confirm("清空当前论文与所有改进进度，重新开始？")) clearAll();
+              }}
+              className="rounded-full px-2.5 py-1 font-medium transition-colors"
+              style={{ color: "rgba(20,33,61,0.45)", border: "1px solid rgba(20,33,61,0.15)" }}
+            >
+              清空重来
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── 原文 tab: the editor ── */}
@@ -1233,10 +1463,15 @@ export default function CritiquePage() {
 
           <div className="border-t border-ink/8" />
 
+          {/* Pending proposal — inform → approve before it enters the worktop */}
+          {pending && (
+            <ProposalPanel pending={pending} busy={busy} onApprove={approvePending} onDiscard={discardPending} />
+          )}
+
           {/* 按我的要求改 — standalone lever, works without a diagnosis */}
           <InstructCard
             hasDraft={draft !== null}
-            busy={busy}
+            busy={modLocked}
             instructing={instructing}
             instructError={instructError}
             onInstruct={handleInstruct}
@@ -1367,16 +1602,16 @@ export default function CritiquePage() {
                   <>
                     <button
                       onClick={handleProbe}
-                      disabled={busy || !hasEnough}
+                      disabled={modLocked || !hasEnough}
                       className="flex w-full items-center justify-center gap-2 rounded-[16px] py-3 text-sm font-semibold transition-all"
                       style={{
-                        background: !busy && hasEnough ? "rgba(176,125,46,0.10)" : "rgba(20,33,61,0.08)",
-                        color: !busy && hasEnough ? SUBSTANCE_DARK : "rgba(20,33,61,0.30)",
+                        background: !modLocked && hasEnough ? "rgba(176,125,46,0.10)" : "rgba(20,33,61,0.08)",
+                        color: !modLocked && hasEnough ? SUBSTANCE_DARK : "rgba(20,33,61,0.30)",
                         border:
-                          !busy && hasEnough
+                          !modLocked && hasEnough
                             ? "1px solid rgba(176,125,46,0.38)"
                             : "1px solid rgba(20,33,61,0.10)",
-                        cursor: !busy && hasEnough ? "pointer" : "not-allowed",
+                        cursor: !modLocked && hasEnough ? "pointer" : "not-allowed",
                       }}
                     >
                       {probing ? (
@@ -1402,6 +1637,7 @@ export default function CritiquePage() {
                     integrating={integrating}
                     integrateError={integrateError}
                     integratedCount={substanceApplied}
+                    locked={modLocked}
                     onIntegrate={handleIntegrate}
                     onReprobe={handleProbe}
                   />
@@ -1426,6 +1662,7 @@ export default function CritiquePage() {
                 busy={busy}
                 onAdopt={handleAdopt}
                 onReset={resetWorktop}
+                onDraftChange={setDraft}
               />
             </>
           )}
