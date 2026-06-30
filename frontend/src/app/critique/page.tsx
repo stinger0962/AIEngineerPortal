@@ -702,13 +702,15 @@ function DeepDivePanel({
         {questions.map((q, i) => {
           const a = answers[i];
           const isSkip = a.stance === "skip";
+          const done = integratedCount > 0; // a round已融入 → 本组问题变成只读历史
+          const answered = a.stance !== "skip" && a.answer.trim().length > 0;
           return (
             <div
               key={i}
               className="rounded-[16px] p-4 space-y-3"
-              style={{ background: "rgba(176,125,46,0.05)", border: "1px solid rgba(176,125,46,0.22)" }}
+              style={{ background: "rgba(176,125,46,0.05)", border: "1px solid rgba(176,125,46,0.22)", opacity: done && !answered ? 0.6 : 1 }}
             >
-              {/* weakness + location */}
+              {/* weakness + location + (done) status */}
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
@@ -717,46 +719,64 @@ function DeepDivePanel({
                   实质薄弱
                 </span>
                 {q.location && <span className="font-mono text-[12px] text-ink/45">{q.location}</span>}
+                {done && (
+                  <span
+                    className="ml-auto inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                    style={
+                      answered
+                        ? { background: "rgba(31,122,77,0.12)", color: "#1f7a4d", border: "1px solid rgba(31,122,77,0.30)" }
+                        : { background: "rgba(20,33,61,0.06)", color: "rgba(20,33,61,0.45)", border: "1px solid rgba(20,33,61,0.15)" }
+                    }
+                  >
+                    {answered ? "✓ 已融入" : isSkip ? "已跳过" : "未答"}
+                  </span>
+                )}
               </div>
               {q.weakness && <p className="text-[13px] leading-5 text-ink/60">{q.weakness}</p>}
 
               {/* question */}
               <p className="text-sm font-medium leading-6 text-ink">{q.question}</p>
 
-              {/* answer textarea */}
-              <textarea
-                value={a.answer}
-                onChange={(e) => setText(i, e.target.value)}
-                disabled={isSkip}
-                placeholder={
-                  isSkip
-                    ? "已选择暂时跳过——此处不改动，仅作提醒。"
-                    : "补充真实材料：具体数据、文献出处、对照、机制解释…（标『只是推测』则会被弱化处理）"
-                }
-                className="w-full resize-y rounded-[12px] border border-ink/12 bg-white/75 p-3 text-[13px] leading-6 text-ink placeholder:text-ink/35 focus:outline-none focus:ring-2 disabled:opacity-50 disabled:bg-ink/[0.03]"
-                style={{ minHeight: 72, ...( { "--tw-ring-color": "rgba(176,125,46,0.40)" } as React.CSSProperties) }}
-              />
-
-              {/* stance chips */}
-              <div className="flex flex-wrap gap-2">
-                {STANCES.map(({ value, label }) => {
-                  const active = a.stance === value;
-                  return (
-                    <button
-                      key={value}
-                      onClick={() => setStance(i, value)}
-                      className="rounded-full px-3 py-1 text-[11px] font-semibold transition-all"
-                      style={
-                        active
-                          ? { background: "rgba(176,125,46,0.14)", color: SUBSTANCE_DARK, border: "1px solid rgba(176,125,46,0.40)" }
-                          : { background: "transparent", color: "rgba(20,33,61,0.45)", border: "1px solid rgba(20,33,61,0.12)" }
-                      }
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+              {/* answer — editable until this round is integrated, then read-only */}
+              {done ? (
+                answered ? (
+                  <p className="rounded-[12px] border border-ink/10 bg-white/70 p-3 text-[13px] leading-6 text-ink/70">{a.answer}</p>
+                ) : null
+              ) : (
+                <>
+                  <textarea
+                    value={a.answer}
+                    onChange={(e) => setText(i, e.target.value)}
+                    disabled={isSkip}
+                    placeholder={
+                      isSkip
+                        ? "已选择暂时跳过——此处不改动，仅作提醒。"
+                        : "补充真实材料：具体数据、文献出处、对照、机制解释…（标『只是推测』则会被弱化处理）"
+                    }
+                    className="w-full resize-y rounded-[12px] border border-ink/12 bg-white/75 p-3 text-[13px] leading-6 text-ink placeholder:text-ink/35 focus:outline-none focus:ring-2 disabled:opacity-50 disabled:bg-ink/[0.03]"
+                    style={{ minHeight: 72, ...( { "--tw-ring-color": "rgba(176,125,46,0.40)" } as React.CSSProperties) }}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    {STANCES.map(({ value, label }) => {
+                      const active = a.stance === value;
+                      return (
+                        <button
+                          key={value}
+                          onClick={() => setStance(i, value)}
+                          className="rounded-full px-3 py-1 text-[11px] font-semibold transition-all"
+                          style={
+                            active
+                              ? { background: "rgba(176,125,46,0.14)", color: SUBSTANCE_DARK, border: "1px solid rgba(176,125,46,0.40)" }
+                              : { background: "transparent", color: "rgba(20,33,61,0.45)", border: "1px solid rgba(20,33,61,0.12)" }
+                          }
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           );
         })}
@@ -946,6 +966,7 @@ export default function CritiquePage() {
   const [integrateError, setIntegrateError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
 
   const charCount = text.length;
   const hasEnough = charCount >= 200;
@@ -993,6 +1014,12 @@ export default function CritiquePage() {
     }, 400);
     return () => clearTimeout(id);
   }, [hydrated, text, paperType, outputLang, filename, result, draft, worklog, pending, questions, activeTab]);
+
+  // When a proposal appears, bring the output zone (proposal + worktop) into view
+  // so the user doesn't have to hunt for the 通过/放弃 dialog after triggering.
+  useEffect(() => {
+    if (pending) outputRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [pending]);
 
   function clearAll() {
     setText("");
@@ -1463,11 +1490,6 @@ export default function CritiquePage() {
 
           <div className="border-t border-ink/8" />
 
-          {/* Pending proposal — inform → approve before it enters the worktop */}
-          {pending && (
-            <ProposalPanel pending={pending} busy={busy} onApprove={approvePending} onDiscard={discardPending} />
-          )}
-
           {/* 按我的要求改 — standalone lever, works without a diagnosis */}
           <InstructCard
             hasDraft={draft !== null}
@@ -1652,19 +1674,24 @@ export default function CritiquePage() {
             </div>
           )}
 
-          {/* ── 改进工作稿（写作 + 实质 + 按需 汇总，唯一导出/采纳处）── */}
-          {draft !== null && (
-            <>
+          {/* ── 改进区：拟修改提案（待你通过）+ 改进工作稿，集中一处，触发时滚动到此 ── */}
+          {(pending || draft !== null) && (
+            <div ref={outputRef} className="space-y-6 scroll-mt-4">
               <div className="border-t border-ink/8" />
-              <WorktopPanel
-                draft={draft}
-                worklog={worklog}
-                busy={busy}
-                onAdopt={handleAdopt}
-                onReset={resetWorktop}
-                onDraftChange={setDraft}
-              />
-            </>
+              {pending && (
+                <ProposalPanel pending={pending} busy={busy} onApprove={approvePending} onDiscard={discardPending} />
+              )}
+              {draft !== null && (
+                <WorktopPanel
+                  draft={draft}
+                  worklog={worklog}
+                  busy={busy}
+                  onAdopt={handleAdopt}
+                  onReset={resetWorktop}
+                  onDraftChange={setDraft}
+                />
+              )}
+            </div>
           )}
 
           <div className="border-t border-ink/8" />
