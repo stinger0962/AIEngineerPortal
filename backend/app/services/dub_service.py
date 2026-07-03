@@ -4,9 +4,11 @@ from __future__ import annotations
 import io
 import logging
 import os
+import random
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -19,22 +21,53 @@ logger = logging.getLogger(__name__)
 # Known-good narration voice used as a safety net if a chosen voice is rejected.
 _DUB_FALLBACK_VOICE = "Chinese (Mandarin)_Radio_Host"
 
+# MiniMax caps TTS requests-per-minute (RPM) per account. The dub bursts many TTS
+# calls in parallel, which trips "1002 rate limit exceeded(RPM)". Proactively space
+# request STARTS ≥ _TTS_MIN_INTERVAL apart (across all threads) so we stay under the
+# cap. Tune via MINIMAX_TTS_MIN_INTERVAL env (seconds): 2.0s ≈ 30 RPM. Lower it if
+# your MiniMax tier allows a higher RPM (faster dubs); raise it if 1002 persists.
+_TTS_MIN_INTERVAL = float(os.getenv("MINIMAX_TTS_MIN_INTERVAL", "2.0"))
+_tts_rl_lock = threading.Lock()
+_tts_last_start = 0.0
+
+
+def _tts_throttled(*args, **kwargs) -> bytes:
+    """Rate-limited wrapper around MiniMax _tts_bytes: reserve a start slot ≥
+    _TTS_MIN_INTERVAL after the previous one (the sleep runs under the lock so
+    threads queue in order), then do the actual HTTP call outside the lock so
+    requests still overlap."""
+    global _tts_last_start
+    from app.services.podcast_service import _tts_bytes
+
+    with _tts_rl_lock:
+        wait = _TTS_MIN_INTERVAL - (time.monotonic() - _tts_last_start)
+        if wait > 0:
+            time.sleep(wait)
+        _tts_last_start = time.monotonic()
+    return _tts_bytes(*args, **kwargs)
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    s = str(exc).lower()
+    return "1002" in s or "rate limit" in s or "rpm" in s or "429" in s or "too many" in s
+
 
 def _resolve_dub_voice(voice_id: str, mm_key: str, mm_group: str, mm_model: str, mm_base: str) -> str:
     """Probe the chosen narration voice once (tiny TTS). If MiniMax rejects it
     (unknown/invalid id), fall back to a known-good voice so a bad selection never
     fails the whole dub job. Negligible next to the full transcribe→dub pipeline."""
-    from app.services.podcast_service import _tts_bytes
-
     try:
-        _tts_bytes("你好", voice_id, mm_key, mm_group, mm_model, mm_base)
+        _tts_throttled("你好", voice_id, mm_key, mm_group, mm_model, mm_base)
         return voice_id
     except Exception as exc:  # noqa: BLE001
+        # A rate-limit here isn't the voice's fault — don't wrongly fall back.
+        if _is_rate_limit(exc):
+            return voice_id
         logger.warning("dub: voice %r rejected (%s); falling back to %r", voice_id, exc, _DUB_FALLBACK_VOICE)
         return _DUB_FALLBACK_VOICE
 
-_TTS_CONCURRENCY = 5   # fire N MiniMax TTS calls at once (I/O-bound) — ~5x faster than sequential
-_TTS_RETRIES = 3       # per-segment retry (parallel bursts can trip transient 429s)
+_TTS_CONCURRENCY = 5   # fire N MiniMax TTS calls at once (I/O-bound); RPM is capped by _tts_throttled, not this
+_TTS_RETRIES = 4       # per-segment retry (rate-limit backoff needs a few attempts to clear the RPM window)
 
 DUB_DIR = Path(os.getenv("DUB_VIDEO_DIR", "/data/dub_videos"))
 MAX_DURATION_S = 600
@@ -262,11 +295,16 @@ def build_voice_track(
         last_exc: Optional[Exception] = None
         for attempt in range(_TTS_RETRIES):
             try:
-                data = _tts_bytes(zh, voice_id, mm_key, mm_group, mm_model, mm_base, speed=base_speed)
+                data = _tts_throttled(zh, voice_id, mm_key, mm_group, mm_model, mm_base, speed=base_speed)
                 return AudioSegment.from_file(io.BytesIO(data))
-            except Exception as exc:  # transient 429 / timeout under parallel load → retry
+            except Exception as exc:  # transient rate-limit / timeout under parallel load → retry
                 last_exc = exc
-                time.sleep(0.6 * (attempt + 1))
+                # Rate-limit (RPM) windows are per-minute — back off much longer than a
+                # plain transient, with jitter so parallel workers don't re-fire in sync.
+                if _is_rate_limit(exc):
+                    time.sleep(3.0 * (attempt + 1) + random.uniform(0, 1.5))
+                else:
+                    time.sleep(0.6 * (attempt + 1))
         raise last_exc if last_exc else RuntimeError("TTS failed")
 
     # Parallelize the per-segment TTS (I/O-bound HTTP calls) — order preserved by map().
