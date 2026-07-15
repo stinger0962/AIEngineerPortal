@@ -72,7 +72,10 @@ _TTS_RETRIES = 4       # per-segment retry (rate-limit backoff needs a few attem
 DUB_DIR = Path(os.getenv("DUB_VIDEO_DIR", "/data/dub_videos"))
 MAX_DURATION_S = 600
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024   # 100 MB upload cap
-DUB_RETENTION_DAYS = 7                  # auto-delete dubbed mp4s older than this
+# Auto-delete dubbed mp4s older than this. Dub outputs are large videos on a small
+# droplet, so unlike podcast/oracle (which keep files forever) dub is capped. Default
+# 90d; tune via env DUB_RETENTION_DAYS (e.g. a very large number ≈ keep "forever").
+DUB_RETENTION_DAYS = int(os.getenv("DUB_RETENTION_DAYS", "90"))
 _MAX_TTS_SPEED = 1.30   # B: global MiniMax speed ceiling
 _MAX_ATEMPO = 1.15      # A: per-clip residual speed-up ceiling (base handles global, so gentler than old 1.25)
 _CHARS_PER_SEC = 4.8    # estimate: MiniMax zh narration ≈ 4.8 chars/sec at speed 1.0
