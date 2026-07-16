@@ -363,9 +363,7 @@ export function QianWorkspace() {
                     <span style={{ color: "#d6a84a" }}>
                       第{h.sign_id}签 · {h.grade}
                     </span>
-                    <span className="ml-2" style={{ color: "rgba(233,220,196,.7)" }}>
-                      {h.question}
-                    </span>
+                    <MaskedQuestion text={h.question} />
                   </div>
                 ))}
               </div>
