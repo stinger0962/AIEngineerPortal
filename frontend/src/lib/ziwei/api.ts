@@ -1,4 +1,5 @@
 import { API_BASE } from "@/lib/api";
+import { getDeviceId } from "@/lib/deviceId";
 import type { ZiweiChart } from "./types";
 
 /** HTTP 层错误（区别于排盘错误），携带状态码与后端 detail */
@@ -40,7 +41,7 @@ export type ZiweiProfileCreate = {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: { "Content-Type": "application/json", "X-Device-Id": getDeviceId(), ...(init?.headers ?? {}) },
     cache: "no-store",
   });
   if (!response.ok) {
@@ -105,7 +106,7 @@ async function streamOracle(
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/ziwei/profiles/${profileId}/oracle/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Device-Id": getDeviceId() },
     body: JSON.stringify(body),
     cache: "no-store",
     signal,
@@ -158,4 +159,10 @@ export const ziweiApi = {
     request<ConversationOut[]>(`/ziwei/profiles/${profileId}/conversations`),
   listMessages: (conversationId: number) =>
     request<MessageOut[]>(`/ziwei/conversations/${conversationId}/messages`),
+  /** 一次性认领无归属旧数据（紫微档案 + 灵签记录）到本浏览器，需服务器口令。 */
+  claimLegacy: (code: string) =>
+    request<{ claimed_profiles: number; claimed_readings: number }>("/ziwei/claim", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
 };

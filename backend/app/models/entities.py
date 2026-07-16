@@ -331,6 +331,8 @@ class ZiweiProfile(Base):
     __tablename__ = "ziwei_profiles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # 匿名浏览器归属（无登录）。NULL = 旧数据：对所有 device 隐藏，可经口令一次性认领。
+    device_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     relation: Mapped[str] = mapped_column(String(20), default="self")  # self, family, friend
     gender: Mapped[str] = mapped_column(String(10), nullable=False)  # male, female
@@ -374,6 +376,8 @@ class QianReading(Base):
     __table_args__ = (Index("ix_qian_reading_created", "created_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # 匿名浏览器归属（无登录）。NULL = 旧数据：对所有 device 隐藏，可经口令一次性认领。
+    device_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     sign_id: Mapped[int] = mapped_column(Integer, nullable=False)
     grade: Mapped[str] = mapped_column(String(20), default="")

@@ -6,7 +6,7 @@ import time
 from datetime import date, datetime
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -95,20 +95,40 @@ def _profile_out(p: ZiweiProfile) -> dict:
     }
 
 
+def get_device_id(x_device_id: str = Header(default="")) -> str:
+    """匿名浏览器归属：前端每台浏览器生成一个 device_id，随请求头 X-Device-Id 传来。"""
+    return (x_device_id or "").strip()
+
+
+def _owned_or_404(db: Session, profile_id: int, device: str) -> ZiweiProfile:
+    """取回属于本 device 的档案；否则 404（不 403——不泄露它对别的 device 存在）。
+    NULL device_id（旧数据）永不匹配；空 device 什么也看不到。"""
+    profile = db.get(ZiweiProfile, profile_id)
+    if not profile or not device or profile.device_id != device:
+        raise HTTPException(404, "Profile not found")
+    return profile
+
+
 @router.get("/profiles")
-def list_profiles(db: Session = Depends(get_db)):
-    profiles = db.scalars(select(ZiweiProfile).order_by(ZiweiProfile.id.asc())).all()
+def list_profiles(db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    if not device:
+        return []
+    profiles = db.scalars(
+        select(ZiweiProfile).where(ZiweiProfile.device_id == device).order_by(ZiweiProfile.id.asc())
+    ).all()
     return [_profile_out(p) for p in profiles]
 
 
 @router.post("/profiles")
-def create_profile(payload: ProfileCreate, db: Session = Depends(get_db)):
+def create_profile(payload: ProfileCreate, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    if not device:
+        raise HTTPException(400, "缺少设备标识，请刷新页面重试。")
     _validate("relation", payload.relation, VALID_RELATIONS)
     _validate("gender", payload.gender, VALID_GENDERS)
     _validate("birth_time_index", payload.birth_time_index)
     _validate("birth_date", payload.birth_date)
 
-    profile = ZiweiProfile(**payload.model_dump())
+    profile = ZiweiProfile(device_id=device, **payload.model_dump())
     db.add(profile)
     db.commit()
     db.refresh(profile)
@@ -116,18 +136,15 @@ def create_profile(payload: ProfileCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/profiles/{profile_id}")
-def get_profile(profile_id: int, db: Session = Depends(get_db)):
-    profile = db.get(ZiweiProfile, profile_id)
-    if not profile:
-        raise HTTPException(404, "Profile not found")
-    return _profile_out(profile)
+def get_profile(profile_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    return _profile_out(_owned_or_404(db, profile_id, device))
 
 
 @router.put("/profiles/{profile_id}")
-def update_profile(profile_id: int, payload: ProfileUpdate, db: Session = Depends(get_db)):
-    profile = db.get(ZiweiProfile, profile_id)
-    if not profile:
-        raise HTTPException(404, "Profile not found")
+def update_profile(
+    profile_id: int, payload: ProfileUpdate, db: Session = Depends(get_db), device: str = Depends(get_device_id)
+):
+    profile = _owned_or_404(db, profile_id, device)
 
     updates = payload.model_dump(exclude_unset=True, exclude_none=True)  # 列均非空，显式 null 视为无操作
     if "relation" in updates:
@@ -149,13 +166,40 @@ def update_profile(profile_id: int, payload: ProfileUpdate, db: Session = Depend
 
 
 @router.delete("/profiles/{profile_id}")
-def delete_profile(profile_id: int, db: Session = Depends(get_db)):
-    profile = db.get(ZiweiProfile, profile_id)
-    if not profile:
-        raise HTTPException(404, "Profile not found")
+def delete_profile(profile_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    profile = _owned_or_404(db, profile_id, device)
     db.delete(profile)
     db.commit()
     return {"deleted": profile_id}
+
+
+class ClaimRequest(BaseModel):
+    code: str
+
+
+@router.post("/claim")
+def claim_legacy(payload: ClaimRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    """一次性认领：把所有无归属（device_id IS NULL）的紫微档案 + 灵签记录划归当前浏览器。
+    口令来自 env ZIWEI_CLAIM_CODE；留空则认领禁用。"""
+    from app.models.entities import QianReading
+
+    settings = get_settings()
+    code = (settings.ziwei_claim_code or "").strip()
+    if not code:
+        raise HTTPException(403, "认领未启用（服务器未设置 ZIWEI_CLAIM_CODE）。")
+    if not device:
+        raise HTTPException(400, "缺少设备标识，请刷新页面重试。")
+    if (payload.code or "").strip() != code:
+        raise HTTPException(403, "认领口令不正确。")
+
+    profiles = db.query(ZiweiProfile).filter(ZiweiProfile.device_id.is_(None)).update(
+        {ZiweiProfile.device_id: device}, synchronize_session=False
+    )
+    readings = db.query(QianReading).filter(QianReading.device_id.is_(None)).update(
+        {QianReading.device_id: device}, synchronize_session=False
+    )
+    db.commit()
+    return {"claimed_profiles": profiles, "claimed_readings": readings}
 
 
 class OracleRequest(BaseModel):
@@ -169,10 +213,8 @@ def _get_user_id(db: Session) -> int:
 
 
 @router.post("/profiles/{profile_id}/oracle")
-def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db)):
-    profile = db.get(ZiweiProfile, profile_id)
-    if not profile:
-        raise HTTPException(404, "Profile not found")
+def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    profile = _owned_or_404(db, profile_id, device)
     if not (profile.chart_json or {}).get("palaces"):
         raise HTTPException(400, "Profile has no chart data")
 
@@ -232,10 +274,8 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
 
 
 @router.post("/profiles/{profile_id}/oracle/stream")
-def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db)):
-    profile = db.get(ZiweiProfile, profile_id)
-    if not profile:
-        raise HTTPException(404, "Profile not found")
+def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    profile = _owned_or_404(db, profile_id, device)
     if not (profile.chart_json or {}).get("palaces"):
         raise HTTPException(400, "Profile has no chart data")
 
@@ -335,13 +375,18 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
 
 
 @router.get("/profiles/{profile_id}/conversations")
-def list_conversations(profile_id: int, db: Session = Depends(get_db)):
+def list_conversations(profile_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    _owned_or_404(db, profile_id, device)  # only the owner sees this profile's conversations
     convs = db.scalars(select(ZiweiConversation).where(ZiweiConversation.profile_id == profile_id).order_by(ZiweiConversation.id.desc())).all()
     return [{"id": c.id, "scenario": c.scenario, "title": c.title, "created_at": c.created_at.isoformat() if c.created_at else None} for c in convs]
 
 
 @router.get("/conversations/{conversation_id}/messages")
-def list_messages(conversation_id: int, db: Session = Depends(get_db)):
+def list_messages(conversation_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    conv = db.get(ZiweiConversation, conversation_id)
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+    _owned_or_404(db, conv.profile_id, device)  # verify the conversation's profile is ours
     msgs = db.scalars(select(ZiweiMessage).where(ZiweiMessage.conversation_id == conversation_id).order_by(ZiweiMessage.id.asc())).all()
     return [{"id": m.id, "role": m.role, "content": m.content, "chart_context_json": m.chart_context_json or {}, "created_at": m.created_at.isoformat() if m.created_at else None} for m in msgs]
 

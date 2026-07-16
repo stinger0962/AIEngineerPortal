@@ -1,4 +1,5 @@
 import { API_BASE } from "@/lib/api";
+import { getDeviceId } from "@/lib/deviceId";
 import type { CameraCommand } from "@/lib/ziwei/api";
 
 export class QianApiError extends Error {
@@ -26,7 +27,7 @@ async function streamOracle(
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/qian/oracle/stream`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: { "Content-Type": "application/json", "X-Device-Id": getDeviceId() },
     body: JSON.stringify(body), cache: "no-store", signal,
   });
   if (!res.ok || !res.body) {
@@ -60,5 +61,7 @@ async function streamOracle(
 
 export const qianApi = {
   streamOracle,
-  listReadings: () => fetch(`${API_BASE}/qian/readings`, { cache: "no-store" }).then((r) => r.json() as Promise<QianReadingOut[]>),
+  listReadings: () =>
+    fetch(`${API_BASE}/qian/readings`, { cache: "no-store", headers: { "X-Device-Id": getDeviceId() } })
+      .then((r) => r.json() as Promise<QianReadingOut[]>),
 };

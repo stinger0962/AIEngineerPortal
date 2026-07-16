@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -32,8 +32,13 @@ def _get_user_id(db: Session) -> int:
     return db.scalar(select(User.id).limit(1)) or 1
 
 
+def get_device_id(x_device_id: str = Header(default="")) -> str:
+    """匿名浏览器归属：灵签求签记录按 device 私有（无登录）。"""
+    return (x_device_id or "").strip()
+
+
 @router.post("/oracle/stream")
-def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db)):
+def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     question = (payload.question or "").strip()
     if not question:
         raise HTTPException(400, "请先写下你的问题")
@@ -67,7 +72,7 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db)):
         try:
             if clean:
                 _db.add(QianReading(
-                    question=question, sign_id=sign["id"], grade=sign["grade"], response=clean,
+                    device_id=device or None, question=question, sign_id=sign["id"], grade=sign["grade"], response=clean,
                     context_json={"sign": sign, "camera_commands": cameras, "segments": segments},
                 ))
             _db.add(AIFeedback(
@@ -115,8 +120,12 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/readings")
-def list_readings(db: Session = Depends(get_db)):
-    rows = db.scalars(select(QianReading).order_by(QianReading.id.desc())).all()
+def list_readings(db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    if not device:
+        return []
+    rows = db.scalars(
+        select(QianReading).where(QianReading.device_id == device).order_by(QianReading.id.desc())
+    ).all()
     return [{
         "id": r.id, "question": r.question, "sign_id": r.sign_id, "grade": r.grade,
         "created_at": r.created_at.isoformat() if r.created_at else None,
@@ -124,9 +133,9 @@ def list_readings(db: Session = Depends(get_db)):
 
 
 @router.get("/readings/{reading_id}")
-def get_reading(reading_id: int, db: Session = Depends(get_db)):
+def get_reading(reading_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     r = db.get(QianReading, reading_id)
-    if not r:
+    if not r or not device or r.device_id != device:
         raise HTTPException(404, "记录不存在")
     return {
         "id": r.id, "question": r.question, "sign_id": r.sign_id, "grade": r.grade,

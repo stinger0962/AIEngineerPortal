@@ -10,6 +10,22 @@ import { makeQianFireCommand } from "./qian-camera";
 const KAITI = "'STKaiti','KaiTi STD','KaiTi','楷体','Kaiti SC',serif";
 const SONGTI = "'Songti SC','Noto Serif CJK SC','SimSun',serif";
 
+// ── 历史问题脱敏：默认只露前一小段，点击展开（避免他人一眼看全你问的事）─────────
+function MaskedQuestion({ text }: { text: string }) {
+  const [show, setShow] = useState(false);
+  const long = text.length > 12;
+  return (
+    <span
+      className="ml-2 cursor-pointer select-none"
+      style={{ color: "rgba(233,220,196,.7)" }}
+      onClick={() => setShow((s) => !s)}
+      title={show ? "点击收起" : "点击查看完整问题"}
+    >
+      {show || !long ? text : text.slice(0, 12) + "……"}
+    </span>
+  );
+}
+
 // ── Grade → badge palette ──────────────────────────────────────────────────────
 function gradeBadge(grade: string): { bg: string; text: string } {
   if (grade.includes("上")) return { bg: "#b8862f", text: "#fff4dc" };

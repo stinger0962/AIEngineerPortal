@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { ProfileForm } from "@/components/ziwei/profile-form";
 import { ZiweiWorkspace } from "@/components/ziwei/ziwei-workspace";
+import { OracleIdentityPanel } from "@/components/oracle/identity-panel";
 import { hasChart, ziweiApi, type ZiweiProfileOut } from "@/lib/ziwei/api";
 import { RELATION_LABELS } from "@/lib/ziwei/constants";
 
@@ -112,6 +113,8 @@ export default function ZiweiPage() {
               <Plus size={16} /> 新建命主档案
             </button>
           )}
+
+          <OracleIdentityPanel />
         </div>
 
         {/* 命盘 */}

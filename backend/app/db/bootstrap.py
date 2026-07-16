@@ -49,6 +49,17 @@ SUMMARIES_COLUMN_PATCHES = {
     ],
 }
 
+# Per-browser privacy for 命理: anonymous device ownership. Existing rows keep
+# device_id NULL (hidden from all devices until claimed).
+ORACLE_PRIVACY_COLUMN_PATCHES = {
+    "ziwei_profiles": [
+        ("device_id", "ALTER TABLE ziwei_profiles ADD COLUMN device_id VARCHAR(64)"),
+    ],
+    "qian_readings": [
+        ("device_id", "ALTER TABLE qian_readings ADD COLUMN device_id VARCHAR(64)"),
+    ],
+}
+
 # Columns whose NOT NULL must be relaxed on already-existing tables.
 # (create_all handles new DBs; this handles the prod table created earlier.)
 NULLABILITY_PATCHES = {
@@ -96,6 +107,8 @@ INDEX_PATCHES = [
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_korean_progress_user_node ON korean_progress (user_id, node_id)",
     "CREATE INDEX IF NOT EXISTS ix_korean_conv_user_node ON korean_conversations (user_id, node_id)",
     "CREATE INDEX IF NOT EXISTS ix_korean_msg_conv ON korean_messages (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS ix_ziwei_profiles_device ON ziwei_profiles (device_id)",
+    "CREATE INDEX IF NOT EXISTS ix_qian_readings_device ON qian_readings (device_id)",
 ]
 
 
@@ -110,7 +123,12 @@ def apply_runtime_schema_patches(engine: Engine) -> None:
         if "memory_cards" not in existing_tables:
             connection.execute(text(MEMORY_CARDS_CREATE_DDL))
 
-        all_patches = {**PHASE_TWO_COLUMN_PATCHES, **PHASE_FIVE_COLUMN_PATCHES, **SUMMARIES_COLUMN_PATCHES}
+        all_patches = {
+            **PHASE_TWO_COLUMN_PATCHES,
+            **PHASE_FIVE_COLUMN_PATCHES,
+            **SUMMARIES_COLUMN_PATCHES,
+            **ORACLE_PRIVACY_COLUMN_PATCHES,
+        }
         for table_name, patches in all_patches.items():
             if table_name not in existing_tables:
                 continue

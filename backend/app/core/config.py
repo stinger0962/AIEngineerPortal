@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     minimax_korean_voice_id: str = "Korean_SweetGirl"  # override via env MINIMAX_KOREAN_VOICE_ID
     # 紫微/灵签 解盘也是高价值、低频任务 → 用最强模型（与高频的 ai_model 解耦）。
     oracle_model: str = "claude-opus-4-8"
+    # 一次性「认领旧命理数据」口令（无归属的 device_id=NULL 行划归当前浏览器）。
+    # 留空 = 认领禁用；在 VPS .env 设 ZIWEI_CLAIM_CODE 才能认领。
+    ziwei_claim_code: str = ""
     ai_daily_token_budget: int = 100_000
 
     @field_validator("ai_model")
