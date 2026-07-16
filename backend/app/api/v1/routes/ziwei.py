@@ -113,6 +113,17 @@ def _owned_or_404(db: Session, profile_id: int, device: str) -> ZiweiProfile:
 def list_profiles(db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     if not device:
         return []
+    # 一次性自动收养：部署前建的旧档案 device_id 为 NULL，会对所有设备隐藏 → 旧数据像「丢了」。
+    # 让第一台带 device_id 访问的浏览器（= 站主本人，正打开着页面）把 NULL 档案收归本设备。
+    # 自限：收养后再无 NULL 行，后续访客收不到任何东西；收养后档案即绑定本设备，陌生人看不到。
+    # 关：ZIWEI_AUTO_ADOPT=0（认领完可关，杜绝任何残留 NULL 被别的设备捡走）。
+    if get_settings().ziwei_auto_adopt:
+        has_orphan = db.scalar(select(ZiweiProfile.id).where(ZiweiProfile.device_id.is_(None)).limit(1))
+        if has_orphan is not None:
+            db.query(ZiweiProfile).filter(ZiweiProfile.device_id.is_(None)).update(
+                {ZiweiProfile.device_id: device}, synchronize_session=False
+            )
+            db.commit()
     profiles = db.scalars(
         select(ZiweiProfile).where(ZiweiProfile.device_id == device).order_by(ZiweiProfile.id.asc())
     ).all()

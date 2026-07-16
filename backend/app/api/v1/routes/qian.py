@@ -119,12 +119,12 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db), devi
     return EventSourceResponse(event_stream())
 
 
+# 灵签历史：用户只要「马赛克隐藏后半」（前端 MaskedQuestion 做），不要按设备隔离——
+# 隔离会让旧记录看起来「丢了」。这里回到全量返回（脱敏在前端），device_id 列保留但读取不设防。
 @router.get("/readings")
-def list_readings(db: Session = Depends(get_db), device: str = Depends(get_device_id)):
-    if not device:
-        return []
+def list_readings(db: Session = Depends(get_db)):
     rows = db.scalars(
-        select(QianReading).where(QianReading.device_id == device).order_by(QianReading.id.desc())
+        select(QianReading).order_by(QianReading.id.desc()).limit(50)
     ).all()
     return [{
         "id": r.id, "question": r.question, "sign_id": r.sign_id, "grade": r.grade,
@@ -133,9 +133,9 @@ def list_readings(db: Session = Depends(get_db), device: str = Depends(get_devic
 
 
 @router.get("/readings/{reading_id}")
-def get_reading(reading_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+def get_reading(reading_id: int, db: Session = Depends(get_db)):
     r = db.get(QianReading, reading_id)
-    if not r or not device or r.device_id != device:
+    if not r:
         raise HTTPException(404, "记录不存在")
     return {
         "id": r.id, "question": r.question, "sign_id": r.sign_id, "grade": r.grade,

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # 一次性「认领旧命理数据」口令（无归属的 device_id=NULL 行划归当前浏览器）。
     # 留空 = 认领禁用；在 VPS .env 设 ZIWEI_CLAIM_CODE 才能认领。
     ziwei_claim_code: str = ""
+    # 自动收养旧紫微档案：第一台带 device_id 访问的浏览器把 NULL 档案收归自己。
+    # 默认开（部署后站主一刷新即找回旧档案，无需口令/改 .env）；认领完可设 ZIWEI_AUTO_ADOPT=0 关。
+    ziwei_auto_adopt: bool = True
     ai_daily_token_budget: int = 100_000
 
     @field_validator("ai_model")
