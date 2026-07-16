@@ -119,15 +119,23 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db), devi
     return EventSourceResponse(event_stream())
 
 
-# 灵签历史：用户只要「马赛克隐藏后半」（前端 MaskedQuestion 做），不要按设备隔离——
-# 隔离会让旧记录看起来「丢了」。这里回到全量返回（脱敏在前端），device_id 列保留但读取不设防。
+# 灵签历史：所有人共见（不按设备隔离，否则旧记录像「丢了」），但问题**脱敏**——
+# 只回前 12 字 + 省略号，后半永不离开服务器（前端也无从展开），保护隐私。
+_MASK_LEN = 12
+
+
+def _mask_question(q: str) -> str:
+    q = q or ""
+    return q[:_MASK_LEN] + "……" if len(q) > _MASK_LEN else q
+
+
 @router.get("/readings")
 def list_readings(db: Session = Depends(get_db)):
     rows = db.scalars(
         select(QianReading).order_by(QianReading.id.desc()).limit(50)
     ).all()
     return [{
-        "id": r.id, "question": r.question, "sign_id": r.sign_id, "grade": r.grade,
+        "id": r.id, "question": _mask_question(r.question), "sign_id": r.sign_id, "grade": r.grade,
         "created_at": r.created_at.isoformat() if r.created_at else None,
     } for r in rows]
 
