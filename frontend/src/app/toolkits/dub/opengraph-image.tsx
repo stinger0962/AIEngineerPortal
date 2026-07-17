@@ -1,5 +1,6 @@
 import { renderOgCard, OG_SIZE, OG_CONTENT_TYPE } from "../../_og/card";
 
+// og-layout: centered v2 — bump content so Next mints a fresh ?hash (busts stale crop).
 export const runtime = "nodejs";
 export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
