@@ -149,14 +149,22 @@ def _extract_audio(video_path: str, out_path: str, sample_rate: int, channels: i
 
 
 def extract_segments(video_path: str, openai_api_key: str) -> List[Dict]:
-    """16kHz mono mp3 -> Whisper verbose_json -> [{start, end, text}]. (<=10min => single call.)"""
+    """16kHz mono mp3 -> Whisper TRANSLATION (any language -> English) verbose_json ->
+    [{start, end, text}]. (<=10min => single call.)
+
+    Uses the *translation* task, not transcription. Transcription auto-detects ONE
+    language for the whole file; a mixed-language source (e.g. mainly English with
+    faint Korean) can get mis-detected and then transcribed — or hallucinated — in the
+    wrong language, which is how a mainly-English video came out dubbed in Korean.
+    The translation task funnels every source language to English (English stays
+    English), so there's no wrong-language lock-in; Claude then renders Chinese."""
     from openai import OpenAI
 
     with tempfile.TemporaryDirectory() as tmp:
         mp3 = _extract_audio(video_path, str(Path(tmp) / "asr.mp3"), 16000, 1)
         client = OpenAI(api_key=openai_api_key)
         with open(mp3, "rb") as fh:
-            resp = client.audio.transcriptions.create(
+            resp = client.audio.translations.create(
                 model="whisper-1", file=fh, response_format="verbose_json"
             )
 
@@ -225,6 +233,11 @@ def translate_segments(segments: List[Dict], anthropic_api_key: str, model: str)
 
     client = anthropic.Anthropic(api_key=anthropic_api_key)
     result: List[str] = [""] * len(segments)
+    # Diagnostics (surfaced in the error if translation fails, since we can't read
+    # prod logs): how many numbered lines parsed, how many dropped as still-foreign,
+    # and a sample of the model's raw output — pinpoints the failure mode in one run.
+    n_matched = n_dropped_foreign = 0
+    first_raw = ""
 
     for start in range(0, len(segments), _TRANSLATE_BATCH):
         batch = segments[start:start + _TRANSLATE_BATCH]
@@ -235,23 +248,32 @@ def translate_segments(segments: List[Dict], anthropic_api_key: str, model: str)
             messages=[{"role": "user", "content": _TRANSLATE_PROMPT.format(numbered=numbered)}],
         )
         raw = msg.content[0].text if msg.content else ""
+        if not first_raw:
+            first_raw = raw
         for line in raw.splitlines():
             m = _LINE_RE.match(line)
             if not m:
                 continue
             local = int(m.group(1)) - 1
-            if 0 <= local < len(batch):
-                zh = m.group(2).strip()
-                # Skip anything that didn't actually become Chinese (empty, or still
-                # Hangul/kana) — synthesizing the foreign source is the bug we're killing.
-                if zh and not _NON_CHINESE_RE.search(zh):
-                    result[start + local] = zh
+            if not (0 <= local < len(batch)):
+                continue
+            n_matched += 1
+            zh = m.group(2).strip()
+            # Skip anything that didn't actually become Chinese (empty, or still
+            # Hangul/kana) — synthesizing the foreign source is the bug we're killing.
+            if zh and not _NON_CHINESE_RE.search(zh):
+                result[start + local] = zh
+            else:
+                n_dropped_foreign += 1
 
     src_idx = [i for i, s in enumerate(segments) if s["text"].strip()]
     translated = [i for i in src_idx if result[i]]
     if src_idx and len(translated) < len(src_idx) * 0.5:
-        logger.warning("dub translate: only %d/%d segments translated", len(translated), len(src_idx))
-        raise ValueError("字幕翻译失败（可能内容过长或语言不支持），请重试或更换视频。")
+        sample = first_raw.strip().replace("\n", " ⏎ ")[:240]
+        diag = (f"段数={len(src_idx)} 成功={len(translated)} 解析出编号行={n_matched} "
+                f"因含外文丢弃={n_dropped_foreign} | 模型样例：{sample!r}")
+        logger.warning("dub translate failed — %s", diag)
+        raise ValueError(f"字幕翻译失败。诊断[{diag}]（把这条发给开发者定位）")
     return result
 
 

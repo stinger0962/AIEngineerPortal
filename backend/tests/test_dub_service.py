@@ -30,6 +30,33 @@ def test_probe_duration_returns_seconds(monkeypatch):
     assert dub.probe_duration("https://youtu.be/abc12345678") == 300
 
 
+def test_extract_segments_uses_translation_task(monkeypatch, tmp_path):
+    """ASR must use Whisper's translation task (any language -> English), which is
+    robust to mixed / mis-detected source audio — NOT transcription, which locked onto
+    Korean on a mainly-English video and produced a Korean transcript."""
+    import app.services.dub_service as dub
+    from unittest.mock import MagicMock
+    import openai
+
+    def fake_extract(video_path, out_path, sr, ch):
+        from pathlib import Path
+        Path(out_path).write_bytes(b"x")
+        return out_path
+
+    resp = MagicMock()
+    resp.segments = [{"start": 0.0, "end": 1.0, "text": "Hello world"}]
+    client = MagicMock()
+    client.audio.translations.create.return_value = resp
+
+    monkeypatch.setattr(dub, "_extract_audio", fake_extract)
+    monkeypatch.setattr(openai, "OpenAI", lambda api_key: client)
+
+    out = dub.extract_segments("video.mp4", "k")
+    assert out == [{"start": 0.0, "end": 1.0, "text": "Hello world"}]
+    assert client.audio.translations.create.called
+    assert not client.audio.transcriptions.create.called
+
+
 def test_translate_segments_parses_numbered(monkeypatch):
     import app.services.dub_service as dub
     from unittest.mock import MagicMock
