@@ -203,28 +203,56 @@ _TRANSLATE_PROMPT = """把下面带编号的字幕逐条翻译成自然、口语
 字幕：
 {numbered}"""
 
+# Translate in batches so a long video never overflows the model's output window.
+# A single call used to truncate at max_tokens on long videos → the cut-off tail
+# lines didn't parse → every un-parsed segment silently fell back to the ORIGINAL
+# foreign transcript and got dubbed back (e.g. a Korean video "dubbed" in Korean).
+_TRANSLATE_BATCH = 30
+_LINE_RE = re.compile(r"\s*(\d+)\s*[\.、):：]\s*(.+)")
+# Hangul (syllables + jamo) and Japanese kana. Chinese never contains these, so if a
+# "translation" still has them it wasn't translated → don't synthesize it as the dub.
+_NON_CHINESE_RE = re.compile(r"[가-힣ᄀ-ᇿ㄰-㆏぀-ヿ]")
+
 
 def translate_segments(segments: List[Dict], anthropic_api_key: str, model: str) -> List[str]:
-    """One Claude call, numbered 1:1. Returns a Chinese list the same length as segments;
-    any missing line falls back to the original text so alignment never breaks."""
+    """Translate each subtitle to Chinese, numbered 1:1, in batches (so a long video
+    never truncates the response). Returns a list the SAME length as segments; any
+    segment that couldn't be translated — missing line, or output still in the source
+    language — becomes "" (synthesized as silence), NEVER the foreign original. Raises
+    ValueError if most segments fail, so the user gets a clear "翻译失败" instead of a
+    broken/foreign-language dub."""
     import anthropic
 
-    numbered = "\n".join(f"{i + 1}. {s['text']}" for i, s in enumerate(segments))
     client = anthropic.Anthropic(api_key=anthropic_api_key)
-    msg = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": _TRANSLATE_PROMPT.format(numbered=numbered)}],
-    )
-    raw = msg.content[0].text
+    result: List[str] = [""] * len(segments)
 
-    by_idx: Dict[int, str] = {}
-    for line in raw.splitlines():
-        m = re.match(r"\s*(\d+)[\.、)]\s*(.+)", line)
-        if m:
-            by_idx[int(m.group(1))] = m.group(2).strip()
+    for start in range(0, len(segments), _TRANSLATE_BATCH):
+        batch = segments[start:start + _TRANSLATE_BATCH]
+        numbered = "\n".join(f"{i + 1}. {s['text']}" for i, s in enumerate(batch))
+        msg = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            messages=[{"role": "user", "content": _TRANSLATE_PROMPT.format(numbered=numbered)}],
+        )
+        raw = msg.content[0].text if msg.content else ""
+        for line in raw.splitlines():
+            m = _LINE_RE.match(line)
+            if not m:
+                continue
+            local = int(m.group(1)) - 1
+            if 0 <= local < len(batch):
+                zh = m.group(2).strip()
+                # Skip anything that didn't actually become Chinese (empty, or still
+                # Hangul/kana) — synthesizing the foreign source is the bug we're killing.
+                if zh and not _NON_CHINESE_RE.search(zh):
+                    result[start + local] = zh
 
-    return [by_idx.get(i + 1) or s["text"] for i, s in enumerate(segments)]
+    src_idx = [i for i, s in enumerate(segments) if s["text"].strip()]
+    translated = [i for i in src_idx if result[i]]
+    if src_idx and len(translated) < len(src_idx) * 0.5:
+        logger.warning("dub translate: only %d/%d segments translated", len(translated), len(src_idx))
+        raise ValueError("字幕翻译失败（可能内容过长或语言不支持），请重试或更换视频。")
+    return result
 
 
 def estimate_ms(text: str) -> int:

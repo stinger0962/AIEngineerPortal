@@ -44,7 +44,9 @@ def test_translate_segments_parses_numbered(monkeypatch):
     assert out == ["你好", "世界"]
 
 
-def test_translate_segments_fallback_on_missing(monkeypatch):
+def test_translate_segments_missing_line_is_blank_not_source(monkeypatch):
+    """A missing translated line must NOT fall back to the foreign source text
+    (that dubbed videos in their original language) — it becomes "" (silence)."""
     import app.services.dub_service as dub
     from unittest.mock import MagicMock
     import anthropic
@@ -55,7 +57,64 @@ def test_translate_segments_fallback_on_missing(monkeypatch):
     monkeypatch.setattr(anthropic, "Anthropic", lambda api_key: client)
 
     out = dub.translate_segments(segs, "k", "m")
-    assert out == ["你好", "World"]
+    assert out == ["你好", ""]
+
+
+def test_translate_segments_skips_untranslated_hangul(monkeypatch):
+    """If a 'translation' is still in the source language (Hangul/kana), drop it —
+    never synthesize the foreign text as the Chinese dub."""
+    import app.services.dub_service as dub
+    from unittest.mock import MagicMock
+    import anthropic
+
+    segs = [{"start": 0, "end": 1, "text": "안녕하세요"}, {"start": 1, "end": 2, "text": "감사"}]
+    msg = MagicMock(); msg.content = [MagicMock(text="1. 안녕하세요\n2. 你好")]  # line 1 not translated
+    client = MagicMock(); client.messages.create.return_value = msg
+    monkeypatch.setattr(anthropic, "Anthropic", lambda api_key: client)
+
+    out = dub.translate_segments(segs, "k", "m")
+    assert out == ["", "你好"]
+
+
+def test_translate_segments_batches_long_input(monkeypatch):
+    """Long videos are translated in batches so the response never truncates
+    (the truncation that caused the source-language fallback)."""
+    import re as _re
+    import app.services.dub_service as dub
+    from unittest.mock import MagicMock
+    import anthropic
+
+    segs = [{"start": i, "end": i + 1, "text": f"line{i}"} for i in range(70)]
+
+    def fake_create(model, max_tokens, messages):
+        nums = _re.findall(r"(?m)^(\d+)\.", messages[0]["content"])
+        msg = MagicMock(); msg.content = [MagicMock(text="\n".join(f"{n}. 中{n}" for n in nums))]
+        return msg
+
+    client = MagicMock(); client.messages.create.side_effect = fake_create
+    monkeypatch.setattr(anthropic, "Anthropic", lambda api_key: client)
+
+    out = dub.translate_segments(segs, "k", "m")
+    assert len(out) == 70
+    assert all(t for t in out)  # every segment translated, none blank
+    assert client.messages.create.call_count == 3  # ceil(70 / 30)
+
+
+def test_translate_segments_raises_when_mostly_untranslated(monkeypatch):
+    """A wholesale translation failure raises (clear error) instead of shipping a
+    silent/foreign dub."""
+    import pytest
+    import app.services.dub_service as dub
+    from unittest.mock import MagicMock
+    import anthropic
+
+    segs = [{"start": i, "end": i + 1, "text": f"line{i}"} for i in range(6)]
+    msg = MagicMock(); msg.content = [MagicMock(text="sorry, no.")]  # nothing parseable
+    client = MagicMock(); client.messages.create.return_value = msg
+    monkeypatch.setattr(anthropic, "Anthropic", lambda api_key: client)
+
+    with pytest.raises(ValueError, match="翻译失败"):
+        dub.translate_segments(segs, "k", "m")
 
 
 def test_merge_sentences_groups_fragments():
@@ -205,12 +264,12 @@ def test_purge_expired_deletes_old_keeps_fresh(tmp_path):
     now = datetime.utcnow()
     with Session(engine) as s:
         old = DubVideo(youtube_url=None, title="old", voice_id="v", video_path=str(old_file),
-                       created_at=now - timedelta(days=8))
+                       created_at=now - timedelta(days=dub.DUB_RETENTION_DAYS + 5))
         fresh = DubVideo(youtube_url=None, title="fresh", voice_id="v", video_path=str(fresh_file),
                          created_at=now)
         missing = DubVideo(youtube_url=None, title="missing", voice_id="v",
                            video_path=str(tmp_path / "gone.mp4"),
-                           created_at=now - timedelta(days=9))
+                           created_at=now - timedelta(days=dub.DUB_RETENTION_DAYS + 10))
         s.add_all([old, fresh, missing])
         s.commit()
 
