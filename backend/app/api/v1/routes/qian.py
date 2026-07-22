@@ -1,4 +1,5 @@
 """观音灵签 求签 + AI 解签 端点。"""
+import hashlib
 import json
 import logging
 import time
@@ -129,6 +130,14 @@ def _mask_question(q: str) -> str:
     return q[:_MASK_LEN] + "……" if len(q) > _MASK_LEN else q
 
 
+def _device_label(device_id: str | None) -> str:
+    """匿名分组标签：device_id 的不可逆短哈希（用于「哪几条来自同一台」/ 有几个用户
+    的调研）。绝不回传真实 device_id——它就是找回码，泄露=别人能进你的紫微档案。"""
+    if not device_id:
+        return "—"  # 旧数据无归属
+    return "dev#" + hashlib.sha256(device_id.encode("utf-8")).hexdigest()[:6]
+
+
 @router.get("/readings")
 def list_readings(db: Session = Depends(get_db)):
     rows = db.scalars(
@@ -136,6 +145,7 @@ def list_readings(db: Session = Depends(get_db)):
     ).all()
     return [{
         "id": r.id, "question": _mask_question(r.question), "sign_id": r.sign_id, "grade": r.grade,
+        "device": _device_label(r.device_id),
         "created_at": r.created_at.isoformat() if r.created_at else None,
     } for r in rows]
 
