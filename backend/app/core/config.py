@@ -39,6 +39,18 @@ class Settings(BaseSettings):
     # 自动收养旧紫微档案：第一台带 device_id 访问的浏览器把 NULL 档案收归自己。
     # 默认开（部署后站主一刷新即找回旧档案，无需口令/改 .env）；认领完可设 ZIWEI_AUTO_ADOPT=0 关。
     ziwei_auto_adopt: bool = True
+    # 付费点数（灰度）：默认关——一切就绪后设 ZIWEI_REQUIRE_CREDITS=true 开闸收费。
+    ziwei_require_credits: bool = False
+    ziwei_free_credits: int = 3  # 新账号赠送点数
+    # Stripe 跨境收款（支付宝/微信）。空 = 未配置，购买端点返回 503。
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    # SMTP 邮箱找回验证码。空 = 未配置，找回端点 503（device 找回码仍可用）。
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
     ai_daily_token_budget: int = 100_000
 
     @field_validator("ai_model")

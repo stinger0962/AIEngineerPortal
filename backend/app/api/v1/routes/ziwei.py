@@ -21,6 +21,7 @@ from app.models.entities import (
     ZiweiMessage,
     ZiweiProfile,
 )
+from app.services import credits as credits_svc
 from app.services.ai_service import AIService
 from app.services.podcast_service import _tts_bytes
 from app.services.ziwei.oracle import ZiweiOracle
@@ -223,12 +224,24 @@ def _get_user_id(db: Session) -> int:
     return db.scalar(select(User.id).limit(1)) or 1
 
 
+def _require_credit_or_402(db: Session, device: str) -> Optional[int]:
+    """付费开启时：解析账号、校验余额≥1；余额不足抛 402。返回 account_id（供成功后扣点）。
+    付费未开启（灰度）时返回 None，行为与从前一致——绝不影响现有用户。"""
+    if not get_settings().ziwei_require_credits:
+        return None
+    acct = credits_svc.resolve_account(db, device)
+    if not acct or credits_svc.balance(db, acct.id) < 1:
+        raise HTTPException(402, "点数不足，请充值后再解盘。")
+    return acct.id
+
+
 @router.post("/profiles/{profile_id}/oracle")
 def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     profile = _owned_or_404(db, profile_id, device)
     if not (profile.chart_json or {}).get("palaces"):
         raise HTTPException(400, "Profile has no chart data")
 
+    account_id = _require_credit_or_402(db, device)  # 402 if paywall on and out of credits
     from app.core.config import get_settings
     settings = get_settings()
     svc = AIService()
@@ -278,6 +291,9 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
     ))
     db.commit()
 
+    if account_id is not None:  # 解盘成功才扣 1 点（失败不扣）
+        credits_svc.consume_one(db, account_id)
+
     return {
         "conversation_id": conv.id, "response": result["response"],
         "camera_commands": result["camera_commands"], "segments": result.get("segments", []), "meta": meta,
@@ -290,6 +306,7 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
     if not (profile.chart_json or {}).get("palaces"):
         raise HTTPException(400, "Profile has no chart data")
 
+    account_id = _require_credit_or_402(db, device)  # 402 if paywall on and out of credits
     from app.core.config import get_settings
     settings = get_settings()
     svc = AIService()
@@ -327,6 +344,7 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
     user_message = payload.message
     scenario = payload.scenario
     uid = _get_user_id(db)
+    acct_id = account_id  # 成功完成时扣 1 点
 
     def _persist(clean: str, cameras: list, segments: list, in_tok: int, out_tok: int, start: float) -> None:
         """用新 session 持久化本轮对话 + token 计量。
@@ -371,6 +389,12 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
             if trailing:
                 yield {"data": json.dumps({"type": "text", "delta": trailing}, ensure_ascii=False)}
             _persist(clean, cameras, segments, in_tok, out_tok, start)
+            if acct_id is not None and clean:  # 有实质输出才扣点
+                _cdb = SessionLocal()
+                try:
+                    credits_svc.consume_one(_cdb, acct_id)
+                finally:
+                    _cdb.close()
             yield {"data": json.dumps({"type": "done", "conversation_id": conv_id, "meta": {"model": model, "total_tokens": in_tok + out_tok, "latency_ms": int((time.time() - start) * 1000)}}, ensure_ascii=False)}
         except Exception:
             # 流中途失败：尽力保住已生成的文字 + 计量（非原子；前端收到 error 应清掉屏幕上的半截文本）

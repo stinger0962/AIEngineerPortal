@@ -473,3 +473,65 @@ class KoreanMessage(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # user | assistant
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ── 付费点数 (Ziwei paid credits) ────────────────────────────────────────────────
+# 匿名 device_id → account；点数记在 account 的流水里，余额 = SUM(delta)。
+# 见 docs/superpowers/specs/2026-07-22-ziwei-paid-credits-design.md
+class Account(Base):
+    __tablename__ = "accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # 购买时由 Stripe 收银台带回，用于收据 + 邮箱找回；NULL = 尚未绑定邮箱的匿名账号。
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AccountDevice(Base):
+    """一个 account 可绑多台浏览器（device_id）。首次解盘时自动建 account + 绑当前 device。"""
+    __tablename__ = "account_devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CreditLedger(Base):
+    """点数流水（只增不改）。余额 = SUM(delta)。delta>0 充值/赠送，delta<0 消费。"""
+    __tablename__ = "credit_ledger"
+    __table_args__ = (Index("ix_credit_ledger_account", "account_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
+    delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(40), nullable=False)  # welcome | purchase | ziwei_oracle | refund
+    order_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PaymentOrder(Base):
+    __tablename__ = "payment_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+    pack: Mapped[str] = mapped_column(String(40), nullable=False)          # 服务端 PACKS 的 key
+    credits: Mapped[int] = mapped_column(Integer, nullable=False)          # 服务端定，不信前端
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)     # 分（CNY 分）
+    currency: Mapped[str] = mapped_column(String(10), default="cny")
+    stripe_session_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending")     # pending | paid | failed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class EmailCode(Base):
+    """邮箱找回的一次性验证码。"""
+    __tablename__ = "email_codes"
+    __table_args__ = (Index("ix_email_code_email", "email"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str] = mapped_column(String(12), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

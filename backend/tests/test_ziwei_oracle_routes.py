@@ -137,7 +137,10 @@ def teardown_module():
         rmtree(TEST_DB_DIR, ignore_errors=True)
 
 
-client = TestClient(app)
+# Profiles are device-scoped (X-Device-Id); send a stable device on every request and
+# seed profiles under the same device so _owned_or_404 matches.
+TEST_DEVICE = "test-dev"
+client = TestClient(app, headers={"X-Device-Id": TEST_DEVICE})
 
 
 @pytest.fixture(autouse=True)
@@ -160,7 +163,7 @@ def _seed_profile(chart=None, persona="sage"):
         db.add(User(id=1, name="Tester", email="t@example.com", target_role="x"))
         profile = ZiweiProfile(
             name="命主", relation="self", gender="male",
-            birth_date="1990-01-01", birth_time_index=0,
+            birth_date="1990-01-01", birth_time_index=0, device_id=TEST_DEVICE,
             chart_json=_valid_chart() if chart is None else chart, persona=persona,
         )
         db.add(profile)
