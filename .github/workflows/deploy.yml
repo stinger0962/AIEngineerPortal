@@ -93,6 +93,15 @@ jobs:
             upsert_env MINIMAX_API_KEY "${{ secrets.MINIMAX_API_KEY }}"
             upsert_env MINIMAX_GROUP_ID "${{ secrets.MINIMAX_GROUP_ID }}"
             upsert_env OPENAI_API_KEY "${{ secrets.OPENAI_API_KEY }}"
+            # 紫微付费点数（Stripe 跨境 + 邮箱找回）。secret 未设 → 写空值 → 端点返回 503（安全）。
+            upsert_env STRIPE_SECRET_KEY "${{ secrets.STRIPE_SECRET_KEY }}"
+            upsert_env STRIPE_WEBHOOK_SECRET "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
+            upsert_env ZIWEI_REQUIRE_CREDITS "${{ vars.ZIWEI_REQUIRE_CREDITS || 'false' }}"
+            upsert_env SMTP_HOST "${{ secrets.SMTP_HOST }}"
+            upsert_env SMTP_PORT "${{ secrets.SMTP_PORT }}"
+            upsert_env SMTP_USER "${{ secrets.SMTP_USER }}"
+            upsert_env SMTP_PASSWORD "${{ secrets.SMTP_PASSWORD }}"
+            upsert_env SMTP_FROM "${{ secrets.SMTP_FROM }}"
 
             # Update repo for docker-compose file and scripts
             cd $APP_DIR

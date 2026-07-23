@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     # Stripe 跨境收款（支付宝/微信）。空 = 未配置，购买端点返回 503。
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
+    # 收银台付款后跳回的站点公网地址（success/cancel URL 用）。
+    public_base_url: str = "https://portal.leipan.cc"
     # SMTP 邮箱找回验证码。空 = 未配置，找回端点 503（device 找回码仍可用）。
     smtp_host: str = ""
     smtp_port: int = 587

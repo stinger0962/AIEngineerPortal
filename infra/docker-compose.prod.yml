@@ -48,6 +48,14 @@ services:
       MINIMAX_MODEL: ${MINIMAX_MODEL:-speech-2.6-hd}
       WEBSHARE_PROXY_USERNAME: ${WEBSHARE_PROXY_USERNAME:-}
       WEBSHARE_PROXY_PASSWORD: ${WEBSHARE_PROXY_PASSWORD:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      ZIWEI_REQUIRE_CREDITS: ${ZIWEI_REQUIRE_CREDITS:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     volumes:
       - podcast_audio:/data/podcast_audio
       - dub_videos:/data/dub_videos
