@@ -9,6 +9,8 @@ for name in ('ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'MINIMAX_API_KEY',
     os.environ[name] = ''
 os.environ['DATABASE_URL'] = 'sqlite://'
 os.environ['ZIWEI_REQUIRE_CREDITS'] = 'false'
+os.environ['STRIPE_TEST_ENABLED'] = 'false'
+os.environ['STRIPE_TEST_BASE_URL'] = ''
 
 import pytest
 from fastapi import FastAPI
@@ -20,7 +22,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from app.core.config import Settings
 from app.db.session import get_db
 from app.api.v1.routes import billing, ziwei
-from app.models.entities import (Account, AccountDevice, CreditLedger, PaymentOrder,
+from app.models.entities import (Base, Account, AccountDevice, CreditLedger, PaymentOrder,
                                 User, ZiweiProfile, ZiweiConversation, ZiweiMessage, AIFeedback)
 from app.services import credits, stripe_billing
 
@@ -47,15 +49,16 @@ def qa(tmp_path, monkeypatch):
                         public_base_url='http://localhost:3000',
                         ziwei_require_credits=True, ziwei_free_credits=0,
                         ziwei_auto_adopt=False)
+    # Explicit agreed configuration, also usable against the pre-contract baseline.
+    settings = settings.model_copy(update={'stripe_test_enabled': True,
+                                           'stripe_test_base_url': 'http://localhost:3000'})
     import app.core.config as config
     for module in (config, credits, stripe_billing, billing, ziwei):
         monkeypatch.setattr(module, 'get_settings', lambda: settings)
     engine = create_engine(f'sqlite:///{tmp_path / "qa.db"}',
                            connect_args={'check_same_thread': False, 'timeout': 5})
-    models = (Account, AccountDevice, CreditLedger, PaymentOrder, User,
-              ZiweiProfile, ZiweiConversation, ZiweiMessage, AIFeedback)
-    for model in models:
-        model.__table__.create(engine)
+    # Include new billing/reservation tables without depending on their class names.
+    Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine, expire_on_commit=False)
     def db_override():
         with sessions() as db:

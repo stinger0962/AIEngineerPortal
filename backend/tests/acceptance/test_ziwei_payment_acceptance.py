@@ -87,7 +87,7 @@ def test_live_key_cannot_enable_checkout(qa, monkeypatch):
     calls = []
     monkeypatch.setattr(stripe.checkout.Session, 'create', lambda **kw: calls.append(kw))
     qa.settings.stripe_secret_key = 'sk_live_nonfunctional_qa_placeholder'
-    response = qa.client.post('/api/v1/billing/checkout', json={'pack': 'p10'}, headers={'X-Device-Id': 'qa-owner'})
+    response = qa.client.post('/api/v1/billing/checkout', json={'pack': 'p10'}, headers={'X-Device-Id': 'qa-owner', 'Idempotency-Key': 'qa-live-key-reject'})
     assert response.status_code == 503
     assert calls == []
 
