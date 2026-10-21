@@ -74,6 +74,8 @@ function load(file) {
   global.fetch = async (url, init) => {
     oracleCalls.push(init);
     if (outcome === '402') return new Response(JSON.stringify({ detail: { code: 'insufficient_credits', balance: 0, required: 1 } }), { status: 402 });
+    if (outcome === 'busy') return new Response(JSON.stringify({ detail: { code: 'billing_busy' } }), { status: 503, headers: { 'Retry-After': '2' } });
+    if (outcome === 'sse-busy') return new Response('data: {"type":"error","code":"billing_busy","retryable":true}\n\n');
     if (outcome === '409') return new Response(JSON.stringify({ detail: { code: 'request_already_completed' } }), { status: 409 });
     if (outcome === 'truncated') return new Response('data: {"type":"text","delta":"partial"}\n\n');
     if (url.endsWith('/stream')) return new Response('data: {"type":"done","conversation_id":42,"meta":{}}\n\n');
@@ -103,9 +105,31 @@ function load(file) {
   const truncatedKey = oracleCalls.at(-1).headers['Idempotency-Key'];
   outcome = 'success'; await ziweiApi.streamOracle(1, question, handlers);
   assert.equal(oracleCalls.at(-1).headers['Idempotency-Key'], truncatedKey);
+  // A single explicit attempt makes one request; transient failures retain its key.
+  for (const method of ['askOracle', 'streamOracle']) {
+    outcome = 'busy';
+    const before = oracleCalls.length;
+    await assert.rejects(ziweiApi[method](1, question, handlers), e => e.status === 503 && e.code === 'billing_busy' && e.retryAfterSeconds === 2);
+    assert.equal(oracleCalls.length, before + 1);
+    const busyKey = oracleCalls.at(-1).headers['Idempotency-Key'];
+    outcome = 'success'; await ziweiApi[method](1, question, handlers);
+    assert.equal(oracleCalls.length, before + 2);
+    assert.equal(oracleCalls.at(-1).headers['Idempotency-Key'], busyKey);
+  }
+  outcome = 'sse-busy';
+  const beforeBusyStream = oracleCalls.length;
+  let retryableEvent;
+  await ziweiApi.streamOracle(1, question, { ...handlers, onError(event) { retryableEvent = event; } });
+  assert.equal(oracleCalls.length, beforeBusyStream + 1);
+  assert.equal(retryableEvent.code, 'billing_busy');
+  assert.equal(retryableEvent.retryable, true);
+  const busyStreamKey = oracleCalls.at(-1).headers['Idempotency-Key'];
+  outcome = 'success'; await ziweiApi.streamOracle(1, question, handlers);
+  assert.equal(oracleCalls.length, beforeBusyStream + 2);
+  assert.equal(oracleCalls.at(-1).headers['Idempotency-Key'], busyStreamKey);
   global.fetch = originalFetch;
   const { CreditPanel } = load(path.join(root, 'components/ziwei/billing/credit-panel.tsx'));
   const markup = renderToStaticMarkup(React.createElement(CreditPanel, { refreshKey: 0, adapter: api }));
   assert.match(markup, /Stripe TEST/); assert.match(markup, /测试支付尚未开放/); assert.match(markup, /aria-live="polite"/);
-  console.log('PASS: test gating, server packs, identity, Checkout rejection, payment states, failures, initial component render');
+  console.log('PASS: test gating, server packs, identity, Checkout rejection, payment states, 503/SSE billing_busy manual retries, failures, initial component render');
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -190,10 +190,12 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
         { scenario: "natal", message, conversation_id: conversationId ?? undefined },
         {
           ...handlers,
-          onError: () => {
+          onError: (event) => {
             handlers.onError();
             setInput(message);
-            setError("解读未完成，问题已保留。可使用相同问题重试。");
+            setError(event?.retryable || event?.code === "billing_busy"
+              ? "点数服务暂时繁忙，请等待 2 秒后手动重试。问题已保留，不会自动重复提交。"
+              : "解读未完成，问题已保留。可使用相同问题重试。");
           },
           onDone: (id, meta) => {
             handlers.onDone(id, meta);
@@ -231,7 +233,10 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
           setInput(message);
           setError("请求标识无效，问题已保留。请刷新后重试。");
         }
-        else if (e.status === 503) setError("解盘师未启用（缺少 API Key）");
+        else if (e.status === 503 && e.code === "billing_busy") {
+          setError(`点数服务暂时繁忙，请等待 ${e.retryAfterSeconds ?? 2} 秒后手动重试。问题已保留，不会自动重复提交。`);
+        }
+        else if (e.status === 503) setError("解盘暂时不可用，请稍后重试。");
         else if (e.status === 429) setError("今日额度已用尽，请明日再来");
         else setError("解盘暂不可用，请稍后再试");
       } else {

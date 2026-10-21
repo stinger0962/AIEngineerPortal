@@ -9,16 +9,19 @@ export class ZiweiApiError extends Error {
     public status: number,
     detail?: string,
     public code?: string,
+    public retryAfterSeconds?: number,
   ) {
     super(detail ?? `Request failed: ${status}`);
   }
 }
 
-function apiError(status: number, detail: unknown): ZiweiApiError {
+function apiError(status: number, detail: unknown, retryAfter: string | null = null): ZiweiApiError {
+  const seconds = retryAfter === null ? undefined : Number(retryAfter);
+  const retryAfterSeconds = seconds !== undefined && Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
   if (typeof detail === "object" && detail !== null && "code" in detail) {
-    return new ZiweiApiError(status, undefined, typeof detail.code === "string" ? detail.code : undefined);
+    return new ZiweiApiError(status, undefined, typeof detail.code === "string" ? detail.code : undefined, retryAfterSeconds);
   }
-  return new ZiweiApiError(status, typeof detail === "string" ? detail : undefined);
+  return new ZiweiApiError(status, typeof detail === "string" ? detail : undefined, undefined, retryAfterSeconds);
 }
 
 export type ZiweiProfileOut = {
@@ -55,7 +58,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const err = await response.json().catch(() => null) as { detail?: unknown } | null;
-    throw apiError(response.status, err?.detail);
+    throw apiError(response.status, err?.detail, response.headers.get("Retry-After"));
   }
   return (await response.json()) as T;
 }
@@ -96,13 +99,13 @@ export type OracleStreamEvent =
   | { type: "text"; delta: string }
   | { type: "camera"; command: CameraCommand }
   | { type: "done"; conversation_id: number; meta: OracleReply["meta"] }
-  | { type: "error" };
+  | { type: "error"; code?: string; retryable?: boolean };
 
 export type OracleStreamHandlers = {
   onText: (delta: string) => void;
   onCamera: (command: CameraCommand) => void;
   onDone: (conversationId: number, meta: OracleReply["meta"]) => void;
-  onError: () => void;
+  onError: (error?: Extract<OracleStreamEvent, { type: "error" }>) => void;
 };
 
 /** 流式解盘：text 增量逐字铺、camera 即时触发镜头/术语、done 落定会话、error 标记失败。
@@ -123,7 +126,7 @@ async function streamOracle(
   });
   if (!response.ok || !response.body) {
     const err = (await response.json().catch(() => null)) as { detail?: unknown } | null;
-    throw apiError(response.status, err?.detail);
+    throw apiError(response.status, err?.detail, response.headers.get("Retry-After"));
   }
 
   const reader = response.body.getReader();
@@ -155,7 +158,7 @@ async function streamOracle(
         handlers.onDone(ev.conversation_id, ev.meta);
       } else if (ev.type === "error") {
         terminal = true;
-        handlers.onError();
+        handlers.onError(ev);
       }
     }
   }
