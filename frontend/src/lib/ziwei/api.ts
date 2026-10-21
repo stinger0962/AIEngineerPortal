@@ -1,4 +1,5 @@
 import { API_BASE } from "@/lib/api";
+import { retryKeys } from "./retry-keys";
 import { getDeviceId } from "@/lib/deviceId";
 import type { ZiweiChart } from "./types";
 
@@ -7,9 +8,17 @@ export class ZiweiApiError extends Error {
   constructor(
     public status: number,
     detail?: string,
+    public code?: string,
   ) {
     super(detail ?? `Request failed: ${status}`);
   }
+}
+
+function apiError(status: number, detail: unknown): ZiweiApiError {
+  if (typeof detail === "object" && detail !== null && "code" in detail) {
+    return new ZiweiApiError(status, undefined, typeof detail.code === "string" ? detail.code : undefined);
+  }
+  return new ZiweiApiError(status, typeof detail === "string" ? detail : undefined);
 }
 
 export type ZiweiProfileOut = {
@@ -46,7 +55,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const err = await response.json().catch(() => null) as { detail?: unknown } | null;
-    throw new ZiweiApiError(response.status, typeof err?.detail === "string" ? err.detail : undefined);
+    throw apiError(response.status, err?.detail);
   }
   return (await response.json()) as T;
 }
@@ -104,21 +113,23 @@ async function streamOracle(
   handlers: OracleStreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
+  const scope = `oracle:${getDeviceId()}:${profileId}:stream`;
   const response = await fetch(`${API_BASE}/ziwei/profiles/${profileId}/oracle/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Device-Id": getDeviceId() },
+    headers: { "Content-Type": "application/json", "X-Device-Id": getDeviceId(), "Idempotency-Key": retryKeys.get(scope, body) },
     body: JSON.stringify(body),
     cache: "no-store",
     signal,
   });
   if (!response.ok || !response.body) {
     const err = (await response.json().catch(() => null)) as { detail?: unknown } | null;
-    throw new ZiweiApiError(response.status, typeof err?.detail === "string" ? err.detail : undefined);
+    throw apiError(response.status, err?.detail);
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let terminal = false;
   while (true) {
     const { done, value } = await reader.read();
     if (done || signal?.aborted) break;
@@ -138,10 +149,17 @@ async function streamOracle(
       }
       if (ev.type === "text") handlers.onText(ev.delta);
       else if (ev.type === "camera") handlers.onCamera(ev.command);
-      else if (ev.type === "done") handlers.onDone(ev.conversation_id, ev.meta);
-      else if (ev.type === "error") handlers.onError();
+      else if (ev.type === "done") {
+        terminal = true;
+        retryKeys.complete(scope);
+        handlers.onDone(ev.conversation_id, ev.meta);
+      } else if (ev.type === "error") {
+        terminal = true;
+        handlers.onError();
+      }
     }
   }
+  if (!terminal && !signal?.aborted) handlers.onError();
 }
 
 export const ziweiApi = {
@@ -152,8 +170,14 @@ export const ziweiApi = {
     request<ZiweiProfileOut>(`/ziwei/profiles/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteProfile: (id: number) =>
     request<{ deleted: number }>(`/ziwei/profiles/${id}`, { method: "DELETE" }),
-  askOracle: (profileId: number, body: OracleAsk) =>
-    request<OracleReply>(`/ziwei/profiles/${profileId}/oracle`, { method: "POST", body: JSON.stringify(body) }),
+  askOracle: async (profileId: number, body: OracleAsk) => {
+    const scope = `oracle:${getDeviceId()}:${profileId}:sync`;
+    const reply = await request<OracleReply>(`/ziwei/profiles/${profileId}/oracle`, {
+      method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": retryKeys.get(scope, body) },
+    });
+    retryKeys.complete(scope);
+    return reply;
+  },
   streamOracle,
   listConversations: (profileId: number) =>
     request<ConversationOut[]>(`/ziwei/profiles/${profileId}/conversations`),
