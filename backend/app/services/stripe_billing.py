@@ -6,6 +6,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.db.billing_contention import bound_lock_wait
 from app.models.entities import BillingRequest, CreditLedger, PaymentOrder
 from app.services import credits as credits_svc
 
@@ -80,6 +81,7 @@ def verify_event(payload: bytes, sig_header: str):
 
 
 def process_event(db: Session, event) -> str:
+    bound_lock_wait(db)
     obj = event["data"]["object"]
     if event.get("livemode") is not False or obj.get("livemode") is not False:
         return "live_or_unknown_mode_rejected"

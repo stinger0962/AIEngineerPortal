@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     ziwei_require_credits: bool = False
     ziwei_free_credits: int = 3  # 新账号赠送点数
     # Stripe 跨境收款（支付宝/微信）。空 = 未配置，购买端点返回 503。
+    billing_lock_timeout_ms: int = Field(default=2000, ge=50, le=10000)
     stripe_test_enabled: bool = False
     stripe_test_base_url: str = ""
     stripe_secret_key: str = ""

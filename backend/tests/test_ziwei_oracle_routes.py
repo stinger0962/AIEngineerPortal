@@ -428,3 +428,40 @@ def test_paid_stream_disconnect_releases_debit(paid_account, monkeypatch):
         pass
     asyncio.run(response({"type": "http"}, receive, send))
     assert _balance(account_id) == before
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_paid_contention_leaves_credits_and_request_key_reusable(paid_account, monkeypatch, stream):
+    from app.services import credits
+    from app.models.entities import BillingRequest
+    from time import monotonic
+    account_id, before = paid_account
+    pid = _seed_profile()
+    monkeypatch.setattr(ziwei_routes.get_settings(), "billing_lock_timeout_ms", 50)
+    if stream:
+        class FakeStream:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            @property
+            def text_stream(self): yield "completed response"
+            def get_final_message(self):
+                return SimpleNamespace(usage=SimpleNamespace(input_tokens=1, output_tokens=2))
+        monkeypatch.setattr(_FakeMessages, "stream", lambda *a, **kw: FakeStream(), raising=False)
+    url = f"/api/v1/ziwei/profiles/{pid}/oracle" + ("/stream" if stream else "")
+    headers = {"Idempotency-Key": "contended-oracle"}
+    with TestingSessionLocal() as blocker:
+        credits.lock_account(blocker, account_id)
+        start = monotonic()
+        result = client.post(url, json={"message": "test"}, headers=headers)
+        assert monotonic() - start < 1.5
+        assert result.status_code == 503
+        assert result.json()["detail"]["code"] == "billing_busy"
+        assert result.headers["retry-after"] == "2"
+    assert _balance(account_id) == before
+    with TestingSessionLocal() as db:
+        assert db.scalars(select(BillingRequest)).all() == []
+    result = client.post(url, json={"message": "test"}, headers=headers)
+    assert result.status_code == 200
+    assert _balance(account_id) == before - 1
+    assert client.post(url, json={"message": "test"}, headers=headers).status_code == 409
+    assert _balance(account_id) == before - 1

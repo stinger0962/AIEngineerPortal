@@ -9,12 +9,14 @@ from typing import Dict, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 from starlette.background import BackgroundTask
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal, get_db
+from app.db.billing_contention import retryable_contention, is_lock_contention
 from app.models.entities import (
     AIFeedback,
     BillingRequest,
@@ -259,6 +261,7 @@ def _reserve_credit(db: Session, account_id, profile_id, payload, key: str):
 
 
 @router.post("/profiles/{profile_id}/oracle")
+@retryable_contention
 def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id), idempotency_key: str = Header(default="")):
     profile = _owned_or_404(db, profile_id, device)
     if not (profile.chart_json or {}).get("palaces"):
@@ -324,6 +327,7 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
 
 
 @router.post("/profiles/{profile_id}/oracle/stream")
+@retryable_contention
 def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id), idempotency_key: str = Header(default="")):
     profile = _owned_or_404(db, profile_id, device)
     if not (profile.chart_json or {}).get("palaces"):
@@ -424,8 +428,12 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
                 raise ValueError("empty_generation")
             _persist(clean, cameras, segments, in_tok, out_tok, start)
             yield {"data": json.dumps({"type": "done", "conversation_id": conv_id, "meta": {"model": model, "total_tokens": in_tok + out_tok, "latency_ms": int((time.time() - start) * 1000)}}, ensure_ascii=False)}
-        except Exception:
+        except Exception as exc:
             stream_db.rollback()  # release debit and idempotency record before salvage
+            if isinstance(exc, DBAPIError) and is_lock_contention(exc):
+                yield {"data": json.dumps({"type": "error", "code": "billing_busy", "retryable": True,
+                                           "retry_after_seconds": 2})}
+                return
             # 流中途失败：尽力保住已生成的文字 + 计量（非原子；前端收到 error 应清掉屏幕上的半截文本）
             logger.exception("ziwei oracle stream failed (profile=%s conv=%s)", profile_id, conv_id)
             try:

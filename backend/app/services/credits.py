@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.db.billing_contention import bound_lock_wait
 from app.models.entities import Account, AccountDevice, CreditLedger
 
 # 服务端权威定价（前端只报 pack key，金额/点数一律以此为准）。amount_cents = CNY 分。
@@ -22,6 +23,7 @@ PACKS: dict[str, dict] = {
 def resolve_account(db: Session, device_id: str, *, create: bool = True) -> Optional[Account]:
     """device_id → account。新设备（create=True 时）自动建 account + 绑定 + 赠送免费点数。
     空 device_id 返回 None。"""
+    bound_lock_wait(db)
     device_id = (device_id or "").strip()
     if not device_id:
         return None
@@ -63,6 +65,7 @@ def grant(db: Session, account_id: int, delta: int, reason: str, order_id: Optio
 def lock_account(db: Session, account_id: int) -> None:
     # An UPDATE obtains a write lock on SQLite and a row lock on PostgreSQL.
     # All balance-decreasing operations must acquire this lock before reading SUM.
+    bound_lock_wait(db)
     db.execute(update(Account).where(Account.id == account_id).values(id=Account.id))
 
 

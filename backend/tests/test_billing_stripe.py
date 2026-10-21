@@ -205,3 +205,129 @@ def test_unresolved_old_checkout_is_not_recreated(db, monkeypatch):
     db.commit()
     with pytest.raises(ValueError, match="checkout_reconciliation_required"):
         stripe_billing.create_checkout_session(db, acct.id, "p10", "checkout-key")
+
+
+def test_checkout_contention_is_bounded_and_retry_preserves_key(db, monkeypatch):
+    from time import monotonic
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api.v1.routes.billing import router
+    from app.db.session import get_db
+    from app.core.config import get_settings
+    import stripe
+    monkeypatch.setattr(get_settings(), "billing_lock_timeout_ms", 50)
+    acct = credits_svc.resolve_account(db, "device-a")
+    account_id = acct.id
+    before = credits_svc.balance(db, account_id)
+    engine = db.get_bind()
+    db.rollback()
+    app = FastAPI()
+    app.include_router(router)
+    def isolated_db():
+        with Session(engine) as session:
+            yield session
+    app.dependency_overrides[get_db] = isolated_db
+    calls = []
+    def create(**kw):
+        calls.append(kw)
+        return SimpleNamespace(id="cs_test_contended", url="https://checkout.stripe.com/mock", livemode=False)
+    monkeypatch.setattr(stripe.checkout.Session, "create", create)
+    client = TestClient(app)
+    headers = {"X-Device-Id": "device-a", "Idempotency-Key": "contention-key"}
+    with Session(engine) as blocker:
+        credits_svc.lock_account(blocker, account_id)
+        start = monotonic()
+        response = client.post("/billing/checkout", headers=headers, json={"pack": "p10"})
+        assert monotonic() - start < 1.5  # does not use fixture's 10-second default
+        assert response.status_code == 503
+        assert response.headers["retry-after"] == "2"
+        assert response.json()["detail"] == {"code": "billing_busy", "retryable": True, "retry_after_seconds": 2}
+    assert calls == []
+    assert credits_svc.balance(db, account_id) == before
+    assert db.scalars(select(BillingRequest)).all() == []
+    assert db.scalars(select(PaymentOrder)).all() == []
+    db.rollback()
+    first = client.post("/billing/checkout", headers=headers, json={"pack": "p10"})
+    repeated = client.post("/billing/checkout", headers=headers, json={"pack": "p10"})
+    assert first.status_code == repeated.status_code == 200
+    assert first.json() == repeated.json() and len(calls) == 1
+
+
+def test_busy_timeout_reapplied_after_commit(db, monkeypatch):
+    from app.db.billing_contention import bound_lock_wait
+    from app.core.config import get_settings
+    from sqlalchemy import text
+    monkeypatch.setattr(get_settings(), "billing_lock_timeout_ms", 75)
+    bound_lock_wait(db)
+    assert db.scalar(text("PRAGMA busy_timeout")) == 75
+    db.execute(text("PRAGMA busy_timeout = 9000"))
+    db.commit()
+    assert db.scalar(text("PRAGMA busy_timeout")) == 75
+
+
+def test_postgres_timeout_is_transaction_local_and_classification_is_precise():
+    from app.db.billing_contention import _apply, is_lock_contention, _translate
+    from fastapi import HTTPException
+    from sqlalchemy.exc import OperationalError
+    from unittest.mock import Mock
+    connection = Mock(dialect=SimpleNamespace(name="postgresql"))
+    _apply(connection, 2000)
+    statement, parameters = connection.execute.call_args.args
+    assert str(statement) == "SELECT set_config('lock_timeout', :timeout, true)"
+    assert parameters == {"timeout": "2000ms"}
+    for code in ("55P03", "40P01"):
+        original = Exception("mock postgres lock failure")
+        original.sqlstate = code
+        error = OperationalError("UPDATE", {}, original)
+        session = Mock()
+        with pytest.raises(HTTPException) as result:
+            _translate(session, error)
+        assert result.value.status_code == 503
+        session.rollback.assert_called_once()
+    original = Exception("unrelated database outage")
+    original.sqlstate = "08006"
+    assert not is_lock_contention(OperationalError("SELECT", {}, original))
+
+
+def test_post_provider_contention_keeps_checkout_intent_for_safe_retry(db, monkeypatch):
+    import stripe
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api.v1.routes.billing import router
+    from app.db.session import get_db
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "billing_lock_timeout_ms", 50)
+    account_id = credits_svc.resolve_account(db, "device-a").id
+    engine = db.get_bind()
+    db.rollback()
+    app = FastAPI()
+    app.include_router(router)
+    def isolated_db():
+        with Session(engine) as session:
+            yield session
+    app.dependency_overrides[get_db] = isolated_db
+    keys = []
+    blocker = Session(engine)
+    def create(**kw):
+        keys.append(kw["idempotency_key"])
+        if len(keys) == 1:
+            credits_svc.lock_account(blocker, account_id)
+        return SimpleNamespace(id="cs_test_recovered", url="https://checkout.stripe.com/mock", livemode=False)
+    monkeypatch.setattr(stripe.checkout.Session, "create", create)
+    headers = {"X-Device-Id": "device-a", "Idempotency-Key": "post-provider-key"}
+    client = TestClient(app)
+    try:
+        response = client.post("/billing/checkout", headers=headers, json={"pack": "p10"})
+        assert response.status_code == 503
+        assert response.json()["detail"]["code"] == "billing_busy"
+    finally:
+        blocker.close()
+    orders = db.scalars(select(PaymentOrder)).all()
+    assert len(orders) == 1 and orders[0].status == "pending"
+    assert len(db.scalars(select(BillingRequest)).all()) == 1
+    db.rollback()
+    retried = client.post("/billing/checkout", headers=headers, json={"pack": "p10"})
+    assert retried.status_code == 200
+    assert keys[0] == keys[1]
+    assert len(db.scalars(select(PaymentOrder)).all()) == 1
+    assert len(db.scalars(select(BillingRequest)).all()) == 1
