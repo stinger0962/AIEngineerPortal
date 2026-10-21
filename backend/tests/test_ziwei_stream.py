@@ -196,7 +196,7 @@ def teardown_module():
         rmtree(TEST_DB_DIR, ignore_errors=True)
 
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Device-Id": "stream-owner"})
 
 
 @pytest.fixture(autouse=True)
@@ -219,7 +219,7 @@ def _seed_profile(chart=None, persona="sage"):
     try:
         db.add(User(id=1, name="Tester", email="t@example.com", target_role="x"))
         profile = ZiweiProfile(
-            name="命主", relation="self", gender="male",
+            name="命主", relation="self", gender="male", device_id="stream-owner",
             birth_date="1990-01-01", birth_time_index=0,
             chart_json=_valid_chart() if chart is None else chart, persona=persona,
         )

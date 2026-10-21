@@ -319,3 +319,112 @@ def test_ask_oracle_502_leaves_no_orphan_message(monkeypatch):
             assert len(msgs) == 0, f"Orphan messages found in conv {conv.id} after 502"
     finally:
         db.close()
+
+
+@pytest.fixture
+def paid_account(monkeypatch):
+    from app.models.entities import Account, AccountDevice, BillingRequest, CreditLedger
+    from app.services import credits
+    for model in (Account, AccountDevice, CreditLedger, BillingRequest):
+        model.__table__.create(engine, checkfirst=True)
+    with engine.begin() as conn:
+        for name in ("billing_requests", "credit_ledger", "account_devices", "accounts"):
+            conn.execute(text(f"DELETE FROM {name}"))
+    monkeypatch.setattr(ziwei_routes.get_settings(), "ziwei_require_credits", True)
+    with TestingSessionLocal() as db:
+        acct = credits.resolve_account(db, TEST_DEVICE)
+        return acct.id, credits.balance(db, acct.id)
+
+
+def _balance(account_id):
+    from app.services import credits
+    with TestingSessionLocal() as db:
+        return credits.balance(db, account_id)
+
+
+def test_paid_sync_success_duplicate_and_conflict(paid_account):
+    account_id, before = paid_account
+    pid = _seed_profile()
+    url = f"/api/v1/ziwei/profiles/{pid}/oracle"
+    headers = {"Idempotency-Key": "oracle-request-1"}
+    assert client.post(url, json={"message": "事业？"}, headers=headers).status_code == 200
+    assert _balance(account_id) == before - 1
+    duplicate = client.post(url, json={"message": "事业？"}, headers=headers)
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"]["code"] == "request_already_completed"
+    assert client.post(url, json={"message": "changed"}, headers=headers).status_code == 409
+    assert _balance(account_id) == before - 1
+
+
+def test_paid_failure_and_empty_output_do_not_charge(paid_account, monkeypatch):
+    account_id, before = paid_account
+    pid = _seed_profile()
+    monkeypatch.setattr(ziwei_routes.ZiweiOracle, "run", lambda *a, **kw: None)
+    url = f"/api/v1/ziwei/profiles/{pid}/oracle"
+    for _ in range(2):
+        assert client.post(url, json={"message": "事业？"}, headers={"Idempotency-Key": "retry-request"}).status_code == 502
+        assert _balance(account_id) == before
+
+
+def test_paid_402_contract_and_key_required(paid_account):
+    from app.services import credits
+    account_id, before = paid_account
+    pid = _seed_profile()
+    url = f"/api/v1/ziwei/profiles/{pid}/oracle"
+    assert client.post(url, json={"message": "事业？"}).status_code == 400
+    with TestingSessionLocal() as db:
+        for _ in range(before):
+            assert credits.consume_one(db, account_id)
+    response = client.post(url, json={"message": "事业？"}, headers={"Idempotency-Key": "no-credit-key"})
+    assert response.status_code == 402
+    assert response.json()["detail"] == {"code": "insufficient_credits", "balance": 0, "required": 1}
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_paid_stream_success_or_failure(paid_account, monkeypatch, fail):
+    account_id, before = paid_account
+    pid = _seed_profile()
+    class FakeStream:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        @property
+        def text_stream(self):
+            yield "partial text"
+            if fail:
+                raise RuntimeError("mock upstream failure")
+            yield " complete"
+        def get_final_message(self):
+            return SimpleNamespace(usage=SimpleNamespace(input_tokens=1, output_tokens=2))
+    monkeypatch.setattr(_FakeMessages, "stream", lambda *a, **kw: FakeStream(), raising=False)
+    url = f"/api/v1/ziwei/profiles/{pid}/oracle/stream"
+    headers = {"Idempotency-Key": "stream-request"}
+    response = client.post(url, json={"message": "事业？"}, headers=headers)
+    assert response.status_code == 200
+    assert ('"type": "error"' if fail else '"type": "done"') in response.text
+    assert _balance(account_id) == before - (0 if fail else 1)
+    repeated = client.post(url, json={"message": "事业？"}, headers=headers)
+    assert repeated.status_code == (200 if fail else 409)
+    assert _balance(account_id) == before - (0 if fail else 1)
+
+
+def test_paid_stream_disconnect_releases_debit(paid_account, monkeypatch):
+    import asyncio
+    account_id, before = paid_account
+    pid = _seed_profile()
+    class FakeStream:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        @property
+        def text_stream(self):
+            yield "first chunk"
+            yield "second chunk"
+    monkeypatch.setattr(_FakeMessages, "stream", lambda *a, **kw: FakeStream(), raising=False)
+    with TestingSessionLocal() as db:
+        response = ziwei_routes.ask_oracle_stream(pid, ziwei_routes.OracleRequest(message="test"),
+                                                  db, TEST_DEVICE, "disconnect-key")
+    async def receive():
+        return {"type": "http.disconnect"}
+    async def send(message):
+        pass
+    asyncio.run(response({"type": "http"}, receive, send))
+    assert _balance(account_id) == before

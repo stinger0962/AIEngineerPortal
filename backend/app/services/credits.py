@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -36,7 +37,11 @@ def resolve_account(db: Session, device_id: str, *, create: bool = True) -> Opti
     free = get_settings().ziwei_free_credits
     if free > 0:
         db.add(CreditLedger(account_id=acct.id, delta=free, reason="welcome"))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return resolve_account(db, device_id, create=False)
     db.refresh(acct)
     return acct
 
@@ -55,11 +60,27 @@ def grant(db: Session, account_id: int, delta: int, reason: str, order_id: Optio
     db.commit()
 
 
-def consume_one(db: Session, account_id: int, reason: str = "ziwei_oracle") -> bool:
-    """扣 1 点；余额不足则不扣、返回 False。
-    注：并发下的检查-扣减非原子（低流量可接受；最坏偶尔多送一次）。"""
+def lock_account(db: Session, account_id: int) -> None:
+    # An UPDATE obtains a write lock on SQLite and a row lock on PostgreSQL.
+    # All balance-decreasing operations must acquire this lock before reading SUM.
+    db.execute(update(Account).where(Account.id == account_id).values(id=Account.id))
+
+
+def consume_one(db: Session, account_id: int, reason: str = "ziwei_oracle", *, commit: bool = True) -> bool:
+    lock_account(db, account_id)
     if balance(db, account_id) < 1:
+        db.rollback()
         return False
     db.add(CreditLedger(account_id=account_id, delta=-1, reason=reason))
-    db.commit()
+    db.flush()
+    if commit:
+        db.commit()
     return True
+
+
+def request_identity(account_id: int, operation: str, key: str, payload: str):
+    import hashlib
+    if not key or not 8 <= len(key) <= 128:
+        raise ValueError("invalid_idempotency_key")
+    digest = lambda value: hashlib.sha256(value.encode()).hexdigest()
+    return digest(f"{account_id}:{operation}:{key}"), digest(payload)
