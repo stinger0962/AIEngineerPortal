@@ -111,11 +111,9 @@ No external preview was deployed; the localhost dev server was stopped after tes
 
 ## Pending security and external acceptance
 
-Parent explicitly deferred changes to legacy profile auto-adoption and callback
-host validation because a separate security-fix action was denied by approval
-review. Those implementations are unchanged by this integration; approval/review
-remains pending. Isolated QA uses `ziwei_auto_adopt=false`. Passing these fixtures
-does not establish safe legacy adoption or exhaustive callback-host validation.
+The previously deferred legacy auto-adoption and callback-host fixes were explicitly
+approved on 2026-10-22 and are now implemented; see the final security verification
+below. No ownerless records were assigned, altered, or deleted.
 
 Real Stripe TEST Checkout/webhook delivery and payment-method availability remain
 pending. Local PostgreSQL concurrency/migration checks are now complete below. There is no live payment
@@ -205,7 +203,7 @@ signing secret only in the isolated backend. This requires installing the offici
 CLI and approved temporary Stripe authentication first. Do not forward to production
 or register/configure an external endpoint as part of this task. No CLI installation,
 Stripe connection, external request, credential creation, or enabling was performed.
-The two separately denied security changes remain pending parent approval.
+The two previously denied security changes were subsequently approved and completed; see below.
 
 ## Residual retry-draft correction
 
@@ -218,3 +216,34 @@ A's original request key/body, and disables ordinary send on the empty draft.
 The earlier browser assertion that B survives successful retry still passes.
 All four browser checkpoint groups pass with mocked APIs and no page exceptions;
 offline frontend tests and TypeScript also pass after this correction.
+
+
+## Final approved security verification — 2026-10-22
+
+Both explicitly approved fixes are now implemented without a renewed denial:
+
+- Profile listing never assigns NULL-owned records, even with stale auto-adopt=true.
+  The deprecated setting defaults to false. Legacy profile, conversation and message
+  data are preserved and hidden until separately authorized explicit recovery.
+- Test callback hostname validation canonicalizes DNS root dots, case and IDNA on
+  both sides before enforcing the existing production-host restrictions. Invalid
+  hostname parsing fails closed. Local isolated test callbacks remain usable.
+
+Fourteen new independent regression cases verify unchanged legacy rows across
+repeated listing/read attempts by missing and different device identities, retained
+access to already owned profiles, disabled explicit claim without configuration,
+production hostname spelling variants, and local callback availability. Tests do
+not perform recovery, create credentials, or contact Stripe.
+
+Focused SQLite suite: **111 passed, 4 PostgreSQL-only skips**. Full backend:
+**387 passed, 6 inherited failures, 4 skips** (the same six baseline failures
+listed above). Real isolated PostgreSQL 16.15 acceptance: **59 passed**. All test
+schemas were removed and the disposable container stopped after verification. Earlier frontend
+browser/typecheck/build passes remain applicable: no frontend code changed in this
+security correction. Existing Stripe integration was not accessed. Checkout uses
+inline price_data/product_data and requires no pre-created Product/Price IDs.
+
+Legacy recovery remains a separate authorized operation requiring verification of
+rightful ownership. The existing code-protected bulk claim endpoint is unchanged,
+not enabled, and also covers Qian records; it must not be treated as proof that a
+visitor owns any particular legacy profile. No production data was touched.

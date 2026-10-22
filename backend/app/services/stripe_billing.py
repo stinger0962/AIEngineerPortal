@@ -11,14 +11,24 @@ from app.models.entities import BillingRequest, CreditLedger, PaymentOrder
 from app.services import credits as credits_svc
 
 
+def _canonical_hostname(hostname: str | None) -> str:
+    # Compare DNS names independent of case, IDNA spelling and the root dot.
+    return (hostname or "").rstrip(".").encode("idna").decode("ascii").lower().rstrip(".")
+
+
 def is_configured() -> bool:
     s = get_settings()
-    base = urlparse(s.stripe_test_base_url)
+    try:
+        base = urlparse(s.stripe_test_base_url)
+        host = _canonical_hostname(base.hostname)
+        production_host = _canonical_hostname(urlparse(s.public_base_url).hostname)
+    except (ValueError, UnicodeError):
+        return False
     return bool(s.stripe_test_enabled and s.stripe_secret_key.startswith("sk_test_")
-                and base.hostname and base.scheme in ("http", "https")
+                and host and base.scheme in ("http", "https")
                 and not base.username and not base.password and not base.query and not base.fragment
-                and base.hostname != urlparse(s.public_base_url).hostname
-                and not base.hostname.endswith("leipan.cc"))
+                and host != production_host
+                and not host.endswith("leipan.cc"))
 
 
 def create_checkout_session(db: Session, account_id: int, pack_key: str, idempotency_key: str) -> dict:

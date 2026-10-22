@@ -41,7 +41,7 @@ No credentials, database migration, deployment, or Stripe configuration were per
 2. New table: `billing_requests` only. Fresh DBs use existing `Base.metadata.create_all`. For an existing PostgreSQL test DB, review `backend/scripts/migrations/20261021_billing_requests.sql`. Existing accounts, ledger, orders, prices, and currency need no data rewrite. Migration has not been run on any external DB.
 3. Default billing remains disabled. Future secure configuration requires `STRIPE_TEST_ENABLED=true`, `STRIPE_SECRET_KEY` beginning `sk_test_`, `STRIPE_WEBHOOK_SECRET` from the test endpoint, and an explicit `STRIPE_TEST_BASE_URL` such as `http://localhost:3000`. There is no fallback to `PUBLIC_BASE_URL`; that host and `leipan.cc` hosts are rejected. Keep secrets out of source, logs, and chat. Persistent credential setup needs user approval.
 4. Configure any future Stripe test webhook forwarding **only** to the isolated backend `/api/v1/billing/webhook`, never production. Configure a separate test signing secret. Payment methods remain the existing Alipay/WeChat/card model; actual sandbox payment-method availability is not yet verified.
-5. Mock AI in local tests. Enabling paid generation against real providers was not authorized. Keep provider keys unset and use injected fake clients. Set `ZIWEI_AUTO_ADOPT=false` on the test instance to avoid the legacy profile auto-adoption path.
+5. Mock AI in local tests. Enabling paid generation against real providers was not authorized. Keep provider keys unset and use injected fake clients. Public profile listing never adopts ownerless legacy rows, even if a stale environment sets `ZIWEI_AUTO_ADOPT=true`; that deprecated setting defaults to false.
 6. Tests create temporary SQLite files and override DB dependencies. Example from repo root, with dependencies installed in a temporary virtualenv:
 
 ```sh
@@ -49,3 +49,25 @@ DATABASE_URL=sqlite:////tmp/ziwei-import-only.db ANTHROPIC_API_KEY='' OPENAI_API
 ```
 
 Real Stripe sandbox end-to-end validation remains pending. Local isolated PostgreSQL 16.15 acceptance, concurrency, rollback and migration checks pass; see [integration QA report](integration/ziwei-stripe-qa-report.md). No main merge, deployment, or release is included.
+
+
+## Approved security corrections — 2026-10-22
+
+Public profile listing is read-only for ownership. Ownerless legacy Ziwei profiles,
+conversations, and messages remain stored unchanged, but are unavailable to visitors
+until an explicit authorized recovery verifies the rightful owner. No ownership
+migration or recovery was run. The existing code-protected `/ziwei/claim` operation
+is unchanged and disabled when `ZIWEI_CLAIM_CODE` is empty; it is a bulk recovery
+operation covering ownerless Ziwei and Qian records, not a per-profile proof of
+ownership. Do not enable it or invent ownership assignments without a separate
+recovery review. Existing owned profiles remain available to their device owner.
+
+Callback validation canonicalizes both configured production and test DNS hostnames
+(case, IDNA spelling, and terminal root dot) before applying the existing host
+restrictions. Thus `portal.leipan.cc.` and equivalent production spellings cannot
+enable Checkout. Malformed hostname parsing fails closed. No broader allowlist or
+new credentials were introduced.
+
+Checkout uses inline Stripe `price_data` and `product_data` from server-side packs;
+pre-created Stripe Product/Price IDs are not required. No other Stripe integration
+was inspected or modified.
