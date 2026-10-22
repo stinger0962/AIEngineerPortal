@@ -28,8 +28,9 @@ return state updates on Next search navigation and `pageshow` restoration.
 
 ## Verification
 
-All API/provider effects were mocked, database data was disposable SQLite, and
-network sockets were blocked during the full backend run. No real AI, Stripe,
+All API/provider effects were mocked. Initial database data was disposable SQLite;
+the follow-up below also exercises real isolated PostgreSQL 16.15. Network sockets
+were blocked during the full backend SQLite run. No real AI, Stripe,
 production database, external migrations, deployment, or credentials were used.
 
 Focused combined suite: **97 passed**:
@@ -104,7 +105,8 @@ No external preview was deployed; the localhost dev server was stopped after tes
   each lock wait, not generation time, total request time, or pool checkout.
 - Slow upstream generation may still tie up a transaction/connection. Process-kill,
   network-proxy disconnect, crash-after-commit, alternative PostgreSQL isolation
-  levels, and real PostgreSQL deadlock/locking behavior were not exercised.
+  levels, and an actual PostgreSQL deadlock cycle were not exercised. Local
+  PostgreSQL READ COMMITTED concurrency and lock-timeout checks now pass below.
 - X-Device-Id remains the existing anonymous bearer identity, not login-based auth.
 
 ## Pending security and external acceptance
@@ -115,8 +117,8 @@ review. Those implementations are unchanged by this integration; approval/review
 remains pending. Isolated QA uses `ziwei_auto_adopt=false`. Passing these fixtures
 does not establish safe legacy adoption or exhaustive callback-host validation.
 
-Real Stripe TEST Checkout/webhook delivery, payment-method availability, and real
-PostgreSQL concurrency/migration checks remain pending. There is no live payment
+Real Stripe TEST Checkout/webhook delivery and payment-method availability remain
+pending. Local PostgreSQL concurrency/migration checks are now complete below. There is no live payment
 verification. Qian charging was not introduced; the backend branch includes
 read-history ownership tightening, preserved as supplied.
 
@@ -124,3 +126,95 @@ Deployment workflows remain unchanged: pushed `v*` tags trigger release/deployme
 and manual workflow dispatch can deploy. Feature-branch pushes do not trigger them.
 No tags, main push/merge, PR, deployment, production changes, or persistent credential
 creation are part of this integration task.
+
+
+## Real PostgreSQL follow-up — 2026-10-22
+
+Available local capability: Docker 28.4.0 and cached official `postgres:16-alpine`
+image. No host postgres/initdb/psql binary or package installation was needed.
+Started PostgreSQL **16.15**, isolated to `127.0.0.1:55432`, using an ephemeral tmpfs
+data directory and a disposable `ziwei_qa` database. The test-only container uses
+trust authentication for its disposable data; no external credentials were created
+and no host authentication/security configuration changed. Container is removed
+after testing. Existing images and other containers are untouched.
+
+Reproduction (requires that cached image and the Python requirements):
+
+```sh
+docker run --detach --rm --pull=never --name ziwei-qa-postgres-20261022 \
+  --publish 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql/data \
+  -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_USER=ziwei_qa \
+  -e POSTGRES_DB=ziwei_qa postgres:16-alpine
+# Wait until this returns accepting connections:
+docker exec ziwei-qa-postgres-20261022 pg_isready -U ziwei_qa -d ziwei_qa
+ZIWEI_QA_POSTGRES_URL=postgresql+psycopg://ziwei_qa@127.0.0.1:55432/ziwei_qa \
+  /tmp/ziwei-qa-venv/bin/python -m pytest backend/tests/acceptance -q --tb=short
+docker stop ziwei-qa-postgres-20261022
+```
+
+The fixture rejects any PostgreSQL target other than this exact local host,
+port, and database. Each test uses a unique schema, dropped on teardown.
+Python provider sockets remain blocked; psycopg/libpq connects to the explicitly
+validated local database. Stripe and AI stay mocked throughout.
+
+Results: **45 passed** on PostgreSQL, including all 41 original acceptance cases
+and four dedicated PostgreSQL cases. SQLite cross-check: **41 passed, 4 skipped**;
+only the four explicitly PostgreSQL-specific cases skip without its opt-in URL.
+
+Evidence includes real concurrent webhook fulfillment (including forced overlapping
+order reads), concurrent one-credit consumption/generation, rollback after failure
+and ASGI disconnect, and same-key replay/retry semantics on PostgreSQL.
+Dedicated PostgreSQL checks verify:
+
+- Migration runs twice after fresh application bootstrap and after removing the
+  new table to represent an existing baseline fixture schema. Existing account,
+  order and ledger data survive, and the new idempotency table accepts/readbacks
+  records. The migration is additive and assumes baseline `accounts` already exists.
+- A locked/debited account does not block another account's successful debit at
+  PostgreSQL READ COMMITTED isolation; rolling back the first restores its credit.
+- Real contention returns HTTP 503 `billing_busy` / Retry-After 2 within the configured
+  100 ms lock-timeout test budget (under 1.5 seconds including HTTP overhead), makes
+  no AI call, rolls back, and permits the same-key successful retry after release.
+
+No application fix was needed for these PostgreSQL cases. This verifies local
+PostgreSQL 16.15 behavior, not production configuration, other isolation levels,
+proxy failures, process crashes, or real deadlock cycles.
+
+## Stripe configuration inventory and smallest next requirement
+
+Read-only inspection of effective local settings (presence/mode only):
+
+- `STRIPE_TEST_ENABLED`: false.
+- `STRIPE_SECRET_KEY`: absent (neither test nor live key present).
+- `STRIPE_WEBHOOK_SECRET`: absent.
+- `STRIPE_TEST_BASE_URL`: absent.
+- `ZIWEI_REQUIRE_CREDITS`: false.
+- Stripe CLI executable: absent.
+
+To perform genuine sandbox verification later, the smallest inputs are an authorized
+Stripe TEST key, a TEST webhook signing secret, explicit isolated callback URL,
+and explicit enabling of test billing. For example, use
+`STRIPE_TEST_BASE_URL=http://127.0.0.1:3100` for the local UI, with a separate disposable
+backend/database on localhost. Enable `NEXT_PUBLIC_ZIWEI_TEST_BILLING=true` in that
+local UI build and `ZIWEI_REQUIRE_CREDITS=true` only for credit-enforcement checks.
+AI must remain mocked; do not add provider credentials.
+
+The safe webhook approach is an authorized Stripe CLI `listen` session forwarding
+TEST events to `http://127.0.0.1:8000/api/v1/billing/webhook`; use that session's
+signing secret only in the isolated backend. This requires installing the official
+CLI and approved temporary Stripe authentication first. Do not forward to production
+or register/configure an external endpoint as part of this task. No CLI installation,
+Stripe connection, external request, credential creation, or enabling was performed.
+The two separately denied security changes remain pending parent approval.
+
+## Residual retry-draft correction
+
+Independent frontend review reproduced recovered A remaining as an unsent draft
+after an explicit retry succeeded. The success handler now clears that matching
+draft only if the input edit version is unchanged. Distinct B or any edit made
+during the retry is preserved. Chromium regression now additionally verifies that
+successful retry clears recovered A from the textarea and session storage, reuses
+A's original request key/body, and disables ordinary send on the empty draft.
+The earlier browser assertion that B survives successful retry still passes.
+All four browser checkpoint groups pass with mocked APIs and no page exceptions;
+offline frontend tests and TypeScript also pass after this correction.

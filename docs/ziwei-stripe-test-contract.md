@@ -48,4 +48,4 @@ No credentials, database migration, deployment, or Stripe configuration were per
 DATABASE_URL=sqlite:////tmp/ziwei-import-only.db ANTHROPIC_API_KEY='' OPENAI_API_KEY='' MINIMAX_API_KEY='' STRIPE_SECRET_KEY='' python -m pytest backend/tests/test_credits.py backend/tests/test_billing_stripe.py backend/tests/test_ziwei_oracle_routes.py backend/tests/test_ziwei_stream.py backend/tests/test_qian_routes.py -q
 ```
 
-Real Stripe sandbox end-to-end validation and PostgreSQL concurrency validation remain pending. No push, merge, or release is included.
+Real Stripe sandbox end-to-end validation remains pending. Local isolated PostgreSQL 16.15 acceptance, concurrency, rollback and migration checks pass; see [integration QA report](integration/ziwei-stripe-qa-report.md). No main merge, deployment, or release is included.

@@ -217,6 +217,12 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
           onDone: (id, meta) => {
             handlers.onDone(id, meta);
             setPendingRequest(null);
+            // Clear recovered A only if it was not edited during this retry.
+            // A distinct or subsequently edited draft B remains untouched.
+            if (draftVersion.current === sentDraftVersion && input.trim() === message) {
+              setInput("");
+              saveDraft("");
+            }
             onReadingSuccess?.();
           },
         },

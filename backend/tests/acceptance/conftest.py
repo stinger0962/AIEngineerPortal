@@ -16,6 +16,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
+from sqlalchemy.schema import CreateSchema, DropSchema
+from uuid import uuid4
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.dialects.postgresql import JSONB
@@ -34,11 +37,22 @@ def _jsonb_sqlite(type_, compiler, **kw):
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    def reject(*args, **kwargs):
-        raise AssertionError('QA suite forbids external network connections')
-    monkeypatch.setattr(socket.socket, 'connect', reject)
-    monkeypatch.setattr(socket.socket, 'connect_ex', reject)
-    monkeypatch.setattr(socket, 'create_connection', reject)
+    postgres_url = os.environ.get('ZIWEI_QA_POSTGRES_URL')
+    allowed = None
+    if postgres_url:
+        target = make_url(postgres_url)
+        if target.host != '127.0.0.1' or target.port != 55432 or target.database != 'ziwei_qa':
+            raise ValueError('QA PostgreSQL must be the isolated 127.0.0.1:55432/ziwei_qa instance')
+        allowed = (target.host, target.port)
+    for name in ('connect', 'connect_ex'):
+        original = getattr(socket.socket, name)
+        def guarded(sock, address, _original=original):
+            if allowed and address == allowed:
+                return _original(sock, address)
+            raise AssertionError('QA suite forbids external network connections')
+        monkeypatch.setattr(socket.socket, name, guarded)
+    # psycopg/libpq sockets are implemented in C; the validated local URL above
+    # is the database boundary. Python-level Stripe/AI sockets remain blocked.
 
 
 @pytest.fixture
@@ -55,8 +69,18 @@ def qa(tmp_path, monkeypatch):
     import app.core.config as config
     for module in (config, credits, stripe_billing, billing, ziwei):
         monkeypatch.setattr(module, 'get_settings', lambda: settings)
-    engine = create_engine(f'sqlite:///{tmp_path / "qa.db"}',
-                           connect_args={'check_same_thread': False, 'timeout': 5})
+    postgres_url = os.environ.get('ZIWEI_QA_POSTGRES_URL')
+    admin = None
+    schema = None
+    if postgres_url:
+        schema = 'qa_' + uuid4().hex
+        admin = create_engine(postgres_url)
+        with admin.begin() as connection:
+            connection.execute(CreateSchema(schema))
+        engine = create_engine(postgres_url, connect_args={'options': f'-csearch_path={schema}'})
+    else:
+        engine = create_engine(f'sqlite:///{tmp_path / "qa.db"}',
+                               connect_args={'check_same_thread': False, 'timeout': 5})
     # Include new billing/reservation tables without depending on their class names.
     Base.metadata.create_all(engine)
     sessions = sessionmaker(bind=engine, expire_on_commit=False)
@@ -81,3 +105,7 @@ def qa(tmp_path, monkeypatch):
     yield SimpleNamespace(settings=settings, sessions=sessions,
                           client=TestClient(application), owner=ids[0], other=ids[1], profile=ids[2])
     engine.dispose()
+    if admin is not None:
+        with admin.begin() as connection:
+            connection.execute(DropSchema(schema, cascade=True))
+        admin.dispose()

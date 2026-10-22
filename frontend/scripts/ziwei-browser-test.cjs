@@ -69,5 +69,22 @@ if (!['localhost','127.0.0.1'].includes(new URL(base).hostname)) throw Error('Lo
   await panel.getByText('可用点数：0',{exact:true}).waitFor();
   assert.equal(await input.inputValue(),'Newer draft B');assert.deepEqual(errors,[]);
   console.log('PASS browser: successful retry refreshes credit, preserves draft, no page exceptions');
+  // Without a newer draft, successful retry must clear recovered A.
+  await input.fill('Question A recovered');oracle='busy';
+  await page.getByRole('button',{name:'问',exact:true}).click();
+  await page.getByRole('alert').filter({hasText:'点数服务暂时繁忙'}).waitFor();
+  assert.equal(await input.inputValue(),'Question A recovered');
+  const failedA=requests.filter(r=>r.path.endsWith('/oracle/stream')).at(-1);
+  oracle='done';
+  await page.getByRole('button',{name:'重试未完成的问题：Question A recovered',exact:true}).click();
+  await page.waitForFunction(()=>!document.querySelector('textarea')?.value);
+  assert.equal(await input.inputValue(),'');
+  assert.equal(await page.evaluate(()=>sessionStorage.getItem('ziwei-question:1')),null);
+  const completedA=requests.filter(r=>r.path.endsWith('/oracle/stream')).at(-1);
+  assert.equal(completedA.headers['idempotency-key'],failedA.headers['idempotency-key']);
+  assert.deepEqual(completedA.body,failedA.body);
+  assert.equal(await page.getByRole('button',{name:'问',exact:true}).isDisabled(),true);
+  assert.deepEqual(errors,[]);
+  console.log('PASS browser: successful explicit retry clears unchanged recovered A and persisted draft');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});
