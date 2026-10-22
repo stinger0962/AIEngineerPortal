@@ -6,9 +6,12 @@ import { ProfileForm } from "@/components/ziwei/profile-form";
 import { ZiweiWorkspace } from "@/components/ziwei/ziwei-workspace";
 import { OracleIdentityPanel } from "@/components/oracle/identity-panel";
 import { hasChart, ziweiApi, type ZiweiProfileOut } from "@/lib/ziwei/api";
+import { CreditPanel } from "@/components/ziwei/billing/credit-panel";
+import { testBillingEnabled } from "@/lib/ziwei/billing";
 import { RELATION_LABELS } from "@/lib/ziwei/constants";
 
 export default function ZiweiPage() {
+  const [balanceVersion, setBalanceVersion] = useState(0);
   const [profiles, setProfiles] = useState<ZiweiProfileOut[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -21,12 +24,23 @@ export default function ZiweiPage() {
       .listProfiles()
       .then((data) => {
         setProfiles(data);
-        if (data.length > 0) setSelectedId(data[0].id);
+        if (data.length > 0) {
+          let restored: number | null = null;
+          if (testBillingEnabled) {
+            try { restored = Number(sessionStorage.getItem("ziwei-selected-profile")); } catch { /* storage unavailable */ }
+          }
+          setSelectedId(data.find((profile) => profile.id === restored)?.id ?? data[0].id);
+        }
         else setShowForm(true);
       })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!testBillingEnabled || selectedId === null) return;
+    try { sessionStorage.setItem("ziwei-selected-profile", String(selectedId)); } catch { /* storage unavailable */ }
+  }, [selectedId]);
 
   const selected = useMemo(() => profiles.find((p) => p.id === selectedId) ?? null, [profiles, selectedId]);
 
@@ -61,6 +75,8 @@ export default function ZiweiPage() {
           <h1 className="font-display text-2xl leading-tight text-ink">紫微斗数</h1>
         </div>
       </div>
+
+      {testBillingEnabled && <CreditPanel refreshKey={balanceVersion} />}
 
       {loadError ? <p className="text-sm text-rose-500">加载档案失败，请确认后端已启动。</p> : null}
       {deleteError ? (
@@ -122,6 +138,7 @@ export default function ZiweiPage() {
           {selected && hasChart(selected) ? (
             <ZiweiWorkspace
               profile={selected}
+              onReadingSuccess={() => setBalanceVersion((value) => value + 1)}
               onPersonaChange={(next) =>
                 setProfiles((prev) =>
                   prev.map((p) => (p.id === selected.id ? { ...p, persona: next } : p)),

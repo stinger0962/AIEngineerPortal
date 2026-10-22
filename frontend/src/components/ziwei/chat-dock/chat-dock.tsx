@@ -10,9 +10,11 @@ import type { ChatMessage, DockState } from "./types";
 import { useOracleTour } from "./use-oracle-tour";
 import { PersonaSwitch } from "./persona-switch";
 import { HistoryPanel } from "./history-panel";
+import { testBillingEnabled } from "@/lib/ziwei/billing";
 import { stripMarkdown } from "@/lib/ziwei/text";
 
 type ChatDockProps = {
+  onReadingSuccess?: () => void;
   profileId: number;
   persona: string;
   chart: ZiweiChart;
@@ -22,14 +24,28 @@ type ChatDockProps = {
   onTourActiveChange: (active: boolean) => void;
 };
 
-export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onPersonaChange, onTourActiveChange }: ChatDockProps) {
+export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onPersonaChange, onTourActiveChange, onReadingSuccess }: ChatDockProps) {
   const [dock, setDock] = useState<DockState>("normal");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<number | null>(null);
+  const [insufficientCredits, setInsufficientCredits] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+
+  // Per-profile tab drafts survive Stripe redirects without storing birth data.
+  useEffect(() => {
+    if (!testBillingEnabled) return;
+    try { setInput(sessionStorage.getItem(`ziwei-question:${profileId}`) ?? ""); } catch { /* storage unavailable */ }
+  }, [profileId]);
+  const saveDraft = (value: string) => {
+    if (!testBillingEnabled) return;
+    try {
+      if (value) sessionStorage.setItem(`ziwei-question:${profileId}`, value);
+      else sessionStorage.removeItem(`ziwei-question:${profileId}`);
+    } catch { /* input remains usable without storage */ }
+  };
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null); // 中止进行中的流式解盘
@@ -87,6 +103,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     setCaption(null);
     setLoading(false); // 中止进行中的解读后解锁输入（abort 走 AbortError 分支不复位 loading）
     setShowHistory(false);
+    setInsufficientCredits(false);
   }
 
   // 历史「重新解读」：用已存 segments 重跑编排（不调 AI、不入库）。
@@ -143,7 +160,9 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     ]);
     setLoading(true);
     setError(null);
+    saveDraft(message);
     setInput("");
+    setInsufficientCredits(false);
     setCaption(null);
 
     const reqProfileId = profileId;
@@ -166,18 +185,65 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
     });
 
     try {
-      await ziweiApi.streamOracle(profileId, { scenario: "natal", message, conversation_id: conversationId ?? undefined }, handlers, controller.signal);
+      await ziweiApi.streamOracle(
+        profileId,
+        { scenario: "natal", message, conversation_id: conversationId ?? undefined },
+        {
+          ...handlers,
+          onError: (event) => {
+            handlers.onError();
+            setInput(message);
+            setError(event?.retryable || event?.code === "billing_busy"
+              ? "点数服务暂时繁忙，请等待 2 秒后手动重试。问题已保留，不会自动重复提交。"
+              : "解读未完成，问题已保留。可使用相同问题重试。");
+          },
+          onDone: (id, meta) => {
+            handlers.onDone(id, meta);
+            onReadingSuccess?.();
+            if (testBillingEnabled) {
+              try {
+                const key = `ziwei-question:${profileId}`;
+                if (sessionStorage.getItem(key) === message) sessionStorage.removeItem(key);
+              } catch { /* storage unavailable */ }
+            }
+          },
+        },
+        controller.signal,
+      );
     } catch (e) {
+      if (controller.signal.aborted) { await playPromise; return; }
       tour.cancel(); // 关队列让 play 退出（校验错误或 abort）
       if (e instanceof DOMException && e.name === "AbortError") { await playPromise; return; }
       setMessages((prev) => prev.filter((m) => !(m.id === assistantId && m.content === "")));
       if (e instanceof ZiweiApiError) {
-        if (e.status === 503) setError("解盘师未启用（缺少 API Key）");
+        if (e.status === 402) {
+          setInput(message);
+          saveDraft(message);
+          setInsufficientCredits(true);
+          setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+          setError("点数不足，无法开始解读。问题已保留；补充点数后可重新发送。");
+        }
+        else if (e.status === 409) {
+          setInput(message);
+          setError(e.code === "request_already_completed"
+            ? "这次请求已完成，请在历史会话中查看解读。请勿重复提交。"
+            : "请求标识与内容冲突，请修改问题后再试。");
+        }
+        else if (e.status === 400 && e.code === "invalid_idempotency_key") {
+          setInput(message);
+          setError("请求标识无效，问题已保留。请刷新后重试。");
+        }
+        else if (e.status === 503 && e.code === "billing_busy") {
+          setError(`点数服务暂时繁忙，请等待 ${e.retryAfterSeconds ?? 2} 秒后手动重试。问题已保留，不会自动重复提交。`);
+        }
+        else if (e.status === 503) setError("解盘暂时不可用，请稍后重试。");
         else if (e.status === 429) setError("今日额度已用尽，请明日再来");
         else setError("解盘暂不可用，请稍后再试");
       } else {
         setError("解盘暂不可用，请稍后再试");
       }
+      setInput(message);
+      setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
       setLoading(false);
       setCaption(null);
       await playPromise;
@@ -331,6 +397,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
         {error ? (
           <p className="text-xs text-rose-400" role="alert">
             {error}
+            {insufficientCredits && testBillingEnabled && <a href="#ziwei-test-credits" className="ml-2 underline">查看测试点数与套餐</a>}
           </p>
         ) : null}
       </div>
@@ -340,7 +407,7 @@ export function ChatDock({ profileId, persona, chart, onFocusBranch, onTerm, onP
         <textarea
           rows={dock === "expanded" ? 3 : 2}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => { setInput(e.target.value); saveDraft(e.target.value); }}
           onKeyDown={onKeyDown}
           placeholder="向解盘师提问……（Enter 发送，Shift+Enter 换行）"
           className="flex-1 resize-none rounded-xl border border-violet-500/20 bg-[#0a0618] px-3 py-2 text-sm text-violet-100 placeholder-violet-400/40 outline-none focus:border-violet-500/50"
