@@ -22,13 +22,14 @@ def pending(qa):
                              amount_cents=990, currency='cny', stripe_session_id='cs_test_qa', status='pending')
         db.add(order)
         db.commit()
+        qa.order_id = order.id
         return order.id
 
 
 def event(qa, **changes):
     obj = dict(id='cs_test_qa', object='checkout.session', livemode=False,
-               payment_status='paid', amount_total=990, currency='cny',
-               metadata={'account_id': str(qa.owner), 'pack': 'p10', 'credits': '10'})
+               payment_status='paid', mode='payment', amount_total=990, currency='cny',
+               metadata={'account_id': str(qa.owner), 'order_id': str(qa.order_id)})
     obj.update(changes)
     return dict(id='evt_qa', object='event', livemode=False, type='checkout.session.completed', data={'object': obj})
 
@@ -115,23 +116,17 @@ def test_concurrent_notifications_credit_once(qa):
 def test_concurrent_credit_consumption_cannot_overspend(qa, monkeypatch):
     with qa.sessions() as db:
         credits.grant(db, qa.owner, 1, 'qa')
-    # Force both baseline callers to observe the same balance before writing.
-    # This deterministic regression probe complements the HTTP reading race.
-    original = credits.balance
-    observed = Barrier(2)
-    def overlapping_balance(db, account):
-        value = original(db, account)
-        observed.wait(timeout=5)
-        return value
-    monkeypatch.setattr(credits, 'balance', overlapping_balance)
+    # Synchronize before acquiring the account lock: a barrier inside balance()
+    # would deadlock a correct lock-before-read implementation.
+    started = Barrier(2)
     def worker(_):
+        started.wait(timeout=5)
         with qa.sessions() as db:
             return credits.consume_one(db, qa.owner)
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(worker, range(2)))
     assert sorted(results) == [False, True]
-    with qa.sessions() as db:
-        assert original(db, qa.owner) == 0
+    assert balance(qa) == 0
 
 
 def test_overlapping_webhook_order_reads_credit_once(qa, monkeypatch):

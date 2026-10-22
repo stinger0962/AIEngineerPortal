@@ -1,5 +1,8 @@
 # Ziwei Stripe test-mode acceptance
 
+Current integrated results: [integration QA report](../../../../docs/integration/ziwei-stripe-qa-report.md).
+The baseline results below are retained as historical evidence.
+
 Independent QA tests against baseline `6c909b235fed2c81f1153a67d8f4bed36dab3fb5`.
 No application code, migrations, deployment configuration, or existing billing tests are changed.
 These are acceptance gates: failures are deliberately not hidden with xfail/skip.

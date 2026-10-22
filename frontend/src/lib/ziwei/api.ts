@@ -166,6 +166,10 @@ async function streamOracle(
 }
 
 export const ziweiApi = {
+  pendingOracle: (profileId: number): OracleAsk | null => {
+    const pending = retryKeys.peek(`oracle:${getDeviceId()}:${profileId}:stream`);
+    try { return pending ? JSON.parse(pending.payload) as OracleAsk : null; } catch { return null; }
+  },
   listProfiles: () => request<ZiweiProfileOut[]>("/ziwei/profiles"),
   createProfile: (payload: ZiweiProfileCreate) =>
     request<ZiweiProfileOut>("/ziwei/profiles", { method: "POST", body: JSON.stringify(payload) }),

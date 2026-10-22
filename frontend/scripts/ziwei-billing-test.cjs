@@ -10,6 +10,7 @@ function load(file) {
   const js = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2020 } }).outputText;
   const module = { exports: {} };
   const req = id => {
+    if (id === "next/navigation") return { useSearchParams: () => new URLSearchParams() };
     if (id === "@/lib/deviceId") return { getDeviceId: () => "mock-device" };
     if (!id.startsWith('@/') && !id.startsWith('.')) return require(id);
     const target = id.startsWith('@/') ? path.join(root, id.slice(2)) : path.resolve(path.dirname(file), id);
@@ -45,7 +46,11 @@ function load(file) {
   assert.equal(calls.at(-1).init.headers['Idempotency-Key'], firstKey);
   await api.checkout('different-server-pack');
   assert.notEqual(calls.at(-1).init.headers['Idempotency-Key'], firstKey);
-  api.resetCheckout();
+  const newerKey = calls.at(-1).init.headers['Idempotency-Key'];
+  api.resetCheckout('old-order');
+  await api.checkout('different-server-pack');
+  assert.equal(calls.at(-1).init.headers['Idempotency-Key'], newerKey);
+  api.resetCheckout('123');
   await api.checkout('server-pack');
   assert.notEqual(calls.at(-1).init.headers['Idempotency-Key'], firstKey);
   mode = false;

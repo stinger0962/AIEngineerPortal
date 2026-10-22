@@ -352,12 +352,9 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
         if not conv or conv.profile_id != profile_id:
             raise HTTPException(404, "Conversation not found")
     else:
-        conv = ZiweiConversation(profile_id=profile_id, scenario=payload.scenario, title=payload.message[:40])
-        db.add(conv)
-        db.commit()  # 提交以拿稳 conv.id（流式生成器用新 session 持久化消息）
-        db.refresh(conv)
+        conv = None  # Create only inside the generation transaction below.
 
-    history = db.scalars(select(ZiweiMessage).where(ZiweiMessage.conversation_id == conv.id).order_by(ZiweiMessage.id.asc())).all()
+    history = db.scalars(select(ZiweiMessage).where(ZiweiMessage.conversation_id == conv.id).order_by(ZiweiMessage.id.asc())).all() if conv else []
     messages = [{"role": m.role, "content": m.content} for m in history]
     messages.append({"role": "user", "content": payload.message})
     claude_messages = messages[-10:] if len(messages) > 10 else messages
@@ -365,7 +362,8 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
     oracle = ZiweiOracle(client=svc.client, model=settings.oracle_model)
     system_prompt = oracle._system_prompt(profile.chart_json, profile.persona, payload.scenario, profile.portrait_json or {})
 
-    conv_id = conv.id
+    conv_id = conv.id if conv else None
+    new_conversation = conv is None
     client = svc.client
     model = settings.oracle_model
     user_message = payload.message
@@ -377,6 +375,11 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
     db.rollback()
     try:
         _reserve_credit(stream_db, account_id, profile_id, payload, idempotency_key)
+        if new_conversation:
+            conv = ZiweiConversation(profile_id=profile_id, scenario=payload.scenario, title=payload.message[:40])
+            stream_db.add(conv)
+            stream_db.flush()
+            conv_id = conv.id
     except BaseException:
         stream_db.close()
         raise
@@ -438,7 +441,8 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
             logger.exception("ziwei oracle stream failed (profile=%s conv=%s)", profile_id, conv_id)
             try:
                 _, clean, segments, cameras = parser.finish()
-                _persist(clean, cameras, segments, in_tok, out_tok, start)
+                if not new_conversation:
+                    _persist(clean, cameras, segments, in_tok, out_tok, start)
             except Exception:
                 logger.exception("ziwei oracle stream salvage-persist failed")
             yield {"data": json.dumps({"type": "error"}, ensure_ascii=False)}

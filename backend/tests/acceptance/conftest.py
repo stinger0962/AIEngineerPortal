@@ -46,7 +46,7 @@ def qa(tmp_path, monkeypatch):
     settings = Settings(_env_file=None, database_url='sqlite://', app_env='test',
                         stripe_secret_key='sk_test_qa_placeholder',
                         stripe_webhook_secret='whsec_qa_placeholder',
-                        public_base_url='http://localhost:3000',
+                        public_base_url='https://portal.leipan.cc',
                         ziwei_require_credits=True, ziwei_free_credits=0,
                         ziwei_auto_adopt=False)
     # Explicit agreed configuration, also usable against the pre-contract baseline.

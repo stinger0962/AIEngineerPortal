@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { billingApi, canPurchase, paymentReturn, type Balance, type BillingAdapter, type PaymentStatus } from "@/lib/ziwei/billing";
 
@@ -11,6 +12,7 @@ const statusText: Record<PaymentStatus, string> = {
 };
 
 export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: number; adapter?: BillingAdapter }) {
+  const search = useSearchParams().toString();
   const [balance, setBalance] = useState<Balance | null>(null);
   const [payment, setPayment] = useState<ReturnType<typeof paymentReturn>>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,11 +28,16 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
 
   useEffect(() => {
     mounted.current = true;
-    const returned = paymentReturn(window.location.search);
-    setPayment(returned);
-    if (returned?.status === "cancelled") adapter.resetCheckout?.();
-    return () => { mounted.current = false; };
-  }, []);
+    const restore = () => {
+      const returned = paymentReturn(window.location.search);
+      setPayment(returned);
+      if (returned?.status === "cancelled" && returned.orderId) adapter.resetCheckout?.(returned.orderId);
+      void refresh();
+    };
+    restore();
+    window.addEventListener("pageshow", restore);
+    return () => { mounted.current = false; window.removeEventListener("pageshow", restore); };
+  }, [search, adapter, refresh]);
   useEffect(() => { void refresh(); }, [refresh, refreshKey]);
 
   const checkPayment = useCallback(async (orderId: string) => {
@@ -39,7 +46,7 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
       if (!mounted.current) return;
       setPayment({ status, orderId });
       setError(null);
-      if (status === "paid" || status === "failed") adapter.resetCheckout?.();
+      if (status === "paid" || status === "failed") adapter.resetCheckout?.(orderId);
       if (status === "paid") await refresh();
     } catch {
       if (mounted.current) setError("付款状态暂无法确认；请稍后刷新，勿重复付款。");

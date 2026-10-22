@@ -146,3 +146,69 @@ def test_closed_stream_generator_preserves_credit(qa, monkeypatch):
     assert response.status_code == 200
     assert closed == [True]
     assert remaining(qa) == 1
+
+
+def test_asgi_disconnect_rolls_back_and_same_key_can_retry(qa, monkeypatch):
+    """Exercise an actual ASGI http.disconnect after a streamed text frame."""
+    import anyio
+    import time
+    from test_ziwei_contract_acceptance import CompleteStream
+    fund(qa)
+    class SlowStream(CompleteStream):
+        @property
+        def text_stream(self):
+            for _ in range(100):
+                time.sleep(0.01)
+                yield 'Mock partial reading. '
+    monkeypatch.setattr(ziwei.ZiweiOracle, '_system_prompt', lambda *a, **kw: 'QA')
+    monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(is_available=True,
+        client=SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: SlowStream()))))
+    path = f'/api/v1/ziwei/profiles/{qa.profile}/oracle/stream'
+    async def disconnect():
+        output_seen = anyio.Event()
+        received = False
+        async def receive():
+            nonlocal received
+            if not received:
+                received = True
+                return {'type': 'http.request', 'body': json.dumps(REQUEST).encode(), 'more_body': False}
+            await output_seen.wait()
+            return {'type': 'http.disconnect'}
+        async def send(message):
+            if message['type'] == 'http.response.body' and b'"text"' in message.get('body', b''):
+                output_seen.set()
+        scope = {'type': 'http', 'asgi': {'version': '3.0'}, 'http_version': '1.1',
+                 'method': 'POST', 'scheme': 'http', 'path': path, 'raw_path': path.encode(),
+                 'query_string': b'', 'root_path': '', 'server': ('testserver', 80),
+                 'client': ('127.0.0.1', 1234), 'headers': [
+                     (b'content-type', b'application/json'),
+                     (b'x-device-id', b'qa-owner'), (b'idempotency-key', b'qa-reading-first')]}
+        with anyio.fail_after(4):
+            await qa.client.app(scope, receive, send)
+        assert output_seen.is_set()
+    anyio.run(disconnect)
+    assert remaining(qa) == 1
+    monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(is_available=True,
+        client=SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: CompleteStream()))))
+    retried = qa.client.post(path, headers=OWNER, json=REQUEST)
+    assert retried.status_code == 200 and '"done"' in retried.text
+    assert remaining(qa) == 0
+
+
+@pytest.mark.parametrize('case', ['invalid_key', 'insufficient', 'upstream_failure'])
+def test_rejected_stream_leaves_no_new_conversation(qa, monkeypatch, case):
+    from sqlalchemy import select
+    if case != 'insufficient':
+        fund(qa)
+    monkeypatch.setattr(ziwei.ZiweiOracle, '_system_prompt', lambda *a, **kw: 'QA')
+    monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(is_available=True,
+        client=SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: InterruptedStream()))))
+    headers = {**OWNER, 'Idempotency-Key': 'short'} if case == 'invalid_key' else OWNER
+    response = qa.client.post(f'/api/v1/ziwei/profiles/{qa.profile}/oracle/stream', headers=headers, json=REQUEST)
+    expected = {'invalid_key': 400, 'insufficient': 402, 'upstream_failure': 200}[case]
+    assert response.status_code == expected
+    if case == 'upstream_failure':
+        assert '"error"' in response.text and '"done"' not in response.text
+    with qa.sessions() as db:
+        assert db.scalars(select(ZiweiConversation)).all() == []
+    assert remaining(qa) == (0 if case == 'insufficient' else 1)

@@ -305,7 +305,7 @@ class _RaisingAIService(_FakeAIService):
         self.client = SimpleNamespace(messages=_RaisingMessages())
 
 
-def test_oracle_stream_emits_error_and_salvages_partial(monkeypatch):
+def test_oracle_stream_emits_error_without_orphan_conversation(monkeypatch):
     monkeypatch.setattr(ziwei_routes, "AIService", _RaisingAIService)
     pid = _seed_profile()
     r = client.post(f"/api/v1/ziwei/profiles/{pid}/oracle/stream", json={"scenario": "natal", "message": "事业如何？"})
@@ -315,11 +315,12 @@ def test_oracle_stream_emits_error_and_salvages_partial(monkeypatch):
     # 中途失败：先有已发的文字，最后是 error，且没有 done
     assert "error" in types and "done" not in types
     assert any(e["type"] == "text" and "命宫紫微" in e["delta"] for e in events)
-    # 已生成的半截被尽力保住（salvage-persist）
+    # A failed first reading rolls back its new conversation and partial messages.
     db = TestingSessionLocal()
     try:
         msgs = db.scalars(select(ZiweiMessage).order_by(ZiweiMessage.id.asc())).all()
-        assert any(m.role == "assistant" and "命宫紫微" in m.content for m in msgs)
+        assert msgs == []
+        assert db.scalars(select(ZiweiConversation)).all() == []
     finally:
         db.close()
 

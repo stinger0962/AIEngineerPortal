@@ -11,12 +11,12 @@ export interface BillingAdapter {
   balance(): Promise<Balance>;
   checkout(pack: string): Promise<string>;
   status(orderId: string): Promise<PaymentStatus>;
-  resetCheckout?(): void;
+  resetCheckout?(orderId: string): void;
 }
 
 export function paymentReturn(search: string): { status: PaymentStatus; orderId?: string } | null {
   const params = new URLSearchParams(search);
-  if (params.get("canceled") === "1" || params.get("cancelled") === "1") return { status: "cancelled" };
+  if (params.get("canceled") === "1" || params.get("cancelled") === "1") return { status: "cancelled", orderId: params.get("order_id") || undefined };
   if (params.get("paid") === "1") return { status: "pending", orderId: params.get("order_id") || undefined };
   return null;
 }
@@ -46,14 +46,18 @@ export function createBillingAdapter(base: string, deviceId: () => string, trans
     return response.json() as Promise<T>;
   }
   return {
-    resetCheckout: () => retryKeys.complete(`checkout:${deviceId()}`),
+    resetCheckout: (orderId) => retryKeys.complete(`checkout:${deviceId()}`, orderId),
     balance: () => request<Balance>("/balance"),
     checkout: async (pack) => {
       // Recheck server mode immediately before creating a session.
       if (!canPurchase(await request<Balance>("/balance"))) throw new Error("Test payments unavailable");
-      const result = await request<{ url: string; order_id: number | string; mode?: string }>("/checkout", { method: "POST", body: JSON.stringify({ pack }), headers: { "Idempotency-Key": retryKeys.get(`checkout:${deviceId()}`, { pack }) } });
+      const scope = `checkout:${deviceId()}`;
+      const key = retryKeys.get(scope, { pack });
+      const result = await request<{ url: string; order_id: number | string; mode?: string }>("/checkout", { method: "POST", body: JSON.stringify({ pack }), headers: { "Idempotency-Key": key } });
       if (result.mode !== "test") throw new Error("Test payment confirmation missing");
-      return testCheckoutUrl(result.url);
+      const url = testCheckoutUrl(result.url);
+      retryKeys.bindOrder(scope, key, String(result.order_id));
+      return url;
     },
     status: async (orderId) => {
       if (!orderId || !/^[a-zA-Z0-9_-]+$/.test(orderId)) throw new Error("Invalid order");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { ProfileForm } from "@/components/ziwei/profile-form";
 import { ZiweiWorkspace } from "@/components/ziwei/ziwei-workspace";
@@ -76,7 +76,7 @@ export default function ZiweiPage() {
         </div>
       </div>
 
-      {testBillingEnabled && <CreditPanel refreshKey={balanceVersion} />}
+      {testBillingEnabled && <Suspense fallback={null}><CreditPanel refreshKey={balanceVersion} /></Suspense>}
 
       {loadError ? <p className="text-sm text-rose-500">加载档案失败，请确认后端已启动。</p> : null}
       {deleteError ? (
