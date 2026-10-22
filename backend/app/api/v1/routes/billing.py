@@ -5,7 +5,10 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import DBAPIError
+from app.db.billing_contention import retryable_contention
 
+from app.models.entities import PaymentOrder
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.services import credits as credits_svc
@@ -27,6 +30,7 @@ def _packs() -> list[dict]:
 
 
 @router.get("/balance")
+@retryable_contention
 def get_balance(db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     """本设备账号余额 + 是否开启付费 + 套餐表。首次访问自动建账号并发放免费点数。"""
     s = get_settings()
@@ -40,6 +44,8 @@ def get_balance(db: Session = Depends(get_db), device: str = Depends(get_device_
         "free_credits": s.ziwei_free_credits,
         "paid_enabled": stripe_billing.is_configured(),
         "packs": _packs(),
+        "currency": "cny",
+        "mode": "test",
     }
 
 
@@ -48,7 +54,8 @@ class CheckoutRequest(BaseModel):
 
 
 @router.post("/checkout")
-def checkout(payload: CheckoutRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+@retryable_contention
+def checkout(payload: CheckoutRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id), idempotency_key: str = Header(default="")):
     """创建 Stripe 收银台会话，返回跳转 URL。金额/点数一律服务端定。"""
     if not stripe_billing.is_configured():
         raise HTTPException(503, "支付暂未开通。")
@@ -58,18 +65,23 @@ def checkout(payload: CheckoutRequest, db: Session = Depends(get_db), device: st
         raise HTTPException(400, "未知套餐。")
     acct = credits_svc.resolve_account(db, device)
     try:
-        url = stripe_billing.create_checkout_session(db, acct.id, payload.pack)
+        result = stripe_billing.create_checkout_session(db, acct.id, payload.pack, idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(409 if str(exc) in ("idempotency_conflict", "checkout_reconciliation_required") else 400, {"code": str(exc)})
+    except DBAPIError:
+        raise
     except Exception:  # noqa: BLE001
         logger.exception("stripe checkout create failed (account=%s pack=%s)", acct.id, payload.pack)
         raise HTTPException(502, "创建支付会话失败，请稍后重试。")
-    return {"url": url}
+    return result
 
 
 @router.post("/webhook")
+@retryable_contention
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     """Stripe 付款回调：验签 → 幂等发点。必须读原始 body 验签。"""
     s = get_settings()
-    if not s.stripe_secret_key or not s.stripe_webhook_secret:
+    if not stripe_billing.is_configured() or not s.stripe_webhook_secret:
         raise HTTPException(503, "billing not configured")
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
@@ -79,4 +91,18 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         logger.warning("stripe webhook signature verification failed")
         raise HTTPException(400, "invalid signature")
     status = stripe_billing.process_event(db, event)
+    if status == "order_not_found":
+        raise HTTPException(503, "order not ready; retry")
     return {"status": status}
+
+
+@router.get("/orders/{order_id}")
+@retryable_contention
+def order_status(order_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    acct = credits_svc.resolve_account(db, device, create=False)
+    order = db.get(PaymentOrder, order_id)
+    if not acct or not order or order.account_id != acct.id:
+        raise HTTPException(404, "Order not found")
+    return {"order_id": order.id, "status": order.status, "pack": order.pack,
+            "credits": order.credits, "amount_cents": order.amount_cents,
+            "currency": order.currency, "mode": "test"}

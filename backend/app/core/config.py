@@ -36,13 +36,16 @@ class Settings(BaseSettings):
     # 一次性「认领旧命理数据」口令（无归属的 device_id=NULL 行划归当前浏览器）。
     # 留空 = 认领禁用；在 VPS .env 设 ZIWEI_CLAIM_CODE 才能认领。
     ziwei_claim_code: str = ""
-    # 自动收养旧紫微档案：第一台带 device_id 访问的浏览器把 NULL 档案收归自己。
-    # 默认开（部署后站主一刷新即找回旧档案，无需口令/改 .env）；认领完可设 ZIWEI_AUTO_ADOPT=0 关。
-    ziwei_auto_adopt: bool = True
+    # Deprecated compatibility setting; public listing never auto-adopts legacy rows,
+    # even if an old environment still supplies ZIWEI_AUTO_ADOPT=true.
+    ziwei_auto_adopt: bool = False
     # 付费点数（灰度）：默认关——一切就绪后设 ZIWEI_REQUIRE_CREDITS=true 开闸收费。
     ziwei_require_credits: bool = False
     ziwei_free_credits: int = 3  # 新账号赠送点数
     # Stripe 跨境收款（支付宝/微信）。空 = 未配置，购买端点返回 503。
+    billing_lock_timeout_ms: int = Field(default=2000, ge=50, le=10000)
+    stripe_test_enabled: bool = False
+    stripe_test_base_url: str = ""
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     # 收银台付款后跳回的站点公网地址（success/cancel URL 用）。

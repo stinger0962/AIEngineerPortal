@@ -9,13 +9,17 @@ from typing import Dict, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
+from starlette.background import BackgroundTask
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal, get_db
+from app.db.billing_contention import retryable_contention, is_lock_contention
 from app.models.entities import (
     AIFeedback,
+    BillingRequest,
     User,
     ZiweiConversation,
     ZiweiMessage,
@@ -114,17 +118,8 @@ def _owned_or_404(db: Session, profile_id: int, device: str) -> ZiweiProfile:
 def list_profiles(db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     if not device:
         return []
-    # 一次性自动收养：部署前建的旧档案 device_id 为 NULL，会对所有设备隐藏 → 旧数据像「丢了」。
-    # 让第一台带 device_id 访问的浏览器（= 站主本人，正打开着页面）把 NULL 档案收归本设备。
-    # 自限：收养后再无 NULL 行，后续访客收不到任何东西；收养后档案即绑定本设备，陌生人看不到。
-    # 关：ZIWEI_AUTO_ADOPT=0（认领完可关，杜绝任何残留 NULL 被别的设备捡走）。
-    if get_settings().ziwei_auto_adopt:
-        has_orphan = db.scalar(select(ZiweiProfile.id).where(ZiweiProfile.device_id.is_(None)).limit(1))
-        if has_orphan is not None:
-            db.query(ZiweiProfile).filter(ZiweiProfile.device_id.is_(None)).update(
-                {ZiweiProfile.device_id: device}, synchronize_session=False
-            )
-            db.commit()
+    # Listing never claims legacy data. NULL owners remain unchanged and hidden
+    # until explicit, authorized recovery; a visitor's device ID proves no ownership.
     profiles = db.scalars(
         select(ZiweiProfile).where(ZiweiProfile.device_id == device).order_by(ZiweiProfile.id.asc())
     ).all()
@@ -225,18 +220,40 @@ def _get_user_id(db: Session) -> int:
 
 
 def _require_credit_or_402(db: Session, device: str) -> Optional[int]:
-    """付费开启时：解析账号、校验余额≥1；余额不足抛 402。返回 account_id（供成功后扣点）。
-    付费未开启（灰度）时返回 None，行为与从前一致——绝不影响现有用户。"""
+    """Resolve the credit account; reservation later checks balance under a lock."""
     if not get_settings().ziwei_require_credits:
         return None
     acct = credits_svc.resolve_account(db, device)
-    if not acct or credits_svc.balance(db, acct.id) < 1:
-        raise HTTPException(402, "点数不足，请充值后再解盘。")
+    if not acct:
+        raise HTTPException(402, {"code": "insufficient_credits", "balance": credits_svc.balance(db, acct.id) if acct else 0, "required": 1})
     return acct.id
 
 
+def _reserve_credit(db: Session, account_id, profile_id, payload, key: str):
+    if account_id is None:
+        return
+    try:
+        identity, fingerprint = credits_svc.request_identity(
+            account_id, "oracle", key,
+            json.dumps({"profile_id": profile_id, **payload.model_dump()}, sort_keys=True),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, {"code": str(exc)})
+    credits_svc.lock_account(db, account_id)
+    existing = db.get(BillingRequest, identity)
+    if existing:
+        db.rollback()
+        raise HTTPException(409, {"code": "request_already_completed" if existing.fingerprint == fingerprint else "idempotency_conflict"})
+    if not credits_svc.consume_one(db, account_id, commit=False):
+        raise HTTPException(402, {"code": "insufficient_credits", "balance": 0, "required": 1})
+    db.add(BillingRequest(key=identity, account_id=account_id, fingerprint=fingerprint,
+                          response_json={"status": "completed"}))
+    db.flush()
+
+
 @router.post("/profiles/{profile_id}/oracle")
-def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+@retryable_contention
+def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id), idempotency_key: str = Header(default="")):
     profile = _owned_or_404(db, profile_id, device)
     if not (profile.chart_json or {}).get("palaces"):
         raise HTTPException(400, "Profile has no chart data")
@@ -268,12 +285,14 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
     messages = [{"role": m.role, "content": m.content} for m in history]
     messages.append({"role": "user", "content": payload.message})
 
+    _reserve_credit(db, account_id, profile_id, payload, idempotency_key)
     oracle = ZiweiOracle(client=svc.client, model=settings.oracle_model)
     result = oracle.run(
         chart_json=profile.chart_json, persona=profile.persona, scenario=payload.scenario,
         portrait=profile.portrait_json or {}, messages=messages,
     )
-    if result is None:
+    if result is None or not result.get("response", "").strip():
+        db.rollback()
         raise HTTPException(502, "解盘师一时失神，请稍后再问。")
 
     meta = result["_meta"]
@@ -291,8 +310,6 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
     ))
     db.commit()
 
-    if account_id is not None:  # 解盘成功才扣 1 点（失败不扣）
-        credits_svc.consume_one(db, account_id)
 
     return {
         "conversation_id": conv.id, "response": result["response"],
@@ -301,7 +318,8 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
 
 
 @router.post("/profiles/{profile_id}/oracle/stream")
-def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+@retryable_contention
+def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Depends(get_db), device: str = Depends(get_device_id), idempotency_key: str = Header(default="")):
     profile = _owned_or_404(db, profile_id, device)
     if not (profile.chart_json or {}).get("palaces"):
         raise HTTPException(400, "Profile has no chart data")
@@ -325,12 +343,9 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
         if not conv or conv.profile_id != profile_id:
             raise HTTPException(404, "Conversation not found")
     else:
-        conv = ZiweiConversation(profile_id=profile_id, scenario=payload.scenario, title=payload.message[:40])
-        db.add(conv)
-        db.commit()  # 提交以拿稳 conv.id（流式生成器用新 session 持久化消息）
-        db.refresh(conv)
+        conv = None  # Create only inside the generation transaction below.
 
-    history = db.scalars(select(ZiweiMessage).where(ZiweiMessage.conversation_id == conv.id).order_by(ZiweiMessage.id.asc())).all()
+    history = db.scalars(select(ZiweiMessage).where(ZiweiMessage.conversation_id == conv.id).order_by(ZiweiMessage.id.asc())).all() if conv else []
     messages = [{"role": m.role, "content": m.content} for m in history]
     messages.append({"role": "user", "content": payload.message})
     claude_messages = messages[-10:] if len(messages) > 10 else messages
@@ -338,20 +353,34 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
     oracle = ZiweiOracle(client=svc.client, model=settings.oracle_model)
     system_prompt = oracle._system_prompt(profile.chart_json, profile.persona, payload.scenario, profile.portrait_json or {})
 
-    conv_id = conv.id
+    conv_id = conv.id if conv else None
+    new_conversation = conv is None
     client = svc.client
     model = settings.oracle_model
     user_message = payload.message
     scenario = payload.scenario
     uid = _get_user_id(db)
-    acct_id = account_id  # 成功完成时扣 1 点
+    # FastAPI may close the dependency session before SSE iteration begins.
+    # Own this transaction until the stream finishes, including cancellation.
+    stream_db = Session(bind=db.get_bind(), expire_on_commit=False)
+    db.rollback()
+    try:
+        _reserve_credit(stream_db, account_id, profile_id, payload, idempotency_key)
+        if new_conversation:
+            conv = ZiweiConversation(profile_id=profile_id, scenario=payload.scenario, title=payload.message[:40])
+            stream_db.add(conv)
+            stream_db.flush()
+            conv_id = conv.id
+    except BaseException:
+        stream_db.close()
+        raise
 
     def _persist(clean: str, cameras: list, segments: list, in_tok: int, out_tok: int, start: float) -> None:
         """用新 session 持久化本轮对话 + token 计量。
         即便 clean 为空也记 AIFeedback（只要花了 token），否则每日额度计量会漏算。"""
         if not clean and not (in_tok or out_tok):
             return
-        _db = SessionLocal()
+        _db = stream_db
         try:
             if clean:
                 _db.add(ZiweiMessage(conversation_id=conv_id, role="user", content=user_message, chart_context_json={}))
@@ -367,8 +396,9 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
                 latency_ms=int((time.time() - start) * 1000),
             ))
             _db.commit()
-        finally:
-            _db.close()
+        except BaseException:
+            _db.rollback()
+            raise
 
     def event_stream():
         parser = StreamMarkerParser()
@@ -388,25 +418,30 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
             trailing, clean, segments, cameras = parser.finish()
             if trailing:
                 yield {"data": json.dumps({"type": "text", "delta": trailing}, ensure_ascii=False)}
+            if not clean.strip():
+                raise ValueError("empty_generation")
             _persist(clean, cameras, segments, in_tok, out_tok, start)
-            if acct_id is not None and clean:  # 有实质输出才扣点
-                _cdb = SessionLocal()
-                try:
-                    credits_svc.consume_one(_cdb, acct_id)
-                finally:
-                    _cdb.close()
             yield {"data": json.dumps({"type": "done", "conversation_id": conv_id, "meta": {"model": model, "total_tokens": in_tok + out_tok, "latency_ms": int((time.time() - start) * 1000)}}, ensure_ascii=False)}
-        except Exception:
+        except Exception as exc:
+            stream_db.rollback()  # release debit and idempotency record before salvage
+            if isinstance(exc, DBAPIError) and is_lock_contention(exc):
+                yield {"data": json.dumps({"type": "error", "code": "billing_busy", "retryable": True,
+                                           "retry_after_seconds": 2})}
+                return
             # 流中途失败：尽力保住已生成的文字 + 计量（非原子；前端收到 error 应清掉屏幕上的半截文本）
             logger.exception("ziwei oracle stream failed (profile=%s conv=%s)", profile_id, conv_id)
             try:
                 _, clean, segments, cameras = parser.finish()
-                _persist(clean, cameras, segments, in_tok, out_tok, start)
+                if not new_conversation:
+                    _persist(clean, cameras, segments, in_tok, out_tok, start)
             except Exception:
                 logger.exception("ziwei oracle stream salvage-persist failed")
             yield {"data": json.dumps({"type": "error"}, ensure_ascii=False)}
+        finally:
+            stream_db.rollback()  # disconnect/cancellation cannot retain a debit
+            stream_db.close()
 
-    return EventSourceResponse(event_stream())
+    return EventSourceResponse(event_stream(), background=BackgroundTask(stream_db.close))
 
 
 @router.get("/profiles/{profile_id}/conversations")

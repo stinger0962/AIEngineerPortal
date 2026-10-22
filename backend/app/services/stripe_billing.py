@@ -1,100 +1,126 @@
-"""Stripe 跨境收款：创建 Checkout Session（支付宝/微信，服务端权威定价）+ 处理 webhook。
-Alipay/WeChat 可能异步结算 → 一律以 webhook 的 paid 状态发点，不靠跳转回来。
-见 docs/superpowers/specs/2026-07-22-ziwei-paid-credits-design.md"""
-from __future__ import annotations
+"""Explicitly opt-in Stripe TEST checkout and atomic fulfillment."""
+from urllib.parse import urlparse
+from datetime import datetime, timedelta
 
-import logging
-
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models.entities import Account, PaymentOrder
+from app.db.billing_contention import bound_lock_wait
+from app.models.entities import BillingRequest, CreditLedger, PaymentOrder
 from app.services import credits as credits_svc
 
-logger = logging.getLogger(__name__)
+
+def _canonical_hostname(hostname: str | None) -> str:
+    # Compare DNS names independent of case, IDNA spelling and the root dot.
+    return (hostname or "").rstrip(".").encode("idna").decode("ascii").lower().rstrip(".")
 
 
 def is_configured() -> bool:
-    return bool(get_settings().stripe_secret_key)
-
-
-def create_checkout_session(db: Session, account_id: int, pack_key: str) -> str:
-    """建 Stripe Checkout Session，落一条 pending 订单，返回收银台 URL。金额/点数一律服务端定。"""
-    import stripe
-
     s = get_settings()
-    if not s.stripe_secret_key:
-        raise RuntimeError("stripe_not_configured")
+    try:
+        base = urlparse(s.stripe_test_base_url)
+        host = _canonical_hostname(base.hostname)
+        production_host = _canonical_hostname(urlparse(s.public_base_url).hostname)
+    except (ValueError, UnicodeError):
+        return False
+    return bool(s.stripe_test_enabled and s.stripe_secret_key.startswith("sk_test_")
+                and host and base.scheme in ("http", "https")
+                and not base.username and not base.password and not base.query and not base.fragment
+                and host != production_host
+                and not host.endswith("leipan.cc"))
+
+
+def create_checkout_session(db: Session, account_id: int, pack_key: str, idempotency_key: str) -> dict:
+    import stripe
+    if not is_configured():
+        raise RuntimeError("stripe_test_not_configured")
     pack = credits_svc.PACKS.get(pack_key)
     if not pack:
         raise ValueError("unknown_pack")
-
-    stripe.api_key = s.stripe_secret_key
-    base = s.public_base_url.rstrip("/")
-    session = stripe.checkout.Session.create(
-        mode="payment",
-        payment_method_types=["alipay", "wechat_pay", "card"],
-        payment_method_options={"wechat_pay": {"client": "web"}},
-        line_items=[{
-            "price_data": {
-                "currency": "cny",
-                "unit_amount": pack["amount_cents"],
-                "product_data": {"name": f"紫微解盘点数 · {pack['label']}"},
-            },
-            "quantity": 1,
-        }],
-        success_url=f"{base}/ziwei?paid=1&sid={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{base}/ziwei?canceled=1",
-        metadata={"account_id": str(account_id), "pack": pack_key, "credits": str(pack["credits"])},
-    )
-    db.add(PaymentOrder(
-        account_id=account_id, pack=pack_key, credits=pack["credits"],
-        amount_cents=pack["amount_cents"], currency="cny",
-        stripe_session_id=session.id, status="pending",
-    ))
+    key, fingerprint = credits_svc.request_identity(account_id, "checkout", idempotency_key, pack_key)
+    credits_svc.lock_account(db, account_id)
+    req = db.get(BillingRequest, key)
+    if req:
+        if req.fingerprint != fingerprint:
+            db.rollback()
+            raise ValueError("idempotency_conflict")
+        order = db.get(PaymentOrder, req.response_json["order_id"])
+        if req.response_json.get("url"):
+            result = dict(req.response_json)
+            db.rollback()
+            return result
+    else:
+        order = PaymentOrder(account_id=account_id, pack=pack_key, credits=pack["credits"],
+                             amount_cents=pack["amount_cents"], currency="cny",
+                             stripe_session_id=f"pending:{key}", status="pending")
+        db.add(order)
+        db.flush()
+        req = BillingRequest(key=key, account_id=account_id, fingerprint=fingerprint,
+                             response_json={"order_id": order.id})
+        db.add(req)
+    if datetime.utcnow() - order.created_at >= timedelta(hours=23):
+        db.rollback()
+        raise ValueError("checkout_reconciliation_required")
+    # Persist intent before Stripe. Retrying a timeout uses the same Stripe key.
     db.commit()
-    return session.url
+    s = get_settings()
+    base = s.stripe_test_base_url.rstrip("/")
+    session = stripe.checkout.Session.create(
+        api_key=s.stripe_secret_key, idempotency_key=f"ziwei-test-{key}",
+        mode="payment", payment_method_types=["alipay", "wechat_pay", "card"],
+        payment_method_options={"wechat_pay": {"client": "web"}},
+        line_items=[{"price_data": {"currency": "cny", "unit_amount": order.amount_cents,
+                     "product_data": {"name": f"紫微解盘点数 · {pack['label']}"}}, "quantity": 1}],
+        success_url=f"{base}/ziwei?paid=1&order_id={order.id}",
+        cancel_url=f"{base}/ziwei?canceled=1&order_id={order.id}",
+        metadata={"order_id": str(order.id), "account_id": str(account_id)},
+    )
+    if session.livemode is not False:
+        raise RuntimeError("live_session_rejected")
+    order.stripe_session_id = session.id
+    result = {"url": session.url, "order_id": order.id, "mode": "test"}
+    req.response_json = result
+    db.commit()
+    return result
 
 
 def verify_event(payload: bytes, sig_header: str):
-    """验签并返回 Stripe 事件；失败抛异常。"""
     import stripe
-
-    s = get_settings()
-    return stripe.Webhook.construct_event(payload, sig_header, s.stripe_webhook_secret)
+    return stripe.Webhook.construct_event(payload, sig_header, get_settings().stripe_webhook_secret)
 
 
 def process_event(db: Session, event) -> str:
-    """处理已验签的事件。付款成功→幂等发点；异步失败→标记订单 failed。返回状态串。"""
-    etype = event["type"]
+    bound_lock_wait(db)
     obj = event["data"]["object"]
-    sid = obj.get("id")
-
-    if etype in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
-        if obj.get("payment_status") != "paid":
-            return "not_paid_yet"  # 异步付款：等 async_payment_succeeded 再发点
-        order = db.scalar(select(PaymentOrder).where(PaymentOrder.stripe_session_id == sid))
-        if not order:
-            return "order_not_found"
-        if order.status == "paid":
-            return "already_paid"  # 幂等：webhook 重投不重复发点
-        order.status = "paid"
-        credits_svc.grant(db, order.account_id, order.credits, "purchase", order_id=order.id)
-        email = (obj.get("customer_details") or {}).get("email")
-        if email:
-            acct = db.get(Account, order.account_id)
-            if acct and not acct.email and not db.scalar(select(Account).where(Account.email == email)):
-                acct.email = email
-                db.commit()
-        logger.info("stripe: credited order=%s account=%s +%s", order.id, order.account_id, order.credits)
-        return "credited"
-
+    if event.get("livemode") is not False or obj.get("livemode") is not False:
+        return "live_or_unknown_mode_rejected"
+    etype = event["type"]
+    if etype not in ("checkout.session.completed", "checkout.session.async_payment_succeeded",
+                     "checkout.session.async_payment_failed"):
+        return "ignored"
+    order = db.scalar(select(PaymentOrder).where(PaymentOrder.stripe_session_id == obj.get("id")))
+    if not order:
+        # Delivery can precede saving the Checkout response; ask Stripe to retry.
+        return "order_not_found"
     if etype == "checkout.session.async_payment_failed":
-        order = db.scalar(select(PaymentOrder).where(PaymentOrder.stripe_session_id == sid))
-        if order and order.status == "pending":
-            order.status = "failed"
-            db.commit()
+        db.execute(update(PaymentOrder).where(PaymentOrder.id == order.id, PaymentOrder.status == "pending")
+                   .values(status="failed"))
+        db.commit()
         return "failed"
-
-    return "ignored"
+    if obj.get("payment_status") != "paid":
+        return "not_paid_yet"
+    if (obj.get("amount_total") != order.amount_cents or obj.get("currency") != order.currency
+            or obj.get("mode") != "payment"
+            or (obj.get("metadata") or {}).get("order_id") != str(order.id)
+            or (obj.get("metadata") or {}).get("account_id") != str(order.account_id)):
+        return "payment_mismatch"
+    changed = db.execute(update(PaymentOrder).where(PaymentOrder.id == order.id, PaymentOrder.status != "paid")
+                         .values(status="paid")).rowcount
+    if not changed:
+        db.rollback()
+        return "already_paid"
+    # Status transition and ledger insert share ONE transaction. No intermediate commit.
+    db.add(CreditLedger(account_id=order.account_id, delta=order.credits, reason="purchase", order_id=order.id))
+    db.commit()
+    return "credited"
