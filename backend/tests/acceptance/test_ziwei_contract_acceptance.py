@@ -1,5 +1,6 @@
 """Confirmed public contract gates; no assumptions about reservation model names."""
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import stripe
@@ -62,6 +63,39 @@ def test_order_details_require_owner_and_do_not_grant_credit(qa, checkout_calls)
     for headers in ({}, {'X-Device-Id': 'qa-other'}):
         assert qa.client.get(path, headers=headers).status_code == 404
     assert remaining(qa) == 0
+
+
+def test_cancel_return_and_unpaid_notification_never_fulfill_checkout(qa, checkout_calls):
+    """Simulated cancellation/resume flow; no actual Stripe delivery occurs."""
+    from test_ziwei_payment_acceptance import deliver, event
+
+    first = checkout(qa)
+    assert first.status_code == 200
+    body = first.json()
+    qa.order_id = body['order_id']
+    cancel = urlparse(checkout_calls[0]['cancel_url'])
+    assert cancel.netloc == 'localhost:3000'
+    assert cancel.path == '/ziwei'
+    assert parse_qs(cancel.query) == {'canceled': ['1'], 'order_id': [str(qa.order_id)]}
+
+    # A return flag cannot authorize payment; the owner still sees pending/zero.
+    path = f'/api/v1/billing/orders/{qa.order_id}'
+    status = qa.client.get(path + '?' + cancel.query, headers=OWNER)
+    assert status.status_code == 200
+    assert status.json()['status'] == 'pending'
+    unpaid = event(qa, id='cs_test_contract', payment_status='unpaid')
+    assert deliver(qa, unpaid).status_code == 200
+    assert remaining(qa) == 0
+    assert qa.client.get(path, headers=OWNER).json()['status'] == 'pending'
+
+    # Resuming the same checkout must preserve the existing intent/session.
+    assert checkout(qa).json() == body
+    assert len(checkout_calls) == 1
+    paid = event(qa, id='cs_test_contract')
+    assert deliver(qa, paid).status_code == 200
+    assert deliver(qa, paid).status_code == 200
+    assert remaining(qa) == 10
+    assert qa.client.get(path, headers=OWNER).json()['status'] == 'paid'
 
 
 @pytest.mark.parametrize('key', [None, 'short', 'x' * 129])

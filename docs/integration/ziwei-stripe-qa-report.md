@@ -1,5 +1,60 @@
 # Ziwei Stripe TEST integration acceptance — 2026-10-22
 
+## Fresh environment follow-up — 2026-10-25
+
+Fetched PR #2 and verified it remained open/draft at
+`20b3e7969696ff28a756fe3c8d9f4285c3c094a6`, on
+`integration/ziwei-stripe-test`. Work continued on that feature branch.
+Repository `CLAUDE.md` and test-contract guidance were inspected; no `AGENTS.md`
+or local `.agents/skills` files were available. The explicit no-deployment scope
+overrides the repository's normal release workflow.
+
+Secret verification reports only: **present; test; authentication unverified**.
+The read-only Stripe balance request could not traverse the environment proxy;
+the transport reported `Tunnel connection failed: 403 Forbidden`, including on
+the elevated execution path. This is not a Stripe authentication rejection and
+does not establish whether the key is valid. No key value was printed, logged,
+persisted, hashed, or placed in an artifact. No live key was used.
+
+`STRIPE_WEBHOOK_SECRET` is absent and the Stripe CLI is unavailable. Actual
+Checkout creation, hosted test payment/cancellation, payment-method availability,
+and Stripe-originated webhook delivery/duplicate redelivery remain **blocked**.
+The precise next checkpoints are permitted HTTPS access to `api.stripe.com`, then
+test-key authentication, and an authorized matching test webhook signing secret
+and delivery path to the isolated local backend. No proxy/security configuration,
+listener credential, persistent access, or external webhook endpoint was created
+or changed. No actual Stripe Checkout session or payment was created.
+
+Added one acceptance regression joining the mocked checkout and signed synthetic
+webhook paths: the cancellation callback targets localhost, return parameters and
+an unpaid notification leave the order pending with zero credits, resuming the
+same idempotency key reuses the order/session, and duplicate paid notifications
+grant exactly ten credits. The signature uses a nonfunctional fixture secret.
+This is **simulated cancellation and webhook delivery**, not hosted Checkout or
+real Stripe delivery.
+
+Fresh validation after that addition:
+
+- Focused SQLite suite: **112 passed, 4 PostgreSQL-only skips**.
+- Real disposable PostgreSQL **16.15** acceptance: **60 passed**, including the
+  new flow, concurrent fulfillment/debits, rollback, lock contention and migration.
+- Frontend offline billing checks: **passed**, including cancellation parsing.
+- Frontend TypeScript `tsc --noEmit`: **passed**.
+- `git diff --check`: **passed**.
+
+Commands used the existing `/workspace/.portal-venv/bin/python` and the focused
+test selection documented above. PostgreSQL used the cached `postgres:16-alpine`
+image with the same localhost-only, tmpfs, disposable database recipe below,
+container name `ziwei-qa-postgres-20261025`. All QA schemas were removed on test
+teardown (verified count zero), and the container was stopped/removed afterward.
+Application/provider effects remained mocked; the published Stripe key was cleared
+inside the test process by the acceptance fixture before application imports.
+The full backend suite and browser/build checks were not rerun; their prior
+results, including six inherited backend failures, remain historical evidence.
+No application code change, main merge, release tag, deployment, or real charge.
+
+## Original integration checkpoint
+
 Integration starts from unchanged main `6c909b235fed2c81f1153a67d8f4bed36dab3fb5`.
 Preserved commits:
 
