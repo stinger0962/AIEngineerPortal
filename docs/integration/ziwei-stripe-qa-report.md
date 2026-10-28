@@ -1,5 +1,91 @@
 # Ziwei Stripe TEST integration acceptance — 2026-10-22
 
+## Published environment validation — 2026-10-28
+
+PR #2 was fetched and inspected as open/draft at
+`78cdcb5c499d290e4da4e085094f2393b3850156`. Work continued only on
+`integration/ziwei-stripe-test`. Repository `CLAUDE.md` and acceptance guidance
+were read; no `AGENTS.md` or local skill files were available. Explicit task
+restrictions exclude the repository's normal production deployment workflow.
+
+**Credential result: present; test-classified; authentication successful.**
+A read-only `GET https://api.stripe.com/v1/balance` returned HTTP 200 with
+`livemode=false`. No credential value or derived identifier was printed, logged,
+hashed, persisted, or added to artifacts. Only the test key was used.
+
+Before creating Checkout, complete Product/Price listings returned two products
+and four active recurring USD prices (no further pages):
+
+- Polaris: USD 79.99/month and USD 759.99/year.
+- Vanguard: USD 24.99/month and USD 239.99/year.
+
+These are subscriptions, whereas this branch implements one-time CNY Ziwei
+credit packs. They were not substituted for the repository's `p10` pricing or
+modified. This product-intent discrepancy remains for reconciliation before
+expanding scope; current verification covers only the existing credit design.
+
+### Actual Stripe API verification
+
+Used the real `stripe_billing.create_checkout_session` service with an isolated
+in-memory SQLite schema, synthetic device identity, zero free credits, test-only
+settings, and `http://127.0.0.1:3100` callbacks. AI was never invoked.
+
+The SDK's bundled CA trust initially rejected the environment proxy certificate
+before reaching Stripe. The test process then selected the existing system CA
+bundle (`ssl.get_default_verify_paths().cafile`) for the Stripe SDK. Certificate
+verification stayed enabled; no trust store, network/security setting, persistent
+configuration, or application code was changed. Before retrying with the same
+idempotency input, the Stripe session listing confirmed zero existing sessions.
+
+- Actual Checkout creation and retrieval succeeded: `mode=payment`,
+  `livemode=false`, `amount_total=990`, `currency=cny`, `status=open`,
+  `payment_status=unpaid`.
+- Stripe accepted the application's requested `alipay`, `wechat_pay`, and `card`
+  payment methods. This does not prove successful payment using each method.
+- Actual stored success/cancel URLs target localhost and contain the order ID.
+- Reusing the same application checkout key returned the same session/order;
+  the synthetic account retained zero credits. This verifies application resume,
+  not browser cancellation or provider-side replay after a lost response.
+- The unpaid test session was explicitly expired and retrieved again as
+  `expired`/`unpaid`. Final listings show exactly one session, two Products and
+  four Prices, all test mode. No additional listed catalog objects were created.
+- No payment was completed, and no charge or genuine fulfillment was performed.
+
+### Fresh independent checks
+
+- Focused SQLite backend command documented below: **112 passed, 4 skips**.
+- Disposable PostgreSQL acceptance: **60 passed**, including cancellation/resume,
+  fulfillment/idempotency, concurrent grants/debits, rollback, and lock contention.
+- `node scripts/ziwei-billing-test.cjs`: **passed** (run from frontend).
+- Frontend `tsc --noEmit`: **passed**.
+
+The PostgreSQL recipe below used container `ziwei-qa-postgres-20261028`.
+All QA schemas were removed (verified zero remaining) and that disposable
+container was stopped/removed. Existing application database/cache containers
+were untouched. These automated tests use synthetic signed events and mocked
+Stripe calls; their fulfillment results are not genuine Stripe webhook delivery.
+Full-suite, build and browser results remain historical, not rerun here.
+
+### Remaining precise blockers
+
+1. Hosted payment/cancellation: an HTTPS probe to `checkout.stripe.com` was
+   denied by the environment proxy with `Tunnel connection failed: 403 Forbidden`.
+   No retry or network-setting change followed the denial. The API allowlist
+   change succeeded but does not authorize or enable this separate hosted origin.
+   Hosted Checkout needs permitted access to that origin and any required assets;
+   do not infer that unrestricted internet is required.
+2. Genuine webhook delivery/redelivery: `STRIPE_WEBHOOK_SECRET` remains absent
+   and Stripe CLI remains unavailable. An exact proposed next action requiring
+   separate credential/access authorization is an ephemeral official Stripe CLI
+   TEST listener forwarding only to an isolated local backend at
+   `http://127.0.0.1:8000/api/v1/billing/webhook`, using its matching signing secret
+   only in memory. No listener credentials or persistent webhook registrations
+   were created; neither delivery nor payment completion is claimed.
+
+No application fixes were needed. Changes in this follow-up only document
+verification. No production/main change, merge, deploy, release tag, real charge,
+credential creation, persistent access, or security/network change occurred.
+
 ## Fresh environment follow-up — 2026-10-25
 
 Fetched PR #2 and verified it remained open/draft at
