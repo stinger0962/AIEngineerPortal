@@ -1,5 +1,35 @@
 # Ziwei Stripe TEST integration acceptance — 2026-10-22
 
+## Republished hosted-origin check — 2026-10-28 15:52 UTC
+
+Fetched `integration/ziwei-stripe-test` at `16aec76` in the fresh published
+workspace. Repository guidance was inspected; no local AGENTS.md or skills were
+available. Chromium and Playwright are installed, but hosted browser acceptance
+could not start because the Checkout origin remains inaccessible.
+
+- Credential classification: test. Read-only Stripe balance authentication:
+  **HTTP 200, livemode=false**. No key value was printed or persisted.
+- `https://checkout.stripe.com/`: HTTPS proxy tunnel denied with
+  **403 Forbidden**, before reaching the hosted page.
+- `https://js.stripe.com/`: **HTTP 403**; root probe does not establish whether
+  the JavaScript asset is usable.
+- `https://hooks.stripe.com/`: **HTTP 404**; HTTPS connection succeeded, but this
+  does not validate a specific authentication flow.
+- GitHub repository fetch succeeded. Read-only GitHub API PR metadata lookup
+  failed at transport level, so current draft/open status was not reverified.
+
+No additional Checkout session, catalog object, test payment, credential,
+webhook endpoint, or listener was created. No browser payment/cancellation result
+or genuine credit fulfillment is claimed. There was no network/security change,
+security-warning bypass, or alternate-route retry after the Checkout denial.
+
+**Remaining blockers:** the environment proxy must permit the Checkout origin
+before hosted cancellation/resume and synthetic card payment can run. Explicit
+approval for downloading the official Stripe CLI and running the temporary local
+sandbox webhook listener remains pending; neither action was attempted. Prior
+automated results below remain historical and were not rerun for this docs-only
+follow-up. Main and production were untouched.
+
 ## Published environment validation — 2026-10-28
 
 PR #2 was fetched and inspected as open/draft at
