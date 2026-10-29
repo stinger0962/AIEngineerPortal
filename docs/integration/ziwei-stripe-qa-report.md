@@ -1,5 +1,59 @@
 # Ziwei Stripe TEST integration acceptance — 2026-10-22
 
+## Genuine Alipay sandbox payment and webhook — 2026-10-29
+
+With explicit user approval, downloaded official Stripe CLI v1.55.3 Linux x86_64
+from the GitHub release and verified the archive against its published
+`stripe-linux-checksums.txt` (SHA-256
+`a894f7891eac5eabb67a5ad5b4820a236626a805b9be544fb4c6e41c5ad91043`).
+Extracted under `/tmp`; no system installation, login, persistent Dashboard
+webhook registration, or trust/network changes occurred.
+
+A temporary test-only listener subscribed to this account's
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`, and
+`checkout.session.async_payment_failed` events and forwarded to
+`127.0.0.1:8000/api/v1/billing/webhook`. The API key remained in process environment;
+the signing secret was captured directly into memory and never written to files,
+logs, or artifacts. The local application billing router used an isolated
+in-memory SQLite database and zero starting credits. No AI calls were made.
+
+The actual application service created one CNY 9.90 Checkout for ten credits.
+Existing USD subscriptions remained unchanged. The user opened the hosted link
+in their normal browser and authorized the Alipay test payment. This bypassed
+neither Chromium's warning nor any security setting: automated browser testing
+remains separately blocked as documented below.
+
+### Verified result
+
+- At **15:42:07 UTC**, Stripe generated the matching genuine
+  `checkout.session.completed` event. Its object already had
+  **`payment_status=paid`**, `mode=payment`, `livemode=false`, CNY amount 990.
+- Event/session identity and order/account metadata matched the controlled test
+  order. Event ID: `evt_1UVvStK1mmznAGURGnPpmavm`.
+- The real webhook reached the unmodified application signature-verification and
+  fulfillment route and returned **HTTP 200**. No synthetic event or manual grant
+  was used.
+- Local order changed to **paid**, and balance changed from **0 to exactly 10**.
+  A subsequent status check still showed 10 and exactly one recorded delivery.
+- Expanded Stripe retrieval independently confirmed payment method **alipay**,
+  PaymentIntent **succeeded**, charge `paid=true`, charge `livemode=false`.
+  Completion alone was not used as proof of payment: paid status was checked.
+- Only one matching completed event and one delivery were observed. This verifies
+  no extra credit grant in this flow; it does **not** test real duplicate webhook
+  redelivery or the delayed asynchronous-success path.
+
+Cleanup preserved the completed paid session, stopped the listener/backend, and
+was confirmed by absent supervisor/listener processes and a closed localhost
+backend port. Post-cleanup Stripe retrieval remained `complete`/`paid`. The
+in-memory QA balance disappeared with the disposable process; no production
+account was credited. CLI temporary files contain no credentials. The test
+Checkout URL is intentionally omitted from this report.
+
+Remaining coverage: automated Chromium hosted interaction, hosted cancellation
+and resume, card/WeChat payments, delayed asynchronous payment, and genuine
+webhook redelivery. Existing mocked regression coverage is separate. This
+follow-up changes evidence only; main, production, and release tags are unchanged.
+
 ## Hosted browser follow-up — 2026-10-29
 
 A separately approved diagnostic at 13:04:09 UTC used the normal HTTP proxy
