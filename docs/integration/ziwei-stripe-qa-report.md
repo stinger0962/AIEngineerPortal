@@ -1,5 +1,44 @@
 # Ziwei Stripe TEST integration acceptance — 2026-10-22
 
+## Hosted browser follow-up — 2026-10-29
+
+A separately approved diagnostic at 13:04:09 UTC used the normal HTTP proxy
+`proxy:8080`: CONNECT to `checkout.stripe.com:443` returned 200, followed by an
+HTTPS 302 to the `stripe.com` hostname. The redirect was not followed. This
+established recovered tunnel access, not the cause of the earlier 403.
+
+Resumed the authorized hosted test using local Next.js at `127.0.0.1:3100` and
+an isolated FastAPI billing router at `127.0.0.1:8000`, with an in-memory SQLite
+schema, zero free credits, and no AI calls. The published credential was checked
+as test-classified; Stripe balance authentication confirmed `livemode=false`.
+The SDK used the existing system CA bundle with verification enabled, as in the
+prior API test. No credential was written into a script, log, or artifact.
+
+Catalog reconciliation still found two Products and four active recurring USD
+Prices, with no additional pages. Those subscriptions were not modified or
+substituted for the existing one-time CNY credit-pack design.
+
+- Local browser UI displayed test mode and zero credits.
+- The UI called the actual application Checkout endpoint and created one test
+  session: CNY 9.90, `open`/`unpaid`, local order `pending`, balance zero.
+- The initial browser harness failed reading the response body during navigation.
+  The existing session was retrieved and inspected before any further action;
+  no duplicate Checkout was created.
+- A bounded navigation to that same hosted session failed in system Chromium
+  with **`net::ERR_CERT_AUTHORITY_INVALID`** for `checkout.stripe.com`.
+  Certificate verification was not bypassed and no trust/security setting changed.
+- Cleanup expired the open session. Retrieval verified `expired`/`unpaid`,
+  `livemode=false`, local balance zero. No payment or credit grant occurred.
+
+Hosted form rendering, cancellation, browser resume, and synthetic card payment
+remain unverified because Chromium does not trust the presented certificate chain.
+The successful verified curl/SDK requests do not establish Chromium trust. The
+next checkpoint is a supported browser CA-trust configuration, followed by the
+hosted flow; do not bypass certificate errors. Genuine webhook delivery remains
+separately blocked pending explicit CLI/listener approval. No listener, signing
+secret, or webhook registration was created. No production/main change occurred.
+This follow-up changes evidence only; prior regression results were not rerun.
+
 ## Republished hosted-origin check — 2026-10-28 15:52 UTC
 
 Fetched `integration/ziwei-stripe-test` at `16aec76` in the fresh published
