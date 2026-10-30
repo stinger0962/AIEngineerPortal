@@ -1,5 +1,62 @@
 # Ziwei Stripe TEST integration acceptance — 2026-10-22
 
+## Implementation completion checks — 2026-10-29
+
+Follow-up development remains on `integration/ziwei-stripe-test`; PR #2 is open
+and draft. No AGENTS.md or local skill files were found. No new provider session,
+payment, listener, credential, trust setting, network rule, or production change
+was needed for this follow-up.
+
+### Corrections and regression coverage
+
+- Cancellation now retains the same-pack Checkout key across return/reload so
+  retry resumes the existing order. Server-confirmed paid/failed clears only the
+  matching key. Server-paid state overrides an old cancel flag, and delayed
+  responses from a previous navigation cannot replace the current return state.
+- Asynchronous failure validates session purchase amount, currency, payment mode,
+  order and account metadata before changing order state. A late failure cannot
+  downgrade paid; delayed paid success after failure grants exactly once.
+  Concurrent success/failure is covered on SQLite and PostgreSQL.
+- Callback validation rejects malformed ports, ambiguous whitespace/backslashes,
+  credentials, queries/fragments and path parameters. HTTP is limited to loopback;
+  separate tester computers need an explicitly configured nonproduction HTTPS
+  callback. No such host was provisioned and no deployed configuration changed.
+- Added a non-deploying GitHub Actions workflow for this feature branch and
+  relevant pull requests: focused SQLite regressions, PostgreSQL acceptance,
+  frontend offline checks and TypeScript. It uses no Stripe/provider secrets and
+  does not invoke either existing release/deployment workflow.
+
+### Local verification
+
+- Focused backend: **135 passed, 4 PostgreSQL-only skips**.
+- Disposable PostgreSQL acceptance: **83 passed**. Verified zero remaining QA
+  schemas and stopped/removed `ziwei-qa-postgres-20261029` afterward.
+- Full backend with provider keys cleared, sockets blocked, and SQLite JSONB
+  adapter: **411 passed, 6 inherited failures, 4 skips**.
+- Independently extracted unchanged baseline `6c909b2` into `/tmp` and ran the
+  two affected modules with the same offline harness: **22 passed, the same six
+  failures**. Three seeded-content/count assertions are stale (including 9
+  learning paths versus expected 7); three profile fixtures omit the existing
+  required device identity. No related application behavior regressed, and these
+  unrelated baseline tests were left unchanged.
+- Frontend offline billing checks and TypeScript: **passed**.
+- Production frontend build with billing disabled: **passed**, with the existing
+  nonfatal dynamic Google-font lookup warning. Nothing was deployed.
+- Local Chromium browser regressions: **passed**, including mocked cancellation,
+  reload/same-key resume, server confirmation over cancel flags, stale-response
+  rejection, newer-draft preservation, retry and credit refresh. All external
+  requests were intercepted or blocked; none of these cases is a hosted Stripe
+  cancellation or provider redelivery test.
+
+Genuine Alipay success below remains the real-provider acceptance evidence.
+Automated hosted Chromium, card/WeChat, hosted cancel/resume, genuine duplicate
+redelivery and delayed provider success remain unverified. The implementation's
+corresponding return/event behavior is covered locally; these limitations do not
+justify further payments or security configuration changes without authorization.
+Production release and reconciliation of subscription versus credit-pack product
+intent remain separate decisions. Generation still holds database locks through
+model execution, as documented in the original transaction review.
+
 ## Genuine Alipay sandbox payment and webhook — 2026-10-29
 
 With explicit user approval, downloaded official Stripe CLI v1.55.3 Linux x86_64

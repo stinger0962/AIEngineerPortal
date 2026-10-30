@@ -208,3 +208,27 @@ def test_failed_reading_allows_same_key_retry(qa, oracle_calls, monkeypatch, suf
         assert '"done"' in retried.text and '"error"' not in retried.text
     assert remaining(qa) == 0
     assert len(oracle_calls) == 1
+
+
+@pytest.mark.parametrize('base', ['http://127.0.0.1:3100', 'http://[::1]:3100', 'https://qa.example.test'])
+def test_success_and_cancel_use_explicit_test_environment(qa, checkout_calls, base):
+    qa.settings.stripe_test_base_url = base
+    response = checkout(qa)
+    assert response.status_code == 200
+    oid = str(response.json()['order_id'])
+    assert checkout_calls[0]['success_url'] == base + '/ziwei?paid=1&order_id=' + oid
+    assert checkout_calls[0]['cancel_url'] == base + '/ziwei?canceled=1&order_id=' + oid
+    assert remaining(qa) == 0
+
+
+@pytest.mark.parametrize('base', [
+    'http://qa.example.test', 'https://qa.example.test:bad', 'https://qa.example.test:65536',
+    'https://qa.example.test:0', 'https://qa.example.test/path;params',
+    'https://qa.example.test/?next=other', 'https://qa.example.test/#fragment',
+    'https://user:pass@qa.example.test', 'https://qa.example.test\\evil',
+    'https://qa.example.test/\n',
+])
+def test_invalid_callback_fails_before_provider_call(qa, checkout_calls, base):
+    qa.settings.stripe_test_base_url = base
+    assert checkout(qa).status_code == 503
+    assert checkout_calls == []

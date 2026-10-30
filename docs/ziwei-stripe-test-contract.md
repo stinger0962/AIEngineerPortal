@@ -71,3 +71,20 @@ new credentials were introduced.
 Checkout uses inline Stripe `price_data` and `product_data` from server-side packs;
 pre-created Stripe Product/Price IDs are not required. No other Stripe integration
 was inspected or modified.
+
+## Return and asynchronous-event follow-up — 2026-10-29
+
+Use an explicit HTTPS nonproduction test base URL when testers run in a separate
+browser/computer. HTTP is accepted only for loopback development (localhost,
+127.0.0.1, or ::1); these callbacks are reachable only from the machine running
+the UI. Invalid ports, whitespace/backslashes, URL credentials, query strings,
+fragments, and path parameters fail configuration before contacting Stripe.
+No public callback host or deployment is provisioned by this feature branch.
+
+Cancel navigation retains the same-pack Checkout retry key; it never cancels the
+provider order or grants credits. Server-confirmed paid/failed states clear only
+the matching order's key. A paid server result overrides stale cancel flags.
+Failure webhooks validate amount, currency, mode and ownership metadata before
+changing state. An unpaid completion grants nothing; later paid success grants
+once, including after a failure delivered earlier. Late failure cannot downgrade
+a paid order. These orderings are tested with locally signed fixtures.

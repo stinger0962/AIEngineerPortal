@@ -1,6 +1,7 @@
 """Explicitly opt-in Stripe TEST checkout and atomic fulfillment."""
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
+from ipaddress import ip_address
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -19,14 +20,22 @@ def _canonical_hostname(hostname: str | None) -> str:
 def is_configured() -> bool:
     s = get_settings()
     try:
+        if any(c.isspace() or c == "\\" for c in s.stripe_test_base_url):
+            return False
         base = urlparse(s.stripe_test_base_url)
+        port = base.port  # Reject malformed/out-of-range ports before contacting Stripe.
         host = _canonical_hostname(base.hostname)
         production_host = _canonical_hostname(urlparse(s.public_base_url).hostname)
     except (ValueError, UnicodeError):
         return False
+    try:
+        loopback = host == "localhost" or ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost"
     return bool(s.stripe_test_enabled and s.stripe_secret_key.startswith("sk_test_")
-                and host and base.scheme in ("http", "https")
-                and not base.username and not base.password and not base.query and not base.fragment
+                and host and (base.scheme == "https" or (base.scheme == "http" and loopback))
+                and port != 0
+                and not base.username and not base.password and not base.query and not base.fragment and not base.params
                 and host != production_host
                 and not host.endswith("leipan.cc"))
 
@@ -103,18 +112,22 @@ def process_event(db: Session, event) -> str:
     if not order:
         # Delivery can precede saving the Checkout response; ask Stripe to retry.
         return "order_not_found"
-    if etype == "checkout.session.async_payment_failed":
-        db.execute(update(PaymentOrder).where(PaymentOrder.id == order.id, PaymentOrder.status == "pending")
-                   .values(status="failed"))
-        db.commit()
-        return "failed"
-    if obj.get("payment_status") != "paid":
-        return "not_paid_yet"
+    # Failure events must identify the same purchase just as success events do.
     if (obj.get("amount_total") != order.amount_cents or obj.get("currency") != order.currency
             or obj.get("mode") != "payment"
             or (obj.get("metadata") or {}).get("order_id") != str(order.id)
             or (obj.get("metadata") or {}).get("account_id") != str(order.account_id)):
         return "payment_mismatch"
+    if etype == "checkout.session.async_payment_failed":
+        changed = db.execute(update(PaymentOrder).where(PaymentOrder.id == order.id, PaymentOrder.status == "pending")
+                             .values(status="failed")).rowcount
+        db.commit()
+        if changed:
+            return "failed"
+        db.refresh(order)  # Another delivery may have paid it after our SELECT.
+        return "already_paid" if order.status == "paid" else "already_failed"
+    if obj.get("payment_status") != "paid":
+        return "not_paid_yet"
     changed = db.execute(update(PaymentOrder).where(PaymentOrder.id == order.id, PaymentOrder.status != "paid")
                          .values(status="paid")).rowcount
     if not changed:

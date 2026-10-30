@@ -19,6 +19,7 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
   const [busy, setBusy] = useState(false);
   const buying = useRef(false);
   const mounted = useRef(false);
+  const returnVersion = useRef(0);
   const refresh = useCallback(async () => {
     try {
       const value = await adapter.balance();
@@ -29,9 +30,9 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
   useEffect(() => {
     mounted.current = true;
     const restore = () => {
+      ++returnVersion.current;
       const returned = paymentReturn(window.location.search);
       setPayment(returned);
-      if (returned?.status === "cancelled" && returned.orderId) adapter.resetCheckout?.(returned.orderId);
       void refresh();
     };
     restore();
@@ -40,18 +41,27 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
   }, [search, adapter, refresh]);
   useEffect(() => { void refresh(); }, [refresh, refreshKey]);
 
-  const checkPayment = useCallback(async (orderId: string) => {
+  const checkPayment = useCallback(async (orderId: string, preserveCancellation = false) => {
+    const version = returnVersion.current;
     try {
       const status = await adapter.status(orderId);
-      if (!mounted.current) return;
-      setPayment({ status, orderId });
+      if (!mounted.current || version !== returnVersion.current) return;
+      setPayment({ status: status === "pending" && preserveCancellation ? "cancelled" : status, orderId });
       setError(null);
       if (status === "paid" || status === "failed") adapter.resetCheckout?.(orderId);
       if (status === "paid") await refresh();
     } catch {
-      if (mounted.current) setError("付款状态暂无法确认；请稍后刷新，勿重复付款。");
+      if (mounted.current && version === returnVersion.current) setError("付款状态暂无法确认；请稍后刷新，勿重复付款。");
     }
   }, [adapter, refresh]);
+
+  useEffect(() => {
+    if (payment?.status === "cancelled" && payment.orderId) {
+      // Returning from Checkout does not cancel the provider session. Keep its
+      // retry key so another click resumes it, and let server truth win if paid.
+      void checkPayment(payment.orderId, true);
+    }
+  }, [payment?.status, payment?.orderId, checkPayment]);
 
   useEffect(() => {
     if (payment?.status !== "pending" || !payment.orderId) return;
@@ -85,7 +95,7 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
       {payment && <p role="status">{statusText[payment.status]}</p>}
       {payment?.status === "pending" && !payment.orderId && <p>缺少订单标识，无法确认付款。请保留测试收据。</p>}
       {error && <p role="alert" className="text-rose-700">{error}</p>}
-      <button type="button" className="underline" onClick={() => { void refresh(); if (payment?.orderId) void checkPayment(payment.orderId); }}>刷新余额与付款状态</button>
+      <button type="button" className="underline" onClick={() => { void refresh(); if (payment?.orderId) void checkPayment(payment.orderId, payment.status === "cancelled"); }}>刷新余额与付款状态</button>
       {!canPurchase(balance) && <p>测试支付尚未开放，购买已停用。</p>}
       <div className="flex flex-wrap gap-2">
         {balance?.packs.map((pack) => (

@@ -8,15 +8,18 @@ if (!['localhost','127.0.0.1'].includes(new URL(base).hostname)) throw Error('Lo
  const browser=await chromium.launch({executablePath:process.env.QA_CHROMIUM || '/usr/bin/chromium',headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
  const context=await browser.newContext({reducedMotion:'reduce',viewport:{width:1440,height:1100}});
  const requests=[], errors=[];
- let balance=1, status='pending', oracle='busy', release;
+ let balance=1, status='pending', oracle='busy', release, releaseOldStatus;
  await context.addInitScript(()=>localStorage.setItem('ziwei-audio-hint','1'));
  await context.route('**/*',async route=>{
   const req=route.request(), url=new URL(req.url());
+  if(url.hostname==='checkout.stripe.com')return route.fulfill({contentType:'text/html',body:`<a href="${base}/ziwei?canceled=1&order_id=123">Mock cancel</a><a href="${base}/ziwei?paid=1&order_id=123">Mock success</a>`});
   if(url.origin!==new URL(base).origin)return route.abort();
   if(!url.pathname.startsWith('/api/v1/'))return route.continue();
   requests.push({path:url.pathname,headers:req.headers(),body:req.postDataJSON()});
   const json=(data,code=200)=>route.fulfill({status:code,contentType:'application/json',body:JSON.stringify(data)});
   if(url.pathname.endsWith('/billing/balance'))return json({balance,paid_enabled:true,require_credits:true,mode:'test',currency:'cny',packs:[{key:'p10',label:'QA 10',credits:10,amount_cents:990}]});
+  if(url.pathname.endsWith('/billing/checkout'))return json({url:'https://checkout.stripe.com/c/pay/cs_test_browser_fixture',order_id:123,mode:'test'});
+  if(url.pathname.endsWith('/billing/orders/777')){await new Promise(r=>releaseOldStatus=r);return json({order_id:777,status:'pending',mode:'test'});}
   if(url.pathname.includes('/billing/orders/'))return json({order_id:123,status,mode:'test'});
   if(url.pathname.endsWith('/oracle/stream')){
    if(oracle==='hold')await new Promise(r=>release=r);
@@ -33,7 +36,19 @@ if (!['localhost','127.0.0.1'].includes(new URL(base).hostname)) throw Error('Lo
   await page.goto(base+'/ziwei');
   const panel=page.getByRole('region',{name:'紫微测试点数'});
   await panel.getByText('可用点数：1',{exact:true}).waitFor();
-  await page.evaluate(()=>history.pushState({},'','/ziwei?paid=1&order_id=123'));
+  await panel.getByRole('button',{name:/测试购买/}).click();
+  await page.getByRole('link',{name:'Mock cancel'}).click();
+  await panel.getByText(/已返回并取消/).waitFor();
+  await panel.getByText('可用点数：1',{exact:true}).waitFor();
+  const firstCheckout=requests.filter(r=>r.path.endsWith('/billing/checkout')).at(-1);
+  await page.reload();await panel.getByText(/已返回并取消/).waitFor();
+  await panel.getByRole('button',{name:/测试购买/}).click();
+  await page.getByRole('link',{name:'Mock success'}).waitFor();
+  const resumedCheckout=requests.filter(r=>r.path.endsWith('/billing/checkout')).at(-1);
+  assert.equal(resumedCheckout.headers['idempotency-key'],firstCheckout.headers['idempotency-key']);
+  assert.deepEqual(resumedCheckout.body,firstCheckout.body);
+  await page.getByRole('link',{name:'Mock success'}).click();
+  console.log('PASS browser: mocked cancellation/reload resumes same checkout key without credit');
   await panel.getByText(/测试付款待确认/).waitFor();
   assert.equal(await panel.getByRole('button',{name:/测试购买/}).isDisabled(),true);
   status='paid';balance=11;
@@ -86,5 +101,19 @@ if (!['localhost','127.0.0.1'].includes(new URL(base).hostname)) throw Error('Lo
   assert.equal(await page.getByRole('button',{name:'问',exact:true}).isDisabled(),true);
   assert.deepEqual(errors,[]);
   console.log('PASS browser: successful explicit retry clears unchanged recovered A and persisted draft');
+  // A stale cancel URL must not override a payment the server has confirmed.
+  status='paid';balance=10;
+  await page.evaluate(()=>history.pushState({},'','/ziwei?canceled=1&order_id=123'));
+  await panel.getByText(/测试付款已确认/).waitFor();
+  await panel.getByText('可用点数：10',{exact:true}).waitFor();
+  console.log('PASS browser: server-paid status wins over canceled return flag');
+  await page.evaluate(()=>history.pushState({},'','/ziwei?paid=1&order_id=777'));
+  for(let i=0;!releaseOldStatus && i<100;i++)await new Promise(r=>setTimeout(r,20));
+  assert.ok(releaseOldStatus);
+  await page.evaluate(()=>history.pushState({},'','/ziwei?paid=1&order_id=123'));
+  await panel.getByText(/测试付款已确认/).waitFor();
+  releaseOldStatus();await page.waitForTimeout(100);
+  assert.match(await panel.innerText(),/测试付款已确认/);
+  console.log('PASS browser: delayed previous-order response cannot overwrite current return');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

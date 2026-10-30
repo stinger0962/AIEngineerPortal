@@ -1,0 +1,71 @@
+name: Ziwei test-mode checks
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/ziwei-test.yml'
+  push:
+    branches: [integration/ziwei-stripe-test]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: ziwei_qa
+          POSTGRES_DB: ziwei_qa
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U ziwei_qa -d ziwei_qa"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: 'sqlite://'
+      STRIPE_TEST_ENABLED: 'false'
+      STRIPE_SECRET_KEY: ''
+      STRIPE_WEBHOOK_SECRET: ''
+      ANTHROPIC_API_KEY: ''
+      OPENAI_API_KEY: ''
+      MINIMAX_API_KEY: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      - name: SQLite payment and reading regressions
+        run: >-
+          python -m pytest backend/tests/acceptance backend/tests/test_billing_stripe.py
+          backend/tests/test_credits.py backend/tests/test_ziwei_oracle_routes.py
+          backend/tests/test_ziwei_stream.py backend/tests/test_qian_routes.py -q --tb=short
+      - name: PostgreSQL acceptance and concurrency
+        env:
+          ZIWEI_QA_POSTGRES_URL: postgresql+psycopg://ziwei_qa@127.0.0.1:55432/ziwei_qa
+        run: python -m pytest backend/tests/acceptance -q --tb=short
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: node scripts/ziwei-billing-test.cjs
+      - run: npx tsc --noEmit

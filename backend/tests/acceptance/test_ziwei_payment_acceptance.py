@@ -147,3 +147,82 @@ def test_overlapping_webhook_order_reads_credit_once(qa, monkeypatch):
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(worker, range(2)))
     assert balance(qa) == 10
+
+
+def test_delayed_async_success_waits_for_paid_and_grants_once(qa):
+    oid = pending(qa)
+    unpaid = event(qa, payment_status='unpaid')
+    assert deliver(qa, unpaid).json()['status'] == 'not_paid_yet'
+    assert balance(qa) == 0
+    with qa.sessions() as db:
+        assert db.get(PaymentOrder, oid).status == 'pending'
+    success = event(qa)
+    success.update(id='evt_delayed_success', type='checkout.session.async_payment_succeeded')
+    assert deliver(qa, success).json()['status'] == 'credited'
+    assert deliver(qa, success).json()['status'] == 'already_paid'
+    assert deliver(qa, unpaid).json()['status'] == 'not_paid_yet'
+    assert balance(qa) == 10
+    with qa.sessions() as db:
+        assert db.get(PaymentOrder, oid).status == 'paid'
+        assert len(db.scalars(select(CreditLedger).where(CreditLedger.order_id == oid)).all()) == 1
+
+
+@pytest.mark.parametrize('failure_first', [False, True])
+def test_out_of_order_failure_and_paid_success_converge_to_one_grant(qa, failure_first):
+    oid = pending(qa)
+    failed = event(qa, payment_status='unpaid')
+    failed.update(id='evt_failure', type='checkout.session.async_payment_failed')
+    success = event(qa)
+    success.update(id='evt_success', type='checkout.session.async_payment_succeeded')
+    if failure_first:
+        assert deliver(qa, failed).json()['status'] == 'failed'
+        assert deliver(qa, failed).json()['status'] == 'already_failed'
+        assert balance(qa) == 0
+    assert deliver(qa, success).json()['status'] == 'credited'
+    assert deliver(qa, failed).json()['status'] == 'already_paid'
+    assert deliver(qa, success).json()['status'] == 'already_paid'
+    assert balance(qa) == 10
+    with qa.sessions() as db:
+        assert db.get(PaymentOrder, oid).status == 'paid'
+        assert len(db.scalars(select(CreditLedger).where(CreditLedger.order_id == oid)).all()) == 1
+
+
+@pytest.mark.parametrize('changes', [
+    {'amount_total': 1}, {'currency': 'usd'}, {'mode': 'subscription'},
+    {'metadata': {}}, {'metadata': {'order_id': '999', 'account_id': '999'}},
+])
+def test_failure_metadata_mismatch_cannot_change_order_state(qa, changes):
+    oid = pending(qa)
+    failed = event(qa, **changes)
+    failed['type'] = 'checkout.session.async_payment_failed'
+    assert deliver(qa, failed).json()['status'] == 'payment_mismatch'
+    with qa.sessions() as db:
+        assert db.get(PaymentOrder, oid).status == 'pending'
+    assert balance(qa) == 0
+
+
+def test_other_session_success_never_fulfills_known_order(qa):
+    oid = pending(qa)
+    response = deliver(qa, event(qa, id='cs_test_other_session'))
+    assert response.status_code == 503
+    with qa.sessions() as db:
+        assert db.get(PaymentOrder, oid).status == 'pending'
+    assert balance(qa) == 0
+
+
+def test_overlapping_failure_and_success_leave_paid_with_one_grant(qa):
+    oid = pending(qa)
+    failed = event(qa, payment_status='unpaid')
+    failed['type'] = 'checkout.session.async_payment_failed'
+    success = event(qa)
+    success['type'] = 'checkout.session.async_payment_succeeded'
+    start = Barrier(2)
+    def worker(payload):
+        start.wait(timeout=5)
+        return deliver(qa, payload).status_code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert list(pool.map(worker, [failed, success])) == [200, 200]
+    with qa.sessions() as db:
+        assert db.get(PaymentOrder, oid).status == 'paid'
+        assert len(db.scalars(select(CreditLedger).where(CreditLedger.order_id == oid)).all()) == 1
+    assert balance(qa) == 10
