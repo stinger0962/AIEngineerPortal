@@ -8,7 +8,7 @@ if (!['localhost','127.0.0.1'].includes(new URL(base).hostname)) throw Error('Lo
  const browser=await chromium.launch({executablePath:process.env.QA_CHROMIUM || '/usr/bin/chromium',headless:true,args:['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
  const context=await browser.newContext({reducedMotion:'reduce',viewport:{width:1440,height:1100}});
  const requests=[], errors=[];
- let balance=1, status='pending', oracle='busy', release, releaseOldStatus;
+ let balance=1, status='pending', oracle='busy', release, releaseOldStatus, checkoutError;
  await context.addInitScript(()=>localStorage.setItem('ziwei-audio-hint','1'));
  await context.route('**/*',async route=>{
   const req=route.request(), url=new URL(req.url());
@@ -18,6 +18,7 @@ if (!['localhost','127.0.0.1'].includes(new URL(base).hostname)) throw Error('Lo
   requests.push({path:url.pathname,headers:req.headers(),body:req.postDataJSON()});
   const json=(data,code=200)=>route.fulfill({status:code,contentType:'application/json',body:JSON.stringify(data)});
   if(url.pathname.endsWith('/billing/balance'))return json({balance,paid_enabled:true,require_credits:true,mode:'test',currency:'cny',packs:[{key:'p10',label:'QA 10',credits:10,amount_cents:990}]});
+  if(url.pathname.endsWith('/billing/checkout')&&checkoutError)return json({detail:{mode:'test',order_id:123,status:checkoutError,code:checkoutError==='pending'?'checkout_reconciliation_required':`checkout_${checkoutError}`}},409);
   if(url.pathname.endsWith('/billing/checkout'))return json({url:'https://checkout.stripe.com/c/pay/cs_test_browser_fixture',order_id:123,mode:'test'});
   if(url.pathname.endsWith('/billing/orders/777')){await new Promise(r=>releaseOldStatus=r);return json({order_id:777,status:'pending',mode:'test'});}
   if(url.pathname.includes('/billing/orders/'))return json({order_id:123,status,mode:'test'});
@@ -115,5 +116,18 @@ if (!['localhost','127.0.0.1'].includes(new URL(base).hostname)) throw Error('Lo
   releaseOldStatus();await page.waitForTimeout(100);
   assert.match(await panel.innerText(),/测试付款已确认/);
   console.log('PASS browser: delayed previous-order response cannot overwrite current return');
+  for(const state of ['paid','failed','pending']){
+    checkoutError=state;status=state;
+    await page.evaluate(()=>history.pushState({},'','/ziwei'));
+    await panel.getByRole('button',{name:/测试购买/}).click();
+    if(state==='paid')await panel.getByText(/测试付款已确认/).waitFor();
+    if(state==='failed')await panel.getByText(/测试付款失败/).waitFor();
+    if(state==='pending'){
+      await panel.getByRole('alert').filter({hasText:'结账已超过安全重试时限'}).waitFor();
+      assert.equal(await panel.getByRole('button',{name:/测试购买/}).isDisabled(),true);
+    }
+    assert.equal(new URL(page.url()).origin,new URL(base).origin);
+  }
+  console.log('PASS browser: terminal/stale checkout recovery stays local and never redirects to dead session');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

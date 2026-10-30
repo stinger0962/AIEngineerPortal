@@ -64,6 +64,16 @@ function load(file) {
   await assert.rejects(api.status('../other'));
   await assert.rejects(b.createBillingAdapter('/mock', () => '', transport).balance());
   await assert.rejects(b.createBillingAdapter('/mock', () => 'mock', async () => ({ ok: false, status: 503 })).balance());
+  for (const state of ['paid','failed','pending']) {
+    const keys=[];
+    const recovering=b.createBillingAdapter('/mock',()=>`recovery-${state}`,async(url,init)=>{
+      if(url.endsWith('/balance'))return {ok:true,json:async()=>({...balance,mode:'test'})};
+      keys.push(init.headers['Idempotency-Key']);
+      return {ok:false,status:409,json:async()=>({detail:{mode:'test',order_id:456,status:state,code:state==='pending'?'checkout_reconciliation_required':`checkout_${state}`}})};
+    });
+    for(let i=0;i<2;i++)await assert.rejects(recovering.checkout('server-pack'),e=>e instanceof b.CheckoutStateError&&e.orderId==='456'&&e.status===state);
+    if(state==='pending')assert.equal(keys[0],keys[1]);else assert.notEqual(keys[0],keys[1]);
+  }
   const { createRetryKeys } = load(path.join(root, 'lib/ziwei/retry-keys.ts'));
   const store = new Map();
   const storage = { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) };

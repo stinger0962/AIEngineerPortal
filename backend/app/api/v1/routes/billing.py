@@ -66,6 +66,9 @@ def checkout(payload: CheckoutRequest, db: Session = Depends(get_db), device: st
     acct = credits_svc.resolve_account(db, device)
     try:
         result = stripe_billing.create_checkout_session(db, acct.id, payload.pack, idempotency_key)
+    except stripe_billing.CheckoutStateError as exc:
+        raise HTTPException(409, {"code": str(exc), "order_id": exc.order_id,
+                                  "status": exc.status, "mode": "test"})
     except ValueError as exc:
         raise HTTPException(409 if str(exc) in ("idempotency_conflict", "checkout_reconciliation_required") else 400, {"code": str(exc)})
     except DBAPIError:

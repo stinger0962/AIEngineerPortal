@@ -35,7 +35,7 @@ Webhook processing checks signature on the raw payload, event/object `livemode=f
 
 ## Isolated test setup and migration
 
-No credentials, database migration, deployment, or Stripe configuration were performed. No live payment or paid AI call was made. Existing deployment credentials are untouched.
+The original implementation performed no credential setup, external migration, or deployment. A later explicitly approved temporary CLI test listener and Alipay sandbox payment were completed and cleaned up; see the QA report. No live payment or paid AI call was made. Existing deployment credentials are untouched.
 
 1. Provision an empty, disposable test database. Set `DATABASE_URL` explicitly for every test server/command; never point at production or restore production personal data. Startup runs existing schema/bootstrap/seed logic, so verify the target **before** starting the app.
 2. New table: `billing_requests` only. Fresh DBs use existing `Base.metadata.create_all`. For an existing PostgreSQL test DB, review `backend/scripts/migrations/20261021_billing_requests.sql`. Existing accounts, ledger, orders, prices, and currency need no data rewrite. Migration has not been run on any external DB.
@@ -48,7 +48,7 @@ No credentials, database migration, deployment, or Stripe configuration were per
 DATABASE_URL=sqlite:////tmp/ziwei-import-only.db ANTHROPIC_API_KEY='' OPENAI_API_KEY='' MINIMAX_API_KEY='' STRIPE_SECRET_KEY='' python -m pytest backend/tests/test_credits.py backend/tests/test_billing_stripe.py backend/tests/test_ziwei_oracle_routes.py backend/tests/test_ziwei_stream.py backend/tests/test_qian_routes.py -q
 ```
 
-Real Stripe sandbox end-to-end validation remains pending. Local isolated PostgreSQL 16.15 acceptance, concurrency, rollback and migration checks pass; see [integration QA report](integration/ziwei-stripe-qa-report.md). No main merge, deployment, or release is included.
+A genuine Alipay sandbox payment and signed webhook have now been verified (2026-10-29); other hosted payment paths remain unverified. Local isolated PostgreSQL 16.15 acceptance, concurrency, rollback and migration checks pass; see [integration QA report](integration/ziwei-stripe-qa-report.md). No main merge, deployment, or release is included.
 
 
 ## Approved security corrections — 2026-10-22
@@ -88,3 +88,5 @@ Failure webhooks validate amount, currency, mode and ownership metadata before
 changing state. An unpaid completion grants nothing; later paid success grants
 once, including after a failure delivered earlier. Late failure cannot downgrade
 a paid order. These orderings are tested with locally signed fixtures.
+
+Deployment boundaries and concrete next steps: [deployment readiness](integration/ziwei-deployment-readiness.md). Cached paid/failed checkouts return structured state for client recovery; unresolved intents older than 23 hours require reconciliation rather than another redirect or automatic purchase. Early provider-side expiry is not detected without provider reconciliation.

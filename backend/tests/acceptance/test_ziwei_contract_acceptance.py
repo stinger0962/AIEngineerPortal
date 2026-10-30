@@ -232,3 +232,24 @@ def test_invalid_callback_fails_before_provider_call(qa, checkout_calls, base):
     qa.settings.stripe_test_base_url = base
     assert checkout(qa).status_code == 503
     assert checkout_calls == []
+
+
+@pytest.mark.parametrize('status', ['paid', 'failed', 'pending'])
+def test_cached_checkout_reconciles_terminal_or_stale_intent(qa, checkout_calls, status):
+    from datetime import datetime, timedelta
+    from app.models.entities import PaymentOrder
+    first = checkout(qa).json()
+    with qa.sessions() as db:
+        order = db.get(PaymentOrder, first['order_id'])
+        order.status = status
+        # A terminal order should report its known state even if old.
+        order.created_at = datetime.utcnow() - timedelta(days=2)
+        db.commit()
+    resumed = checkout(qa)
+    assert resumed.status_code == 409
+    code = 'checkout_reconciliation_required' if status == 'pending' else 'checkout_' + status
+    assert resumed.json()['detail'] == {'code': code, 'order_id': first['order_id'],
+                                       'status': status, 'mode': 'test'}
+    assert 'url' not in resumed.json()
+    assert len(checkout_calls) == 1
+    assert remaining(qa) == 0, 'Reconciliation response is not a credit grant'

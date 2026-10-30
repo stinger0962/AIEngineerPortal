@@ -40,6 +40,14 @@ def is_configured() -> bool:
                 and not host.endswith("leipan.cc"))
 
 
+class CheckoutStateError(ValueError):
+    """A stored checkout must be reconciled instead of redirecting to its old URL."""
+    def __init__(self, code: str, order: PaymentOrder):
+        super().__init__(code)
+        self.order_id = order.id
+        self.status = order.status
+
+
 def create_checkout_session(db: Session, account_id: int, pack_key: str, idempotency_key: str) -> dict:
     import stripe
     if not is_configured():
@@ -55,10 +63,6 @@ def create_checkout_session(db: Session, account_id: int, pack_key: str, idempot
             db.rollback()
             raise ValueError("idempotency_conflict")
         order = db.get(PaymentOrder, req.response_json["order_id"])
-        if req.response_json.get("url"):
-            result = dict(req.response_json)
-            db.rollback()
-            return result
     else:
         order = PaymentOrder(account_id=account_id, pack=pack_key, credits=pack["credits"],
                              amount_cents=pack["amount_cents"], currency="cny",
@@ -68,9 +72,18 @@ def create_checkout_session(db: Session, account_id: int, pack_key: str, idempot
         req = BillingRequest(key=key, account_id=account_id, fingerprint=fingerprint,
                              response_json={"order_id": order.id})
         db.add(req)
-    if datetime.utcnow() - order.created_at >= timedelta(hours=23):
+    if order.status in ("paid", "failed"):
+        error = CheckoutStateError("checkout_" + order.status, order)
         db.rollback()
-        raise ValueError("checkout_reconciliation_required")
+        raise error
+    if datetime.utcnow() - order.created_at >= timedelta(hours=23):
+        error = CheckoutStateError("checkout_reconciliation_required", order)
+        db.rollback()
+        raise error
+    if req.response_json.get("url"):
+        result = dict(req.response_json)
+        db.rollback()
+        return result
     # Persist intent before Stripe. Retrying a timeout uses the same Stripe key.
     db.commit()
     s = get_settings()

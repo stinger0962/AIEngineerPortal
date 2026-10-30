@@ -7,6 +7,11 @@ export const testBillingEnabled = process.env.NEXT_PUBLIC_ZIWEI_TEST_BILLING ===
 export type CreditPack = { key: string; label: string; credits: number; amount_cents: number; currency?: string };
 export type Balance = { balance: number; paid_enabled: boolean; require_credits: boolean; mode?: string; currency?: string; packs: CreditPack[] };
 export type PaymentStatus = "pending" | "paid" | "cancelled" | "failed";
+export class CheckoutStateError extends Error {
+  constructor(public code: string, public orderId: string, public status: PaymentStatus) {
+    super(code);
+  }
+}
 export interface BillingAdapter {
   balance(): Promise<Balance>;
   checkout(pack: string): Promise<string>;
@@ -42,7 +47,18 @@ export function createBillingAdapter(base: string, deviceId: () => string, trans
       ...init, cache: "no-store",
       headers: { "Content-Type": "application/json", "X-Device-Id": device, ...init?.headers },
     });
-    if (!response.ok) throw new Error(`Billing unavailable (${response.status})`);
+    if (!response.ok) {
+      if (response.status === 409) {
+        const detail = (await response.json()).detail;
+        if (detail?.mode === "test" && /^[0-9]+$/.test(String(detail.order_id)) &&
+            ((detail.code === "checkout_paid" && detail.status === "paid") ||
+             (detail.code === "checkout_failed" && detail.status === "failed") ||
+             (detail.code === "checkout_reconciliation_required" && detail.status === "pending"))) {
+          throw new CheckoutStateError(detail.code, String(detail.order_id), detail.status);
+        }
+      }
+      throw new Error(`Billing unavailable (${response.status})`);
+    }
     return response.json() as Promise<T>;
   }
   return {
@@ -53,7 +69,15 @@ export function createBillingAdapter(base: string, deviceId: () => string, trans
       if (!canPurchase(await request<Balance>("/balance"))) throw new Error("Test payments unavailable");
       const scope = `checkout:${deviceId()}`;
       const key = retryKeys.get(scope, { pack });
-      const result = await request<{ url: string; order_id: number | string; mode?: string }>("/checkout", { method: "POST", body: JSON.stringify({ pack }), headers: { "Idempotency-Key": key } });
+      let result: { url: string; order_id: number | string; mode?: string };
+      try { result = await request<{ url: string; order_id: number | string; mode?: string }>("/checkout", { method: "POST", body: JSON.stringify({ pack }), headers: { "Idempotency-Key": key } }); }
+      catch (error) {
+        if (error instanceof CheckoutStateError) {
+          retryKeys.bindOrder(scope, key, error.orderId);
+          if (error.status !== "pending") retryKeys.complete(scope, error.orderId);
+        }
+        throw error;
+      }
       if (result.mode !== "test") throw new Error("Test payment confirmation missing");
       const url = testCheckoutUrl(result.url);
       retryKeys.bindOrder(scope, key, String(result.order_id));

@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { billingApi, canPurchase, paymentReturn, type Balance, type BillingAdapter, type PaymentStatus } from "@/lib/ziwei/billing";
+import { CheckoutStateError, billingApi, canPurchase, paymentReturn, type Balance, type BillingAdapter, type PaymentStatus } from "@/lib/ziwei/billing";
 
 const statusText: Record<PaymentStatus, string> = {
   pending: "测试付款待确认：正在等待服务器入账，请勿重复购买。",
@@ -17,6 +17,7 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
   const [payment, setPayment] = useState<ReturnType<typeof paymentReturn>>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reconciliationOrder, setReconciliationOrder] = useState<string | null>(null);
   const buying = useRef(false);
   const mounted = useRef(false);
   const returnVersion = useRef(0);
@@ -83,7 +84,13 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
     setBusy(true);
     setError(null);
     try { window.location.assign(await adapter.checkout(pack)); }
-    catch { setError("无法开启测试收银台。请稍后重试。问题已保留。"); }
+    catch (error) {
+      if (error instanceof CheckoutStateError) {
+        setPayment({ status: error.status, orderId: error.orderId });
+        if (error.status === "pending") setReconciliationOrder(error.orderId);
+        if (error.status !== "pending") void refresh();
+      } else setError("无法开启测试收银台。请稍后重试。问题已保留。");
+    }
     finally { buying.current = false; setBusy(false); }
   }
 
@@ -94,6 +101,7 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
       <p aria-live="polite">{balance ? `可用点数：${balance.balance}` : "正在读取余额…"}</p>
       {payment && <p role="status">{statusText[payment.status]}</p>}
       {payment?.status === "pending" && !payment.orderId && <p>缺少订单标识，无法确认付款。请保留测试收据。</p>}
+      {payment?.status === "pending" && payment.orderId === reconciliationOrder && <p role="alert">结账已超过安全重试时限，请核对付款状态；不要重复购买。</p>}
       {error && <p role="alert" className="text-rose-700">{error}</p>}
       <button type="button" className="underline" onClick={() => { void refresh(); if (payment?.orderId) void checkPayment(payment.orderId, payment.status === "cancelled"); }}>刷新余额与付款状态</button>
       {!canPurchase(balance) && <p>测试支付尚未开放，购买已停用。</p>}

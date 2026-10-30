@@ -1,5 +1,35 @@
 # Ziwei Stripe TEST integration acceptance — 2026-10-22
 
+## Independent review and readiness — 2026-10-30
+
+A fresh read-only reviewer inspected the cumulative diff and reproduced one
+substantive issue: cached Checkout URLs bypassed terminal-order and age checks.
+The correction reports paid/failed state for client recovery before returning a
+URL; unresolved intents older than 23 hours return explicit reconciliation state.
+The adapter clears only confirmed terminal keys; pending reconciliation retains
+the key and blocks automatic repurchase. The reviewer rechecked the correction
+and found no additional substantive issue in the reviewed scope.
+
+This is safe refusal and terminal recovery, not automatic provider expiry
+reconciliation. Sessions expired externally within 23 hours are not detected
+without provider retrieval; unresolved old pending orders require manual
+reconciliation. No new provider call, payment, key or listener was used here.
+
+Final local focused suite: **138 passed, 4 PostgreSQL-only skips**. Full offline
+backend: **414 passed, the same 6 inherited failures, 4 skips**. Frontend offline,
+TypeScript and mocked browser checks passed, including paid/failed/stale Checkout
+recovery without redirecting to a dead URL. The billing-disabled frontend build
+also passed, retaining the nonfatal dynamic-font lookup warning. CI now covers deployment runtime
+versions Python 3.11 / Node 20 as well as Python 3.12 / Node 22. Exact remote run
+results are linked in PR #2 rather than inferred from local success.
+
+[Deployment readiness](ziwei-deployment-readiness.md) records actual callback and
+build-variable sources, staging prerequisites, additive migration, stable webhook
+requirements, bearer-device ownership, rollback/drain constraints and production
+blockers. Existing deployment docs were corrected to describe builds in Actions
+and image pulls on the VPS, not manual VPS builds. No deployment configuration,
+main branch, release tag, credential or access setting was changed.
+
 ## Implementation completion checks — 2026-10-29
 
 Follow-up development remains on `integration/ziwei-stripe-test`; PR #2 is open
