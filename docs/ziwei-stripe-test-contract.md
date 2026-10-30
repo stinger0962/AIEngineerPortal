@@ -74,8 +74,9 @@ was inspected or modified.
 
 ## Return and asynchronous-event follow-up — 2026-10-29
 
-Use an explicit HTTPS nonproduction test base URL when testers run in a separate
-browser/computer. HTTP is accepted only for loopback development (localhost,
+Use an explicit reachable HTTPS nonproduction test base URL when testers need to
+view return pages from a separate computer. Payment and CLI-forwarded webhook
+acceptance do not require a reachable return page or a second server. HTTP is accepted only for loopback development (localhost,
 127.0.0.1, or ::1); these callbacks are reachable only from the machine running
 the UI. Invalid ports, whitespace/backslashes, URL credentials, query strings,
 fragments, and path parameters fail configuration before contacting Stripe.
@@ -90,3 +91,5 @@ once, including after a failure delivered earlier. Late failure cannot downgrade
 a paid order. These orderings are tested with locally signed fixtures.
 
 Deployment boundaries and concrete next steps: [deployment readiness](integration/ziwei-deployment-readiness.md). Cached paid/failed checkouts return structured state for client recovery; unresolved intents older than 23 hours require reconciliation rather than another redirect or automatic purchase. Early provider-side expiry is not detected without provider reconciliation.
+
+Permanent shared staging is optional. The completed Codex + temporary CLI + manual-browser Alipay test is accepted as real payment/fulfillment evidence; developer-local UI/backend/CLI is a no-new-server alternative for real return-page coverage. No staging target is a required next gate.

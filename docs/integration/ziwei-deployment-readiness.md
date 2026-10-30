@@ -6,7 +6,9 @@ This branch implements **test-only** CNY credit packs. It rejects live Stripe ke
 and callbacks on the configured production hostname or `leipan.cc` hosts. The
 successful Alipay sandbox payment and genuine webhook were verified against a
 disposable local database; that account/balance was discarded afterward. The
-CLI listener is stopped and is not a durable deployment endpoint.
+CLI listener is stopped and is not a durable deployment endpoint. This completed
+flow is valid payment/fulfillment acceptance; a second server or permanent staging
+environment is not required to accept it.
 
 The final independent review found cached-session recovery bypassing the age
 check. The corrected service returns owner-scoped paid/failed state before any
@@ -21,6 +23,41 @@ scope. Green focused CI and local browser tests support review of this draft;
 they do not authorize merge or rollout. Repository branch-protection requirements
 and actual deployed environment values have not been inspected.
 
+## Testing without new infrastructure
+
+The recommended default is to use the completed Codex-backend + temporary Stripe
+CLI + manual-browser result, together with the passing local return-flow tests.
+No staging target is pending as an implementation or payment-acceptance gate.
+
+- **Already verified:** the user completed an Alipay sandbox Checkout in their
+  browser, the temporary CLI forwarded the genuine signed webhook to Codex, and
+  the isolated account received exactly ten credits. The backend did not need a
+  public incoming endpoint or a permanent Dashboard webhook.
+- **Return-page limit:** the test used `STRIPE_TEST_BASE_URL=http://127.0.0.1:3100`.
+  Its success/cancel redirects targeted `/ziwei?paid=1&order_id=…` and
+  `/ziwei?canceled=1&order_id=…`. On the user's computer, localhost did not point
+  to the Codex UI. Payment/fulfillment passed; actual hosted return-page behavior
+  was not verified by that manual test. Mocked local browser tests cover the
+  application's cancellation, resume, status and retry behavior separately.
+- **Developer-local alternative:** run UI, backend, disposable test DB and CLI on
+  the same computer as the browser. Localhost returns then reach the app, without
+  another server, public webhook or production changes. Further provider test
+  activity must stay within its explicitly approved scope.
+- **Existing preview, if available:** a reachable authorized HTTPS preview could
+  host return pages while the CLI forwards webhooks. No existing preview URL or
+  port-publication capability has been established here; none was enabled. Do not
+  invent a preview or enable a tunnel/access rule under an assumption of approval.
+- **Existing-VPS alternative:** a separate test instance on the current host is
+  optional, subject to capacity/data isolation checks and approval before changing
+  the production host. A second Droplet is not inherently necessary.
+
+The `leipan.cc` restriction is an existing application production-isolation guard,
+not a Stripe infrastructure requirement. It was introduced in `31b3b61`, with
+hostname canonicalization subsequently recorded as approved in `20b3e79`. The
+no-new-server options do not require weakening it. Another project's test-mode
+production deployment configuration cannot be copied into this app without
+reviewing these different boundaries.
+
 ## What the repository actually configures
 
 | Concern | Source and current behavior |
@@ -30,11 +67,15 @@ and actual deployed environment values have not been inspected.
 | Test checkout enablement | `STRIPE_TEST_ENABLED` defaults false. Existing production Compose does not pass this setting or `STRIPE_TEST_BASE_URL`; secrets alone cannot enable Checkout. |
 | Frontend | `NEXT_PUBLIC_API_BASE_URL` and `NEXT_PUBLIC_ZIWEI_TEST_BILLING` are build-time values. Current frontend Dockerfile exposes only the API URL build argument. Changing runtime Compose environment alone cannot enable the test panel. |
 | Credit requirement | Production Compose passes `ZIWEI_REQUIRE_CREDITS`, default false. Do not enable credit enforcement while purchase/fulfillment is unavailable. Its actual deployed value is unknown. |
-| Webhook | `/api/v1/billing/webhook`, raw-body signature verification using `STRIPE_WEBHOOK_SECRET`. Caddy routes `/api/*` to backend. Stable delivery and secret binding must be configured for the chosen test environment. |
+| Webhook | `/api/v1/billing/webhook`, raw-body signature verification using `STRIPE_WEBHOOK_SECRET`. Caddy routes `/api/*` to backend. Temporary CLI forwarding already supported the supervised local test; a stable endpoint/secret binding is needed only for a chosen persistent deployment. |
 | Release mechanism | `.github/workflows/deploy.yml`: GitHub Actions builds/pushes images, then VPS pulls/recreates containers. Triggered by `v*` tag or manual dispatch; both target production. No staging deployment workflow currently exists. |
 | Runtime versions | Backend image Python 3.11; frontend image Node 20. Test CI covers these plus Python 3.12 / Node 22. |
 
-## Minimum staging steps, requiring a separate approved target
+## Optional persistent staging, only if requested
+
+These steps apply if a persistent shared environment is desired. They are not
+prerequisites for the completed test acceptance, and do not require a separate
+server if an existing host can safely accommodate an approved isolated instance.
 
 1. Select a nonproduction HTTPS hostname and isolated persistent database/cache.
    Approve provisioning/deployment and any access/credential bindings separately.
@@ -109,7 +150,10 @@ verify bounded contention at READ COMMITTED, not production load or capacity.
   pause/reconciliation/rollback planning, stable webhook provisioning, and an
   approved release. Do not remove test guards merely to make production work.
 
-The next external decision is whether to provision/deploy a named isolated
-HTTPS staging target with persistent test webhook delivery. Merge, production
-rollout, release tags, credential/access changes and real payments remain
-separate approvals; none has been performed by this readiness assessment.
+There is no required staging target or infrastructure purchase pending. The
+implementation and reviewed test acceptance can proceed to PR review without one.
+Merge, deployment/release tags, production-host changes, credential/access or
+trust changes, new public exposure/tunnels, and payment activity outside the
+approved test scope remain separate authorization boundaries. Permanent staging
+is an optional choice, not the mandatory next step. None of those actions was
+performed by this readiness assessment.

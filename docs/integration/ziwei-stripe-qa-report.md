@@ -1,5 +1,25 @@
 # Ziwei Stripe TEST integration acceptance — 2026-10-22
 
+## Infrastructure clarification — 2026-10-30
+
+Permanent staging and a second server are **optional**, not a gate for the
+completed payment acceptance or reviewed implementation. Codex + the temporary
+Stripe CLI + the user's browser already proved Alipay test payment, genuine
+signed webhook delivery and the exact 0-to-10 grant. That listener is stopped.
+
+The manual test's localhost return URL could not reach the Codex UI from the
+user's machine. This leaves actual hosted success/cancel return interaction
+unverified, not payment fulfillment. Local mocked browser tests cover return,
+cancel/resume and recovery behavior. If further real return-page coverage is
+wanted, running UI/backend/CLI with the browser on a developer computer needs
+no second server. An existing authorized preview or isolated same-host instance
+is optional; no preview, tunnel, host change or production test setup was enabled.
+
+The [readiness assessment](ziwei-deployment-readiness.md) now makes these options
+and the actual approval boundaries explicit. No staging hostname, provider
+purchase or persistent webhook is currently required to complete this scope.
+This clarification changes documentation only, not guards or verified coverage.
+
 ## Independent review and readiness — 2026-10-30
 
 A fresh read-only reviewer inspected the cumulative diff and reproduced one
@@ -24,8 +44,8 @@ versions Python 3.11 / Node 20 as well as Python 3.12 / Node 22. Exact remote ru
 results are linked in PR #2 rather than inferred from local success.
 
 [Deployment readiness](ziwei-deployment-readiness.md) records actual callback and
-build-variable sources, staging prerequisites, additive migration, stable webhook
-requirements, bearer-device ownership, rollback/drain constraints and production
+build-variable sources, optional persistent-staging prerequisites, additive migration,
+webhook requirements for persistent deployments, bearer-device ownership, rollback/drain constraints and production
 blockers. Existing deployment docs were corrected to describe builds in Actions
 and image pulls on the VPS, not manual VPS builds. No deployment configuration,
 main branch, release tag, credential or access setting was changed.
@@ -49,8 +69,8 @@ was needed for this follow-up.
   Concurrent success/failure is covered on SQLite and PostgreSQL.
 - Callback validation rejects malformed ports, ambiguous whitespace/backslashes,
   credentials, queries/fragments and path parameters. HTTP is limited to loopback;
-  separate tester computers need an explicitly configured nonproduction HTTPS
-  callback. No such host was provisioned and no deployed configuration changed.
+  separate tester computers need a reachable nonproduction HTTPS callback to
+  view return pages (not to prove payment through CLI-forwarded webhooks). No such host was provisioned and no deployed configuration changed.
 - Added a non-deploying GitHub Actions workflow for this feature branch and
   relevant pull requests: focused SQLite regressions, PostgreSQL acceptance,
   frontend offline checks and TypeScript. It uses no Stripe/provider secrets and
