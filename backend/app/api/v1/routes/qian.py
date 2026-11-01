@@ -120,8 +120,7 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db), devi
     return EventSourceResponse(event_stream())
 
 
-# 灵签历史：所有人共见（不按设备隔离，否则旧记录像「丢了」），但问题**脱敏**——
-# 只回前 12 字 + 省略号，后半永不离开服务器（前端也无从展开），保护隐私。
+# Reading history is private to the bearer device identifier; legacy NULL rows stay hidden.
 _MASK_LEN = 12
 
 
@@ -139,9 +138,11 @@ def _device_label(device_id: str | None) -> str:
 
 
 @router.get("/readings")
-def list_readings(db: Session = Depends(get_db)):
+def list_readings(db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    if not device:
+        return []
     rows = db.scalars(
-        select(QianReading).order_by(QianReading.id.desc()).limit(50)
+        select(QianReading).where(QianReading.device_id == device).order_by(QianReading.id.desc()).limit(50)
     ).all()
     return [{
         "id": r.id, "question": _mask_question(r.question), "sign_id": r.sign_id, "grade": r.grade,
@@ -151,9 +152,9 @@ def list_readings(db: Session = Depends(get_db)):
 
 
 @router.get("/readings/{reading_id}")
-def get_reading(reading_id: int, db: Session = Depends(get_db)):
+def get_reading(reading_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     r = db.get(QianReading, reading_id)
-    if not r:
+    if not r or not device or r.device_id != device:
         raise HTTPException(404, "记录不存在")
     return {
         "id": r.id, "question": r.question, "sign_id": r.sign_id, "grade": r.grade,

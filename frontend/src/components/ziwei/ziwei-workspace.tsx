@@ -9,8 +9,10 @@ import { hasChart, type ZiweiProfileOut } from "@/lib/ziwei/api";
 export function ZiweiWorkspace({
   profile,
   onPersonaChange,
+  onReadingSuccess,
 }: {
   profile: ZiweiProfileOut;
+  onReadingSuccess?: () => void;
   onPersonaChange?: (next: string) => void;
 }) {
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
@@ -35,6 +37,7 @@ export function ZiweiWorkspace({
       {term ? <TermCard info={term} onClose={() => setTerm(null)} /> : null}
       <ChatDock
         profileId={profile.id}
+        onReadingSuccess={onReadingSuccess}
         persona={profile.persona}
         chart={chart}
         onFocusBranch={setSelectedBranch}

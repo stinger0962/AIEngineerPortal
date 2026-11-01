@@ -196,7 +196,7 @@ def teardown_module():
         rmtree(TEST_DB_DIR, ignore_errors=True)
 
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Device-Id": "stream-owner"})
 
 
 @pytest.fixture(autouse=True)
@@ -219,7 +219,7 @@ def _seed_profile(chart=None, persona="sage"):
     try:
         db.add(User(id=1, name="Tester", email="t@example.com", target_role="x"))
         profile = ZiweiProfile(
-            name="命主", relation="self", gender="male",
+            name="命主", relation="self", gender="male", device_id="stream-owner",
             birth_date="1990-01-01", birth_time_index=0,
             chart_json=_valid_chart() if chart is None else chart, persona=persona,
         )
@@ -305,7 +305,7 @@ class _RaisingAIService(_FakeAIService):
         self.client = SimpleNamespace(messages=_RaisingMessages())
 
 
-def test_oracle_stream_emits_error_and_salvages_partial(monkeypatch):
+def test_oracle_stream_emits_error_without_orphan_conversation(monkeypatch):
     monkeypatch.setattr(ziwei_routes, "AIService", _RaisingAIService)
     pid = _seed_profile()
     r = client.post(f"/api/v1/ziwei/profiles/{pid}/oracle/stream", json={"scenario": "natal", "message": "事业如何？"})
@@ -315,11 +315,12 @@ def test_oracle_stream_emits_error_and_salvages_partial(monkeypatch):
     # 中途失败：先有已发的文字，最后是 error，且没有 done
     assert "error" in types and "done" not in types
     assert any(e["type"] == "text" and "命宫紫微" in e["delta"] for e in events)
-    # 已生成的半截被尽力保住（salvage-persist）
+    # A failed first reading rolls back its new conversation and partial messages.
     db = TestingSessionLocal()
     try:
         msgs = db.scalars(select(ZiweiMessage).order_by(ZiweiMessage.id.asc())).all()
-        assert any(m.role == "assistant" and "命宫紫微" in m.content for m in msgs)
+        assert msgs == []
+        assert db.scalars(select(ZiweiConversation)).all() == []
     finally:
         db.close()
 

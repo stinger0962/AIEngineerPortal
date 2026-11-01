@@ -535,3 +535,12 @@ class EmailCode(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     consumed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BillingRequest(Base):
+    """Durable idempotency records; added as a new table (no existing data rewrite)."""
+    __tablename__ = "billing_requests"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    response_json: Mapped[Dict] = mapped_column(JSON, default=dict)

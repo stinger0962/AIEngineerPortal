@@ -120,6 +120,13 @@ def test_stream_400_empty_question(monkeypatch):
 
 def test_readings_list(monkeypatch):
     _patch(monkeypatch)
-    client.post("/api/v1/qian/oracle/stream", json={"question": "甲"})
-    r = client.get("/api/v1/qian/readings")
+    client.post("/api/v1/qian/oracle/stream", json={"question": "甲"}, headers={"X-Device-Id": "owner"})
+    r = client.get("/api/v1/qian/readings", headers={"X-Device-Id": "owner"})
     assert r.status_code == 200 and isinstance(r.json(), list) and len(r.json()) >= 1
+
+    reading_id = r.json()[0]["id"]
+    assert client.get("/api/v1/qian/readings").json() == []
+    assert client.get("/api/v1/qian/readings", headers={"X-Device-Id": "stranger"}).json() == []
+    assert client.get(f"/api/v1/qian/readings/{reading_id}").status_code == 404
+    assert client.get(f"/api/v1/qian/readings/{reading_id}", headers={"X-Device-Id": "stranger"}).status_code == 404
+    assert client.get(f"/api/v1/qian/readings/{reading_id}", headers={"X-Device-Id": "owner"}).status_code == 200
