@@ -7,6 +7,7 @@ on:
       - 'frontend/**'
       - '.github/workflows/ziwei-test.yml'
       - '.github/workflows/deploy.yml'
+      - '.github/workflows/production-preflight.yml'
       - 'scripts/**'
       - '.gitignore'
   push:
@@ -52,6 +53,8 @@ jobs:
       - run: pip install -r backend/requirements.txt
       - name: Deployment safety regressions (isolated fixtures)
         run: python -m unittest discover -s backend/tests -p test_deploy_safety.py -v
+      - name: Read-only production preflight regressions (mocked)
+        run: python -m unittest discover -s backend/tests -p test_production_preflight.py -v
       - name: SQLite payment and reading regressions
         run: >-
           python -m pytest backend/tests/acceptance backend/tests/test_billing_stripe.py

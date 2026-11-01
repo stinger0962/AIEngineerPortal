@@ -1,0 +1,35 @@
+name: Read-only production preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      host_fingerprint:
+        description: 'Verified SHA256 SSH host fingerprint from an already trusted connection or VPS console (not ssh-keyscan alone)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require verified fingerprint input
+        env:
+          HOST_FINGERPRINT: ${{ inputs.host_fingerprint }}
+        run: bash scripts/validate-ssh-fingerprint.sh
+      - name: Inspect fixed production metadata
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ inputs.host_fingerprint }}
+          timeout: 30s
+          command_timeout: 2m
+          debug: false
+          script_path: scripts/production-preflight.sh
