@@ -107,7 +107,8 @@ jobs:
             cd $APP_DIR
             git config --unset-all http.https://github.com/.extraheader 2>/dev/null || true
             git checkout -- . 2>/dev/null || true
-            git clean -fd 2>/dev/null || true
+            # Preserve database backups even before the new .gitignore is checked out.
+            git clean -fd -e /backups/ 2>/dev/null || true
             git fetch --all --tags --prune --force
             git checkout "${{ github.sha }}"
             git reset --hard "${{ github.sha }}"
@@ -143,14 +144,20 @@ jobs:
           script: |
             set -e
             sleep 15
+            HEALTHY=false
             for i in 1 2 3 4 5; do
               if docker exec infra-backend-1 python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" 2>/dev/null; then
                 echo "Backend health check passed on attempt $i"
+                HEALTHY=true
                 break
               fi
               echo "Attempt $i failed, waiting 10s..."
               sleep 10
             done
+            if [ "$HEALTHY" != true ]; then
+              echo "ERROR: backend health check failed after 5 attempts"
+              exit 1
+            fi
             RESTARTING=$(docker compose -f /opt/ai-engineer-portal/infra/docker-compose.prod.yml --env-file /opt/ai-engineer-portal/infra/.env.production ps --format '{{.Status}}' | grep -c "Restarting" || true)
             if [ "$RESTARTING" -gt 0 ]; then
               echo "ERROR: containers are restarting"
