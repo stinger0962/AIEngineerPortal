@@ -6,6 +6,9 @@ on:
       - 'backend/**'
       - 'frontend/**'
       - '.github/workflows/ziwei-test.yml'
+      - '.github/workflows/deploy.yml'
+      - 'scripts/**'
+      - '.gitignore'
   push:
     branches: [integration/ziwei-stripe-test]
 
@@ -47,6 +50,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r backend/requirements.txt
+      - name: Deployment safety regressions (isolated fixtures)
+        run: python -m unittest discover -s backend/tests -p test_deploy_safety.py -v
       - name: SQLite payment and reading regressions
         run: >-
           python -m pytest backend/tests/acceptance backend/tests/test_billing_stripe.py

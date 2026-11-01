@@ -23,3 +23,6 @@ frontend/node_modules/
 .worktrees/
 .superpowers/
 *.tsbuildinfo
+
+# Database dumps retained on the deployment host
+/backups/

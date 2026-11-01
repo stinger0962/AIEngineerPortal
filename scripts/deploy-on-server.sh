@@ -32,7 +32,8 @@ git config --unset-all http.https://github.com/.extraheader 2>/dev/null || true
 # Clean working tree before checkout to prevent conflicts from
 # line-ending changes (CRLF→LF) or untracked files.
 git checkout -- . 2>/dev/null || true
-git clean -fd 2>/dev/null || true
+# Preserve database backups even before the new .gitignore is checked out.
+git clean -fd -e /backups/ 2>/dev/null || true
 
 git fetch --all --tags --prune
 git checkout "$DEPLOY_REF"
