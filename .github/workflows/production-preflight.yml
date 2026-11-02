@@ -22,6 +22,11 @@ jobs:
         env:
           HOST_FINGERPRINT: ${{ inputs.host_fingerprint }}
         run: bash scripts/validate-ssh-fingerprint.sh
+      - name: Observe public host keys (not trust establishment)
+        timeout-minutes: 1
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: python3 -B scripts/observe-ssh-host-keys.py
       - name: Inspect fixed production metadata
         uses: appleboy/ssh-action@v1.2.0
         with:
