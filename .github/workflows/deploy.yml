@@ -6,7 +6,12 @@ on:
       - "v*"
   workflow_dispatch:
 
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
 permissions:
+  actions: read
   contents: read
   packages: write
 
@@ -15,7 +20,21 @@ env:
   REPO_LOWER: stinger0962/aiengineerportal
 
 jobs:
+  release_checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require successful CI for exact main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/require-release-ci.py
+
   build:
+    needs: release_checks
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -51,13 +70,15 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
-    concurrency:
-      group: production-deploy
-      cancel-in-progress: true
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Recheck exact main commit before production mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/require-release-ci.py
 
       - name: Deploy on droplet
         uses: appleboy/ssh-action@v1.2.0
@@ -113,10 +134,8 @@ jobs:
             git checkout "${{ github.sha }}"
             git reset --hard "${{ github.sha }}"
 
-            # Free disk space before pulling — remove all unused images and build cache
-            # This prevents "no space left on device" on the 48GB droplet
-            docker system prune -af --volumes=false
-            docker builder prune -af
+            # Preserve existing images for rollback. Disk cleanup is a separate,
+            # deliberate operation; never prune rollback candidates during release.
 
             # Login to GHCR and pull pre-built images
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
