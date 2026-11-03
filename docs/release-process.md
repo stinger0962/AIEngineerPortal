@@ -79,18 +79,19 @@ unverifiable CI stops the workflow. Workflow-wide concurrency prevents cancellin
 an in-progress release; GitHub may replace an older pending run with a newer one.
 
 Release-time image pruning is removed to preserve rollback candidates. This is
-not yet an immutable rollback procedure or a disk-capacity guarantee.
+not a disk-capacity guarantee. Captured-image rollback is described in
+[the no-backup code rollback guide](no-backup-code-rollback.md).
 
-Production triggers remain tags and manual dispatch. Before enabling automatic
-production deployment, resolve backup inspection and verify a fresh backup and
-restoration, retain explicit previous image references, triage baseline full-suite
-failures, and add a data-preserving rollback procedure. Trusted deployment SSH
-verification and public smoke checks are described below. Keep billing
-disabled. These prerequisites must not be treated as satisfied by a green CI gate.
+Production triggers remain tags and manual dispatch. The user chose to proceed
+without backups for this Portal release; backup/restore verification is not a gate.
+Code rollback cannot recover damaged or lost data. Captured previous image references,
+trusted SSH and health checks support the bounded rollback path. Keep billing disabled;
+triage baseline test failures and verify the release operationally before calling
+automatic production deployment active.
 
 ## Trusted deployment endpoint and public smoke checks
 
-Both deployment SSH steps now require the Portal ECDSA host-key fingerprint
+All deployment SSH steps now require the Portal ECDSA host-key fingerprint
 confirmed from its trusted console and matched by the read-only preflight.
 A mismatch fails SSH; do not replace the pin with an unauthenticated observation
 or disable verification to proceed. A legitimate host-key rotation requires a new
@@ -103,6 +104,6 @@ mandatory, redirects are refused, retries/timeouts are bounded, and response
 bodies/errors are not logged. These checks confirm public routing and basic
 responses, not full application behavior or the deployed commit identity.
 
-Production remains tag/manual only. Backup/restoration, explicit immutable
-rollback references, disk capacity and baseline-test triage remain unresolved
-gates before enabling automatic production deployment.
+Production remains tag/manual only. The first real rollout, disk capacity under
+actual image pulls, and baseline-test triage remain operational considerations.
+The user's no-backup decision does not imply that code rollback restores data.

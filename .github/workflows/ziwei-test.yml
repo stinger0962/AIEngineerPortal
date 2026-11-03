@@ -69,6 +69,8 @@ jobs:
         env:
           RUN_CODE_ROLLBACK_DOCKER_TEST: '1'
         run: python -m unittest discover -s backend/tests -p test_release_image_docker.py -v
+      - name: Release workflow integration regressions (no production)
+        run: python -m unittest discover -s backend/tests -p test_release_workflow_integration.py -v
       - name: SQLite payment and reading regressions
         run: >-
           python -m pytest backend/tests/acceptance backend/tests/test_billing_stripe.py

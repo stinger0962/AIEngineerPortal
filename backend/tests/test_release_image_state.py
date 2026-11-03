@@ -63,6 +63,26 @@ class ReleaseImageStateTests(unittest.TestCase):
                 MODULE.record(CANDIDATE)
         self.assertFalse(any('tag' in call or 'compose' in call for call in self.calls))
 
+    def test_prepare_rerun_preserves_original_images_without_recapture(self):
+        original = self.make_record()
+        path = self.state / (CANDIDATE + '.json')
+        before = path.read_bytes()
+        with patch.object(MODULE, 'command', side_effect=self.command), \
+             patch.object(MODULE, 'inspect_container') as inspect:
+            self.assertEqual(MODULE.prepare(CANDIDATE), original)
+            inspect.assert_not_called()
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_prepare_missing_record_captures_but_corrupt_record_fails_closed(self):
+        with patch.object(MODULE, 'command', side_effect=self.command):
+            MODULE.prepare(CANDIDATE)
+        path = self.state / (CANDIDATE + '.json')
+        path.write_text('corrupt')
+        with patch.object(MODULE, 'record') as record:
+            with self.assertRaises(ValueError):
+                MODULE.prepare(CANDIDATE)
+            record.assert_not_called()
+
     def test_rollback_uses_only_recorded_local_images_and_application_services(self):
         self.make_record()
         self.calls = []

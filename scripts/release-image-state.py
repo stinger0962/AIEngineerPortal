@@ -151,6 +151,17 @@ def record(candidate_sha):
     return data
 
 
+def prepare(candidate_sha):
+    """Reuse a valid original rollback point on rerun; never replace it."""
+    try:
+        data = read_state(candidate_sha)
+    except FileNotFoundError:
+        return record(candidate_sha)
+    for service in SERVICES:
+        require_local_image(data['images'][service])
+    return data
+
+
 def rollback(candidate_sha):
     data = read_state(candidate_sha)
     # Validate ALL inputs and local image availability before changing either tag.
@@ -184,12 +195,12 @@ def rollback(candidate_sha):
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
-    if len(args) != 2 or args[0] not in ('record', 'rollback') or not valid_sha(args[1]):
+    if len(args) != 2 or args[0] not in ('record', 'prepare', 'rollback') or not valid_sha(args[1]):
         print('Release image state: invalid request')
         return 1
     try:
-        with operation_lock(create=args[0] == 'record'):
-            (record if args[0] == 'record' else rollback)(args[1])
+        with operation_lock(create=args[0] in ('record', 'prepare')):
+            {'record': record, 'prepare': prepare, 'rollback': rollback}[args[0]](args[1])
     except Exception:
         print('Release image state: operation failed')
         return 1
