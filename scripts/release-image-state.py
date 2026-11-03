@@ -21,6 +21,7 @@ STATE = Path('/opt/ai-engineer-portal-release-state')  # Outside git-clean scope
 SERVICES = ('backend', 'frontend')
 DOCKER = ['docker', '--host', 'unix:///var/run/docker.sock']
 ENV = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}
+HEALTH_TIMEOUT_SECONDS = 300
 FIELDS = {'version', 'candidate_sha', 'previous_sha', 'compose_sha256', 'images'}
 
 
@@ -107,10 +108,10 @@ def read_state(candidate_sha):
     return data
 
 
-def inspect_container(service):
+def inspect_container(service, timeout=30):
     raw = command(DOCKER + ['inspect', '--format',
                             '{{json .Image}} {{json .State.Status}} {{json .State.Health.Status}}',
-                            'infra-' + service + '-1'])
+                            'infra-' + service + '-1'], timeout=timeout)
     image, status, health = [json.loads(item) for item in raw.split()]
     if not valid_image(image):
         raise ValueError('invalid_container_image')
@@ -163,16 +164,21 @@ def rollback(candidate_sha):
                       '-f', str(APP / 'infra/docker-compose.prod.yml'),
                       'up', '-d', '--no-deps', '--no-build', '--pull', 'never',
                       '--force-recreate', 'backend', 'frontend'], timeout=120)
-    for attempt in range(12):
+    deadline = time.monotonic() + HEALTH_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
         healthy = True
         for service in SERVICES:
-            image, status, health = inspect_container(service)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError('rollback_health_failed')
+            image, status, health = inspect_container(service, timeout=min(10, remaining))
             healthy = healthy and (image == data['images'][service]
                                    and status == 'running' and health == 'healthy')
         if healthy:
             return
-        if attempt < 11:
-            time.sleep(5)
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(5, remaining))
     raise ValueError('rollback_health_failed')
 
 

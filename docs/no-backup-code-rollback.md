@@ -56,3 +56,19 @@ only permits current main. A bounded rollback mode must bypass that forward-only
 SHA rule solely for the captured previous local images while retaining trusted
 workflow source, fixed host, serialization, state validation and health checks.
 Do not enable an automatic production trigger before that integration is reviewed.
+
+## Health timing and configuration limits
+
+Rollback health verification has a five-minute monotonic deadline, allowing
+legitimate container startup delays beyond the earlier short retry window.
+Individual inspection calls are bounded by the remaining deadline. Tests include
+a delayed healthy startup and deadline exhaustion.
+
+Only application image selection is restored. The production environment file,
+repository checkout and database/media contents are not rolled back. Environment
+changes must be reviewed for compatibility with the previous application before
+using code rollback; this helper does not prove that compatibility.
+
+Before activation, rehearse the actual Docker/Compose commands in an isolated
+environment with disposable containers and volumes. Mocked tests establish command
+bounds and logic, not successful rollback on the production Docker installation.

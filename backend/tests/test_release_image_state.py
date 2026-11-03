@@ -135,14 +135,34 @@ class ReleaseImageStateTests(unittest.TestCase):
         with self.assertRaises(OSError):
             MODULE.read_state(CANDIDATE)
 
-    def test_unhealthy_rollback_fails_after_bounded_retries(self):
+    def test_unhealthy_rollback_fails_at_monotonic_deadline(self):
         self.make_record()
+        clock = [0.0]
+        def sleep(seconds):
+            clock[0] += seconds
         with patch.object(MODULE, 'command', side_effect=self.command), \
              patch.object(MODULE, 'inspect_container', return_value=(IMAGES['backend'], 'running', 'unhealthy')), \
-             patch.object(MODULE.time, 'sleep') as sleep:
+             patch.object(MODULE.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(MODULE.time, 'sleep', side_effect=sleep):
             with self.assertRaises(ValueError):
                 MODULE.rollback(CANDIDATE)
-        self.assertEqual(sleep.call_count, 11)
+        self.assertEqual(clock[0], MODULE.HEALTH_TIMEOUT_SECONDS)
+
+    def test_delayed_healthy_startup_beyond_old_timeout_succeeds(self):
+        self.make_record()
+        clock = [0.0]
+        def sleep(seconds):
+            clock[0] += seconds
+        def inspect(service, timeout=30):
+            self.assertGreater(timeout, 0)
+            self.assertLessEqual(timeout, 10)
+            return IMAGES[service], 'running', 'healthy' if clock[0] >= 75 else 'starting'
+        with patch.object(MODULE, 'command', side_effect=self.command), \
+             patch.object(MODULE, 'inspect_container', side_effect=inspect), \
+             patch.object(MODULE.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(MODULE.time, 'sleep', side_effect=sleep):
+            MODULE.rollback(CANDIDATE)
+        self.assertEqual(clock[0], 75)
 
     def test_concurrent_helper_operation_fails_closed(self):
         with MODULE.operation_lock(create=True):
