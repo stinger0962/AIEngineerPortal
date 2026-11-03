@@ -72,3 +72,11 @@ using code rollback; this helper does not prove that compatibility.
 Before activation, rehearse the actual Docker/Compose commands in an isolated
 environment with disposable containers and volumes. Mocked tests establish command
 bounds and logic, not successful rollback on the production Docker installation.
+
+CI now includes an opt-in real-Docker rehearsal on the disposable GitHub runner:
+two local fixture image revisions, recorded previous IDs, replacement and rollback,
+and a sentinel file checked in the fixture volume after rollback. It requires
+preexisting fixture resource names to be absent, uses the already pulled official
+PostgreSQL base image with network-disabled builds, and removes only its own
+fixture resources. It never connects to the Portal server. A successful rehearsal
+validates actual Docker/Compose command behavior on CI, not production compatibility.
