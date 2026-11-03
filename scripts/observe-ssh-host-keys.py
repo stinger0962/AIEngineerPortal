@@ -7,7 +7,8 @@ import re
 import socket
 import subprocess
 
-EXPECTED_IP = '64.225.43.230'
+# Portal Droplet address confirmed by the owner via its trusted console.
+EXPECTED_IP = '146.190.124.162'
 PORT = 22  # Same fixed default port as the existing SSH action.
 KEY_TYPES = {'ssh-ed25519', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384',
              'ecdsa-sha2-nistp521', 'ssh-rsa'}
