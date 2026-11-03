@@ -51,6 +51,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r backend/requirements.txt
+      - name: Public smoke regressions (mocked HTTPS)
+        run: python -m unittest discover -s backend/tests -p test_public_smoke.py -v
       - name: Release CI gate regressions (mocked API)
         run: python -m unittest discover -s backend/tests -p test_release_gate.py -v
       - name: Deployment safety regressions (isolated fixtures)

@@ -52,7 +52,7 @@ class DeploySafetyTests(unittest.TestCase):
         # Only the health SSH body is executed. Docker and sleep are PATH mocks;
         # no deploy, network, database, swap, or host paths are touched.
         step = WORKFLOW.read_text().split('      - name: Verify health via SSH\n', 1)[1]
-        script = textwrap.dedent(step.split('          script: |\n', 1)[1])
+        script = textwrap.dedent(step.split('          script: |\n', 1)[1].split('\n      - name:', 1)[0])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             docker = root / 'docker'

@@ -83,7 +83,26 @@ not yet an immutable rollback procedure or a disk-capacity guarantee.
 
 Production triggers remain tags and manual dispatch. Before enabling automatic
 production deployment, resolve backup inspection and verify a fresh backup and
-restoration, pin trusted host verification on both deployment SSH steps, retain
-explicit previous image references, triage baseline full-suite failures, and add
-public smoke checks and a data-preserving rollback procedure. Keep billing
+restoration, retain explicit previous image references, triage baseline full-suite
+failures, and add a data-preserving rollback procedure. Trusted deployment SSH
+verification and public smoke checks are described below. Keep billing
 disabled. These prerequisites must not be treated as satisfied by a green CI gate.
+
+## Trusted deployment endpoint and public smoke checks
+
+Both deployment SSH steps now require the Portal ECDSA host-key fingerprint
+confirmed from its trusted console and matched by the read-only preflight.
+A mismatch fails SSH; do not replace the pin with an unauthenticated observation
+or disable verification to proceed. A legitimate host-key rotation requires a new
+trusted verification, not a retry with a guessed fingerprint.
+
+After internal health verification, fixed HTTPS checks require
+`https://portal.leipan.cc/health` to return HTTP 200 JSON `{"status":"ok"}`
+and the root page to return HTTP 200 HTML. Certificate/hostname verification is
+mandatory, redirects are refused, retries/timeouts are bounded, and response
+bodies/errors are not logged. These checks confirm public routing and basic
+responses, not full application behavior or the deployed commit identity.
+
+Production remains tag/manual only. Backup/restoration, explicit immutable
+rollback references, disk capacity and baseline-test triage remain unresolved
+gates before enabling automatic production deployment.
