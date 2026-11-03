@@ -19,7 +19,7 @@ class ReleaseWorkflowIntegrationTests(unittest.TestCase):
     def test_rendered_helper_passes_bash_syntax_without_execution(self):
         source = (ROOT / 'scripts/release-image-state.py').read_text()
         for action in ('prepare', 'rollback'):
-            output = MODULE.render(action, SHA, source)
+            output = MODULE.render(action, SHA, source, 'b' * 64 if action == 'prepare' else None)
             self.assertIn(source.rstrip(), output)
             self.assertIn('python3 -B - ' + action + ' ' + SHA, output)
             result = subprocess.run(['bash', '-n'], input=output, text=True, capture_output=True)
@@ -55,6 +55,9 @@ class ReleaseWorkflowIntegrationTests(unittest.TestCase):
         self.assertIn("github.event_name == 'workflow_dispatch' && inputs.operation == 'rollback'", rollback)
         self.assertIn('test "$GITHUB_REF" = refs/heads/main', rollback)
         self.assertIn('RELEASE_ACTION: rollback', rollback)
+        self.assertIn('run: python3 -B scripts/require-current-rollback-source.py', rollback)
+        self.assertLess(rollback.index('Verify rollback workflow is still current main'),
+                        rollback.index('Restore recorded previous application images'))
         self.assertIn('RELEASE_SHA: ${{ inputs.rollback_release_sha }}', rollback)
         self.assertIn('fingerprint: SHA256:5l+l4ylrZutSMsq0T8rtMv5jF6cDPm6XtcnbwWWNSX4', rollback)
         self.assertIn('run: python3 -B scripts/public-smoke.py', rollback)
@@ -67,6 +70,40 @@ class ReleaseWorkflowIntegrationTests(unittest.TestCase):
         self.assertIn('group: production-release', text)
         self.assertIn('cancel-in-progress: false', text)
         self.assertNotIn('continue-on-error', text)
+
+
+
+class RollbackSourceGuardTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('source_guard', ROOT / 'scripts/require-current-rollback-source.py')
+        self.guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.guard)
+
+    def run_guard(self, actual=SHA, error=None, **changes):
+        env = {'GITHUB_REF': 'refs/heads/main', 'GITHUB_SHA': SHA,
+               'GITHUB_REPOSITORY': 'stinger0962/AIEngineerPortal', 'GH_TOKEN': 'secret-sentinel'}
+        env.update(changes)
+        output = io.StringIO()
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(self.guard, 'fetch_main_sha', return_value=actual, side_effect=error) as fetch, \
+             contextlib.redirect_stdout(output):
+            code = self.guard.main()
+        self.assertNotIn('secret-sentinel', output.getvalue())
+        return code, fetch
+
+    def test_current_main_passes_without_forward_ci_requirement(self):
+        self.assertEqual(self.run_guard()[0], 0)
+
+    def test_old_main_rerun_and_api_failure_fail_closed(self):
+        self.assertEqual(self.run_guard(actual='b' * 40)[0], 1)
+        self.assertEqual(self.run_guard(error=RuntimeError('secret-sentinel'))[0], 1)
+
+    def test_wrong_ref_or_context_stops_before_api(self):
+        for change in ({'GITHUB_REF': 'refs/heads/old'}, {'GH_TOKEN': ''},
+                       {'GITHUB_REPOSITORY': 'other/repo'}, {'GITHUB_SHA': 'bad'}):
+            code, fetch = self.run_guard(**change)
+            self.assertEqual(code, 1)
+            fetch.assert_not_called()
 
 
 if __name__ == '__main__':

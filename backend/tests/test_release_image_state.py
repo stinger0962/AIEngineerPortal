@@ -63,6 +63,19 @@ class ReleaseImageStateTests(unittest.TestCase):
                 MODULE.record(CANDIDATE)
         self.assertFalse(any('tag' in call or 'compose' in call for call in self.calls))
 
+    def test_prepare_cli_rejects_candidate_compose_mismatch_before_mutation(self):
+        with patch.dict(os.environ, {'EXPECTED_COMPOSE_SHA256': 'f' * 64}), \
+             patch.object(MODULE, 'prepare') as prepare:
+            self.assertEqual(MODULE.main(['prepare', CANDIDATE]), 1)
+            prepare.assert_not_called()
+        self.assertFalse(self.state.exists())
+
+    def test_prepare_cli_accepts_exact_candidate_compose(self):
+        with patch.dict(os.environ, {'EXPECTED_COMPOSE_SHA256': MODULE.compose_hash()}), \
+             patch.object(MODULE, 'command', side_effect=self.command):
+            self.assertEqual(MODULE.main(['prepare', CANDIDATE]), 0)
+        self.assertEqual(MODULE.read_state(CANDIDATE)['images'], IMAGES)
+
     def test_prepare_rerun_preserves_original_images_without_recapture(self):
         original = self.make_record()
         path = self.state / (CANDIDATE + '.json')

@@ -102,3 +102,14 @@ There is no automatic database restore and no backup gate. User data and the ext
 billing table remain. Environment compatibility must still be considered because
 the environment file is not rolled back. The first production release and rollback
 remain unverified until actually run; CI's rehearsal uses disposable fixtures.
+
+Before forward capture, the renderer supplies the candidate Compose SHA256 and
+the helper requires the installed Compose to match exactly. A future Compose
+change stops before environment updates, image replacement or state creation;
+it requires a separately reviewed compatibility path, not a bypass.
+
+Immediately before rollback SSH, the workflow checks GitHub's current main SHA
+against the executing workflow SHA. Merely having a main ref name is insufficient:
+re-running an older main workflow fails closed. This check does not require
+forward-release CI eligibility for the old application images. As with the forward
+gate, it is a point-in-time check, not a lock preventing subsequent main commits.

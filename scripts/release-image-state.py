@@ -1,4 +1,4 @@
-"""Bounded local-image rollback helper; NOT wired to production workflows yet.
+"""Bounded local-image rollback helper for the current reviewed release workflow.
 
 Only application images are changed. No database restore, volume deletion, image
 pull, credential operation, or old-workflow checkout. Invoke only through the
@@ -199,6 +199,10 @@ def main(argv=None):
         print('Release image state: invalid request')
         return 1
     try:
+        if args[0] == 'prepare':
+            expected = os.environ.get('EXPECTED_COMPOSE_SHA256', '')
+            if not re.fullmatch(r'[0-9a-f]{64}', expected) or compose_hash() != expected:
+                raise ValueError('candidate_compose_incompatible')
         with operation_lock(create=args[0] in ('record', 'prepare')):
             {'record': record, 'prepare': prepare, 'rollback': rollback}[args[0]](args[1])
     except Exception:

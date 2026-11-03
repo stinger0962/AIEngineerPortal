@@ -235,6 +235,10 @@ jobs:
           RELEASE_ACTION: rollback
           RELEASE_SHA: ${{ inputs.rollback_release_sha }}
         run: python3 -B scripts/render-release-helper.py > "$RUNNER_TEMP/release-helper.sh"
+      - name: Verify rollback workflow is still current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/require-current-rollback-source.py
       - name: Restore recorded previous application images
         uses: appleboy/ssh-action@v1.2.0
         with:
