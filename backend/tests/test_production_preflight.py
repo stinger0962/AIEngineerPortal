@@ -102,6 +102,60 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(report['backups'], dict(count=0, latest_utc=None, latest_bytes=None, restore_verified=False))
 
+    def assert_backup_error(self, expected):
+        result, report = self.run_report(self.mock_run)
+        self.assertEqual(result, 1)
+        self.assertEqual(report['backups'], {'error': expected, 'restore_verified': False})
+        self.assertEqual(report['backend']['health'], 'healthy')
+        self.assertNotIn(str(self.app), json.dumps(report))
+
+    def remove_backup_directory(self):
+        for item in (self.app / 'backups').iterdir():
+            item.unlink()
+        (self.app / 'backups').rmdir()
+
+    def test_missing_backup_directory_fails_without_creating_it(self):
+        self.remove_backup_directory()
+        self.assert_backup_error('directory_missing')
+        self.assertFalse((self.app / 'backups').exists())
+
+    def test_symlink_backup_directory_is_rejected(self):
+        self.remove_backup_directory()
+        (self.app / 'backups').symlink_to(self.app, target_is_directory=True)
+        self.assert_backup_error('symlink_rejected')
+
+    def test_backup_path_that_is_a_file_is_rejected(self):
+        self.remove_backup_directory()
+        (self.app / 'backups').write_text(SENTINEL)
+        self.assert_backup_error('invalid_directory')
+        self.assertEqual((self.app / 'backups').read_text(), SENTINEL)
+
+    def test_backup_scan_failures_have_fixed_redacted_labels(self):
+        cases = [(FileNotFoundError(SENTINEL), 'directory_missing'),
+                 (PermissionError(SENTINEL), 'permission_denied'),
+                 (NotADirectoryError(SENTINEL), 'invalid_directory'),
+                 (OSError(SENTINEL), 'metadata_unavailable')]
+        for error, expected in cases:
+            with self.subTest(expected=expected), patch('os.scandir', side_effect=error):
+                self.assert_backup_error(expected)
+
+    def test_backup_entry_metadata_failure_is_not_directory_missing(self):
+        class BrokenEntry:
+            name = 'portal_test.dump'
+            def is_file(self, **kwargs):
+                return True
+            def stat(self, **kwargs):
+                raise FileNotFoundError(SENTINEL)
+        class Entries:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def __iter__(self):
+                return iter([BrokenEntry()])
+        with patch('os.scandir', return_value=Entries()):
+            self.assert_backup_error('metadata_unavailable')
+
     def test_environment_program_never_prints_values_except_boolean_flags(self):
         output = io.StringIO()
         env = {'STRIPE_TEST_ENABLED': SENTINEL, 'ZIWEI_REQUIRE_CREDITS': 'FALSE',
