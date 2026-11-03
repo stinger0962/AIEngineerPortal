@@ -11,7 +11,7 @@ on:
       - 'scripts/**'
       - '.gitignore'
   push:
-    branches: [integration/ziwei-stripe-test]
+    branches: [main, integration/ziwei-stripe-test]
 
 permissions:
   contents: read
@@ -51,6 +51,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r backend/requirements.txt
+      - name: Release CI gate regressions (mocked API)
+        run: python -m unittest discover -s backend/tests -p test_release_gate.py -v
       - name: Deployment safety regressions (isolated fixtures)
         run: python -m unittest discover -s backend/tests -p test_deploy_safety.py -v
       - name: Read-only production preflight regressions (mocked)

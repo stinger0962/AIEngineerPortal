@@ -69,3 +69,21 @@ A target mismatch or observation error stops the workflow before that action.
 
 This workflow only inspects fixed metadata; merging a preflight fix does not
 deploy the application, change repository secrets, or change server trust.
+
+## Release safety preparation (automatic production deployment not enabled)
+
+Main pushes now run CI. Tag/manual releases wait for successful push CI for the
+exact current main SHA, then check it again immediately before production mutation.
+PR CI alone does not authorize a release. Missing, failed, incomplete, timed-out or
+unverifiable CI stops the workflow. Workflow-wide concurrency prevents cancelling
+an in-progress release; GitHub may replace an older pending run with a newer one.
+
+Release-time image pruning is removed to preserve rollback candidates. This is
+not yet an immutable rollback procedure or a disk-capacity guarantee.
+
+Production triggers remain tags and manual dispatch. Before enabling automatic
+production deployment, resolve backup inspection and verify a fresh backup and
+restoration, pin trusted host verification on both deployment SSH steps, retain
+explicit previous image references, triage baseline full-suite failures, and add
+public smoke checks and a data-preserving rollback procedure. Keep billing
+disabled. These prerequisites must not be treated as satisfied by a green CI gate.
