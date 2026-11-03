@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 
 APP = Path('/opt/ai-engineer-portal')
@@ -54,21 +55,48 @@ def inspect_service(service):
     return dict(status=status, health=health, image_id=image_id, registry_digests=digests)
 
 
+class BackupInspectionError(Exception):
+    """Only fixed, non-sensitive status labels may reach the report."""
+    ALLOWED = {'directory_missing', 'permission_denied', 'symlink_rejected',
+               'invalid_directory', 'metadata_unavailable'}
+
+    def __init__(self, code):
+        self.code = code if code in self.ALLOWED else 'metadata_unavailable'
+
+
 def inspect_backups():
     directory = APP / 'backups'
-    if directory.is_symlink():
-        raise ValueError('symlink backup directory')
+    try:
+        mode = directory.lstat().st_mode
+        if stat.S_ISLNK(mode):
+            raise BackupInspectionError('symlink_rejected')
+        if not stat.S_ISDIR(mode):
+            raise BackupInspectionError('invalid_directory')
+        entries = os.scandir(directory)
+    except FileNotFoundError:
+        raise BackupInspectionError('directory_missing') from None
+    except PermissionError:
+        raise BackupInspectionError('permission_denied') from None
+    except NotADirectoryError:
+        raise BackupInspectionError('invalid_directory') from None
+    except OSError:
+        raise BackupInspectionError('metadata_unavailable') from None
     metadata = []
-    with os.scandir(directory) as entries:
-        for entry in entries:
-            if entry.name.startswith('portal_') and entry.name.endswith('.dump') and entry.is_file(follow_symlinks=False):
-                stat = entry.stat(follow_symlinks=False)
-                metadata.append((stat.st_mtime, stat.st_size))
-    latest = max(metadata) if metadata else None
-    return dict(count=len(metadata), latest_utc=datetime.datetime.fromtimestamp(
-        latest[0], datetime.timezone.utc).isoformat() if latest else None,
-        latest_bytes=latest[1] if latest else None,
-        restore_verified=False)
+    try:
+        with entries:
+            for entry in entries:
+                if entry.name.startswith('portal_') and entry.name.endswith('.dump') and entry.is_file(follow_symlinks=False):
+                    info = entry.stat(follow_symlinks=False)
+                    metadata.append((info.st_mtime, info.st_size))
+        latest = max(metadata) if metadata else None
+        return dict(count=len(metadata), latest_utc=datetime.datetime.fromtimestamp(
+            latest[0], datetime.timezone.utc).isoformat() if latest else None,
+            latest_bytes=latest[1] if latest else None,
+            restore_verified=False)
+    except PermissionError:
+        raise BackupInspectionError('permission_denied') from None
+    except Exception:
+        raise BackupInspectionError('metadata_unavailable') from None
 
 
 def inspect_flags():
@@ -89,6 +117,9 @@ def main():
         nonlocal failed
         try:
             report[key] = operation()
+        except BackupInspectionError as error:
+            report[key] = {'error': error.code, 'restore_verified': False}
+            failed = True
         except Exception:
             # Do not echo command output, exception text, paths, or secret-bearing values.
             report[key] = {'error': 'unavailable'}
