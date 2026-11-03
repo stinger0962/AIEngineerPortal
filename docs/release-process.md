@@ -52,3 +52,20 @@ Production deployment is tag-driven.
 - The VPS checks out the exact `GITHUB_SHA` tied to that workflow run.
 - GitHub Actions builds images; Docker Compose recreates services using those images with `--force-recreate --remove-orphans`.
 - GitHub Actions checks backend container health via SSH; public-site smoke testing is a separate verification step.
+
+## Read-only production preflight
+
+The manual-only `production-preflight.yml` workflow runs only on `main`.
+Its unauthenticated observation step requires `VPS_HOST` to resolve exclusively
+to the owner's confirmed **AIEngineerPortal** Droplet, `146.190.124.162`.
+The previously assumed `64.225.43.230` belongs to a different project and is
+not an allowed Portal inspection target.
+
+Supply a SHA256 host-key fingerprint obtained from the Portal Droplet's trusted
+console or an already trusted connection. Observed network fingerprints are
+diagnostics only and must never be used to establish trust. The subsequent SSH
+action still verifies the supplied trusted fingerprint before authentication.
+A target mismatch or observation error stops the workflow before that action.
+
+This workflow only inspects fixed metadata; merging a preflight fix does not
+deploy the application, change repository secrets, or change server trust.

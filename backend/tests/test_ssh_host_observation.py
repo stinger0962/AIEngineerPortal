@@ -57,6 +57,24 @@ class HostObservationTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         resolve.assert_called_once_with(SECRET_HOST, 22, type=socket.SOCK_STREAM)
 
+    def test_confirmed_portal_ip_is_the_only_allowed_target(self):
+        self.assertEqual(MODULE.EXPECTED_IP, '146.190.124.162')
+        code, report, calls, _ = self.run_case(
+            host='146.190.124.162', addresses=[self.address('146.190.124.162')])
+        self.assertEqual(code, 0)
+        self.assertTrue(report['expected_ip_match'])
+        self.assertEqual(calls[0][-1], '146.190.124.162')
+
+    def test_stock_tracker_ip_is_rejected_before_probe(self):
+        for addresses in ([self.address('64.225.43.230')],
+                          [self.address('146.190.124.162'), self.address('64.225.43.230')]):
+            with self.subTest(addresses=addresses):
+                code, report, calls, _ = self.run_case(addresses=addresses)
+                self.assertEqual(code, 1)
+                self.assertFalse(report['expected_ip_match'])
+                self.assertEqual(report['observed_public_keys'], [])
+                self.assertEqual(calls, [])
+
     def test_mismatch_empty_or_mixed_dns_stops_before_probe(self):
         for addresses in ([], [self.address('192.0.2.1')],
                           [self.address(MODULE.EXPECTED_IP), self.address('192.0.2.1')]):
