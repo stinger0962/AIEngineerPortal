@@ -28,6 +28,12 @@ class ReleaseImageStateTests(unittest.TestCase):
         (self.app / 'infra').mkdir(parents=True)
         (self.app / 'infra/docker-compose.prod.yml').write_text('fixture')
         self.state = self.root / 'state'
+        self.home = self.root / 'home'
+        self.home.mkdir()
+        account = type('Account', (), {'pw_dir': str(self.home)})()
+        patcher = patch.object(MODULE.pwd, 'getpwuid', return_value=account)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         for name, value in [('APP', self.app), ('STATE', self.state)]:
             patcher = patch.object(MODULE, name, value)
             patcher.start()
@@ -317,7 +323,7 @@ class ReleaseImageStateTests(unittest.TestCase):
                     self.assertEqual(MODULE.main(['prepare', CANDIDATE]), 1)
                 self.assertEqual(output.getvalue(), 'Release image state: operation failed stage=previous_commit category=' + category + '\n')
                 self.assertNotIn(SECRET, output.getvalue())
-                self.assertEqual(run.call_args.kwargs['env'], MODULE.ENV)
+                self.assertEqual(run.call_args.kwargs['env'], dict(MODULE.ENV, HOME=str(self.home)))
                 self.assertEqual(run.call_args.kwargs['stderr'], MODULE.subprocess.PIPE)
                 self.assertEqual(run.call_args.args[0], ['git', '--no-optional-locks', '-C', str(self.app), 'rev-parse', 'HEAD'])
                 self.assertFalse((self.state / (CANDIDATE + '.json')).exists())
@@ -329,12 +335,47 @@ class ReleaseImageStateTests(unittest.TestCase):
                 MODULE.command(MODULE.DOCKER + ['inspect', 'fixture'])
         self.assertEqual(run.call_args.kwargs['stderr'], MODULE.subprocess.DEVNULL)
 
-    def test_successful_git_read_returns_revision_without_changing_environment(self):
+    def test_successful_git_read_uses_only_verified_account_home(self):
         result = type('Result', (), {'returncode': 0, 'stdout': PREVIOUS + '\n', 'stderr': SECRET})()
         with patch.object(MODULE.subprocess, 'run', return_value=result) as run:
             self.assertEqual(MODULE.command(['git', '--no-optional-locks', '-C', str(self.app), 'rev-parse', 'HEAD']), PREVIOUS)
-        self.assertEqual(run.call_args.kwargs['env'], {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
+        self.assertEqual(run.call_args.kwargs['env'], dict(MODULE.ENV, HOME=str(self.home)))
         self.assertNotIn('safe.directory', str(run.call_args))
+
+
+
+    def test_git_home_comes_from_os_account_not_inherited_environment(self):
+        with patch.dict(os.environ, {'HOME': '/untrusted', 'XDG_CONFIG_HOME': '/untrusted',
+                                   'GIT_CONFIG_GLOBAL': '/untrusted', 'GIT_CONFIG_COUNT': '1',
+                                   'SUDO_UID': '12345', 'DOCKER_HOST': 'tcp://untrusted'}):
+            self.assertEqual(MODULE.git_environment(), dict(MODULE.ENV, HOME=str(self.home)))
+        MODULE.pwd.getpwuid.assert_called_with(os.geteuid())
+
+    def test_invalid_account_home_fails_before_git_execution(self):
+        link = self.root / 'link'
+        link.symlink_to(self.home)
+        for value in ('relative', str(link), str(self.app / 'infra/docker-compose.prod.yml')):
+            with self.subTest(value=value):
+                account = type('Account', (), {'pw_dir': value})()
+                with patch.object(MODULE.pwd, 'getpwuid', return_value=account), \
+                     patch.object(MODULE.subprocess, 'run') as run:
+                    with self.assertRaisesRegex(ValueError, 'invalid_account_home'):
+                        MODULE.command(['git', '--no-optional-locks', '-C', str(self.app), 'rev-parse', 'HEAD'])
+                    run.assert_not_called()
+
+    def test_foreign_owned_account_home_fails_closed(self):
+        info = type('Info', (), {'st_mode': 0o40700, 'st_uid': os.geteuid() + 1})()
+        with patch.object(Path, 'lstat', return_value=info):
+            with self.assertRaisesRegex(ValueError, 'invalid_account_home'):
+                MODULE.git_environment()
+
+    def test_docker_never_loads_account_home_or_git_configuration(self):
+        result = type('Result', (), {'returncode': 0, 'stdout': 'fixture'})()
+        with patch.object(MODULE.subprocess, 'run', return_value=result) as run, \
+             patch.object(MODULE, 'git_environment', side_effect=AssertionError('not Git')):
+            self.assertEqual(MODULE.command(MODULE.DOCKER + ['inspect', 'fixture']), 'fixture')
+        self.assertEqual(run.call_args.kwargs['env'], MODULE.ENV)
+        self.assertNotIn('HOME', run.call_args.kwargs['env'])
 
 
 if __name__ == '__main__':
