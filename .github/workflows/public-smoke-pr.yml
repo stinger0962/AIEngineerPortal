@@ -1,0 +1,24 @@
+name: PR public HTTPS diagnostics
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/public-smoke.py'
+      - 'backend/tests/test_public_smoke.py'
+      - '.github/workflows/public-smoke-pr.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  public_smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Offline diagnostic regressions
+        run: python3 -B -m unittest discover -s backend/tests -p test_public_smoke.py -v
+      - name: Check fixed public HTTPS endpoints only
+        run: python3 -B scripts/public-smoke.py
