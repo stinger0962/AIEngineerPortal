@@ -36,7 +36,8 @@ REASONS = frozenset({
     'unsafe_state_path', 'invalid_candidate', 'oversized_state',
     'invalid_container_image', 'invalid_image', 'image_unavailable',
     'previous_service_not_healthy', 'rollback_health_failed',
-    'candidate_compose_incompatible',
+    'candidate_compose_incompatible', 'git_dubious_ownership',
+    'git_not_repository', 'git_permission_denied', 'git_command_failed',
 })
 
 
@@ -81,12 +82,32 @@ def valid_image(value):
     return isinstance(value, str) and re.fullmatch(r'sha256:[0-9a-f]{64}', value) is not None
 
 
+def git_failure_category(stderr):
+    """Diagnostic hints only: stderr is never printed and never relaxes a guard."""
+    if not isinstance(stderr, str):
+        return 'git_command_failed'
+    # LANG is fixed to C.UTF-8. Inspect a bounded prefix; never include it in output.
+    lines = stderr[:4096].splitlines()
+    if any(line.startswith('fatal: detected dubious ownership in repository at ')
+           for line in lines):
+        return 'git_dubious_ownership'
+    if any(line.startswith('fatal: not a git repository') for line in lines):
+        return 'git_not_repository'
+    if any(line.startswith(('fatal: ', 'error: ')) and line.endswith(': Permission denied')
+           for line in lines):
+        return 'git_permission_denied'
+    return 'git_command_failed'
+
+
 def command(args, timeout=30):
+    # Only the fixed revision read gets diagnostic stderr. Docker is unchanged.
+    git_revision = args == ['git', '--no-optional-locks', '-C', str(APP), 'rev-parse', 'HEAD']
     result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL, text=True, timeout=timeout,
+                            stderr=subprocess.PIPE if git_revision else subprocess.DEVNULL,
+                            text=True, timeout=timeout,
                             check=False, env=ENV)
     if result.returncode:
-        raise ValueError('command_failed')
+        raise ValueError(git_failure_category(result.stderr) if git_revision else 'command_failed')
     return result.stdout.strip()
 
 
