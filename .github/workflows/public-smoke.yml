@@ -1,0 +1,18 @@
+name: Public HTTPS diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public_smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Require main diagnostic source
+        run: test "$GITHUB_REF" = refs/heads/main
+      - uses: actions/checkout@v4
+      - name: Check fixed public HTTPS endpoints only
+        run: python3 -B scripts/public-smoke.py

@@ -48,6 +48,7 @@ class PublicSmokeTests(unittest.TestCase):
              patch.object(MODULE.time, 'sleep') as sleep, contextlib.redirect_stdout(output):
             code = MODULE.main()
         self.assertNotIn(SENTINEL, output.getvalue())
+        self.output = output.getvalue()
         return code, sleep
 
     def test_success_checks_only_fixed_https_urls_with_timeout(self):
@@ -65,7 +66,7 @@ class PublicSmokeTests(unittest.TestCase):
                 opener = Opener(error)
                 code, sleep = self.run_main(opener)
                 self.assertEqual(code, 1)
-                self.assertEqual(len(opener.calls), 5)
+                self.assertEqual(len(opener.calls), 10)
                 self.assertEqual(sleep.call_count, 4)
 
     def test_tls_defaults_verify_peer_and_redirects_are_refused(self):
@@ -107,6 +108,52 @@ class PublicSmokeTests(unittest.TestCase):
                         workflow.index('- name: Verify public HTTPS endpoints'))
         self.assertIn('run: python3 -B scripts/public-smoke.py', workflow)
         self.assertNotIn('continue-on-error', workflow)
+
+
+
+    def test_safe_failure_categories_do_not_echo_exception_details(self):
+        import socket
+        import urllib.error
+        cases = [
+            (ssl.SSLError(SENTINEL), 'tls_error', None),
+            (urllib.error.URLError(ssl.SSLError(SENTINEL)), 'tls_error', None),
+            (urllib.error.URLError(socket.gaierror(SENTINEL)), 'dns_error', None),
+            (TimeoutError(SENTINEL), 'timeout', None),
+            (ConnectionRefusedError(SENTINEL), 'connection_error', None),
+            (ValueError(SENTINEL), 'probe_error', None),
+            (urllib.error.HTTPError('https://' + SENTINEL, 503, SENTINEL, {}, None), 'http_status', 503),
+            (urllib.error.HTTPError('https://' + SENTINEL, 302, SENTINEL, {'Location': SENTINEL}, None), 'redirect_refused', 302),
+        ]
+        for error, category, status in cases:
+            with self.subTest(category=category):
+                self.assertEqual(MODULE.classify(error), (category, status))
+                code, _ = self.run_main(Opener(error))
+                self.assertEqual(code, 1)
+                self.assertIn('endpoint=health category=' + category, self.output)
+                self.assertIn('endpoint=frontend category=' + category, self.output)
+                self.assertNotIn(SENTINEL, self.output)
+
+    def test_health_failure_does_not_hide_frontend_result(self):
+        opener = Opener()
+        def response(request, timeout):
+            opener.calls.append(request.full_url)
+            if request.full_url.endswith('/health'):
+                return Response(b'private body', 'text/html')
+            return Response(b'not html', 'text/html')
+        with patch.object(opener, 'open', side_effect=response):
+            code, _ = self.run_main(opener)
+        self.assertEqual(code, 1)
+        self.assertIn('endpoint=health category=content_type', self.output)
+        self.assertIn('endpoint=frontend category=frontend_body', self.output)
+        self.assertEqual(len(opener.calls), 10)
+
+    def test_diagnostic_only_workflow_has_no_server_access(self):
+        workflow = (ROOT / '.github/workflows/public-smoke.yml').read_text()
+        self.assertIn('workflow_dispatch:', workflow)
+        self.assertIn('contents: read', workflow)
+        self.assertIn('python3 -B scripts/public-smoke.py', workflow)
+        for forbidden in ('secrets.', 'ssh-action', 'deploy.yml', 'push:', 'pull_request:', 'packages:', 'write', 'inputs:'):
+            self.assertNotIn(forbidden, workflow)
 
 
 if __name__ == '__main__':
