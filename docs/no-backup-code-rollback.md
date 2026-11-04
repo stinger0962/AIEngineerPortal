@@ -113,3 +113,16 @@ against the executing workflow SHA. Merely having a main ref name is insufficien
 re-running an older main workflow fails closed. This check does not require
 forward-release CI eligibility for the old application images. As with the forward
 gate, it is a point-in-time check, not a lock preventing subsequent main commits.
+
+## Safe failure diagnostics
+
+The helper reports only fixed stage/category labels, never raw exception messages,
+paths, command output, image references, or configuration values. Every failure
+still returns nonzero; diagnostics do not relax validation or retry an operation.
+For example, `stage=previous_commit category=command_failed` identifies a failed
+Git read, while `stage=candidate_compatibility category=candidate_compose_incompatible`
+means capture stopped before its state-directory/lock writes. A later capture
+failure may leave those private state files; it does not imply an app rollout.
+The workflow skips forward deployment after capture failure. Investigate the
+reported stage rather than rerunning unchanged or bypassing a guard. An unknown
+failure remains `category=operation_failed` without disclosing its exception.

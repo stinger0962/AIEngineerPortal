@@ -25,6 +25,54 @@ HEALTH_TIMEOUT_SECONDS = 300
 FIELDS = {'version', 'candidate_sha', 'previous_sha', 'compose_sha256', 'images'}
 
 
+# Output is selected only from these literals, never exception text or paths.
+STAGES = frozenset({
+    'candidate_compatibility', 'compose_read', 'state_directory', 'state_lock',
+    'state_read', 'previous_commit', 'container_inspection', 'local_image_check',
+    'record', 'prepare', 'rollback', 'operation',
+})
+REASONS = frozenset({
+    'command_failed', 'unsafe_path', 'invalid_state', 'unsafe_state_permissions',
+    'unsafe_state_path', 'invalid_candidate', 'oversized_state',
+    'invalid_container_image', 'invalid_image', 'image_unavailable',
+    'previous_service_not_healthy', 'rollback_health_failed',
+    'candidate_compose_incompatible',
+})
+
+
+@contextmanager
+def diagnostic_stage(stage):
+    """Annotate, but never replace, exceptions: existing catch behavior is intact."""
+    try:
+        yield
+    except Exception as exc:
+        if not hasattr(exc, '_release_stage'):
+            exc._release_stage = stage if stage in STAGES else 'operation'
+        raise
+
+
+def failure_category(exc):
+    if isinstance(exc, PermissionError):
+        return 'permission_denied'
+    if isinstance(exc, FileNotFoundError):
+        return 'not_found'
+    if isinstance(exc, FileExistsError):
+        return 'already_exists'
+    if isinstance(exc, BlockingIOError):
+        return 'lock_unavailable'
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return 'command_timeout'
+    if isinstance(exc, json.JSONDecodeError):
+        return 'invalid_json'
+    if type(exc) is ValueError and len(exc.args) == 1:
+        reason = exc.args[0]
+        if type(reason) is str and reason in REASONS:
+            return reason
+    if isinstance(exc, OSError):
+        return 'filesystem_error'
+    return 'operation_failed'
+
+
 def valid_sha(value):
     return isinstance(value, str) and re.fullmatch(r'[0-9a-f]{40}', value) is not None
 
@@ -42,6 +90,7 @@ def command(args, timeout=30):
     return result.stdout.strip()
 
 
+@diagnostic_stage('compose_read')
 def compose_hash():
     path = APP / 'infra/docker-compose.prod.yml'
     if APP.resolve() != APP or path.resolve() != path:
@@ -71,6 +120,7 @@ def check_private(info, directory=False):
         raise ValueError('unsafe_state_permissions')
 
 
+@diagnostic_stage('state_directory')
 def state_directory(create=False):
     if STATE.parent.resolve() != STATE.parent:
         raise ValueError('unsafe_state_path')
@@ -82,17 +132,19 @@ def state_directory(create=False):
 
 @contextmanager
 def operation_lock(create=False):
-    directory = state_directory(create=create)
-    fd = os.open(directory / '.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, 'r+') as stream:
-        check_private(os.fstat(stream.fileno()))
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        try:
-            yield
-        finally:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    with diagnostic_stage('state_lock'):
+        directory = state_directory(create=create)
+        fd = os.open(directory / '.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'r+') as stream:
+            check_private(os.fstat(stream.fileno()))
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
+@diagnostic_stage('state_read')
 def read_state(candidate_sha):
     if not valid_sha(candidate_sha):
         raise ValueError('invalid_candidate')
@@ -108,6 +160,7 @@ def read_state(candidate_sha):
     return data
 
 
+@diagnostic_stage('container_inspection')
 def inspect_container(service, timeout=30):
     raw = command(DOCKER + ['inspect', '--format',
                             '{{json .Image}} {{json .State.Status}} {{json .State.Health.Status}}',
@@ -118,6 +171,7 @@ def inspect_container(service, timeout=30):
     return image, status, health
 
 
+@diagnostic_stage('local_image_check')
 def require_local_image(image):
     if not valid_image(image):
         raise ValueError('invalid_image')
@@ -125,10 +179,12 @@ def require_local_image(image):
         raise ValueError('image_unavailable')
 
 
+@diagnostic_stage('record')
 def record(candidate_sha):
     if not valid_sha(candidate_sha):
         raise ValueError('invalid_candidate')
-    previous = command(['git', '--no-optional-locks', '-C', str(APP), 'rev-parse', 'HEAD'])
+    with diagnostic_stage('previous_commit'):
+        previous = command(['git', '--no-optional-locks', '-C', str(APP), 'rev-parse', 'HEAD'])
     images = {}
     for service in SERVICES:
         image, status, health = inspect_container(service)
@@ -151,6 +207,7 @@ def record(candidate_sha):
     return data
 
 
+@diagnostic_stage('prepare')
 def prepare(candidate_sha):
     """Reuse a valid original rollback point on rerun; never replace it."""
     try:
@@ -162,6 +219,7 @@ def prepare(candidate_sha):
     return data
 
 
+@diagnostic_stage('rollback')
 def rollback(candidate_sha):
     data = read_state(candidate_sha)
     # Validate ALL inputs and local image availability before changing either tag.
@@ -200,13 +258,18 @@ def main(argv=None):
         return 1
     try:
         if args[0] == 'prepare':
-            expected = os.environ.get('EXPECTED_COMPOSE_SHA256', '')
-            if not re.fullmatch(r'[0-9a-f]{64}', expected) or compose_hash() != expected:
-                raise ValueError('candidate_compose_incompatible')
+            with diagnostic_stage('candidate_compatibility'):
+                expected = os.environ.get('EXPECTED_COMPOSE_SHA256', '')
+                if not re.fullmatch(r'[0-9a-f]{64}', expected) or compose_hash() != expected:
+                    raise ValueError('candidate_compose_incompatible')
         with operation_lock(create=args[0] in ('record', 'prepare')):
             {'record': record, 'prepare': prepare, 'rollback': rollback}[args[0]](args[1])
-    except Exception:
-        print('Release image state: operation failed')
+    except Exception as exc:
+        stage = getattr(exc, '_release_stage', 'operation')
+        if type(stage) is not str or stage not in STAGES:
+            stage = 'operation'
+        print('Release image state: operation failed stage=' + stage
+              + ' category=' + failure_category(exc))
         return 1
     print('Release image state: operation completed')
     return 0
