@@ -130,6 +130,18 @@ failure remains `category=operation_failed` without disclosing its exception.
 The fixed Git revision read additionally classifies stderr into
 `git_dubious_ownership`, `git_not_repository`, `git_permission_denied`, or
 `git_command_failed`. These are diagnostic hints, not permission to bypass a
-check. Raw stderr/stdout remain private; no HOME/config inheritance, ownership
-change, or safe-directory exception is introduced. Unknown messages still fail
+check. Raw stderr/stdout remain private; no arbitrary environment/config inheritance,
+ownership change, or safe-directory exception is introduced. Unknown messages still fail
 closed. A category must be observed before attributing a production failure to it.
+
+### Existing account Git configuration
+
+Only the fixed Git revision read receives HOME from the operating system account
+record for the effective UID, after validating an absolute, nonsymlink directory
+owned by that UID. Incoming HOME, XDG_CONFIG_HOME, GIT_CONFIG_* and SUDO_UID are not
+inherited. Git may therefore read the account's already-existing configuration;
+no configuration is written and no safe.directory exception is added. Git's own
+ownership check still applies and may still reject the repository. Docker keeps
+its original scrubbed environment and fixed local socket. This corrects a context
+difference from the successful preflight, but does not prove the server has an
+existing applicable trust entry or guarantee a successful release.

@@ -9,6 +9,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 from pathlib import Path
 import re
 import stat
@@ -29,7 +30,7 @@ FIELDS = {'version', 'candidate_sha', 'previous_sha', 'compose_sha256', 'images'
 STAGES = frozenset({
     'candidate_compatibility', 'compose_read', 'state_directory', 'state_lock',
     'state_read', 'previous_commit', 'container_inspection', 'local_image_check',
-    'record', 'prepare', 'rollback', 'operation',
+    'record', 'prepare', 'rollback', 'operation', 'git_environment',
 })
 REASONS = frozenset({
     'command_failed', 'unsafe_path', 'invalid_state', 'unsafe_state_permissions',
@@ -38,6 +39,7 @@ REASONS = frozenset({
     'previous_service_not_healthy', 'rollback_health_failed',
     'candidate_compose_incompatible', 'git_dubious_ownership',
     'git_not_repository', 'git_permission_denied', 'git_command_failed',
+    'invalid_account_home',
 })
 
 
@@ -99,13 +101,25 @@ def git_failure_category(stderr):
     return 'git_command_failed'
 
 
+@diagnostic_stage('git_environment')
+def git_environment():
+    """Restore only the OS account home for existing Git config; never add trust."""
+    home = Path(pwd.getpwuid(os.geteuid()).pw_dir)
+    if not home.is_absolute() or home.resolve() != home:
+        raise ValueError('invalid_account_home')
+    info = home.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+        raise ValueError('invalid_account_home')
+    return dict(ENV, HOME=str(home))
+
+
 def command(args, timeout=30):
     # Only the fixed revision read gets diagnostic stderr. Docker is unchanged.
     git_revision = args == ['git', '--no-optional-locks', '-C', str(APP), 'rev-parse', 'HEAD']
     result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE if git_revision else subprocess.DEVNULL,
                             text=True, timeout=timeout,
-                            check=False, env=ENV)
+                            check=False, env=git_environment() if git_revision else ENV)
     if result.returncode:
         raise ValueError(git_failure_category(result.stderr) if git_revision else 'command_failed')
     return result.stdout.strip()
