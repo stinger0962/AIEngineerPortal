@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 
 ORIGIN = 'https://portal.leipan.cc'
+USER_AGENT = 'AIEngineerPortal-HealthCheck/1.0'
 ATTEMPTS = 5
 DELAY_SECONDS = 10
 TIMEOUT_SECONDS = 10
@@ -73,7 +74,9 @@ class NoRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def probe(opener, path, kind):
-    request = urllib.request.Request(ORIGIN + path, headers={'Accept': kind})
+    # Identify this application honestly rather than inheriting a library identity.
+    request = urllib.request.Request(
+        ORIGIN + path, headers={'Accept': kind, 'User-Agent': USER_AGENT})
     try:
         response = opener.open(request, timeout=TIMEOUT_SECONDS)
     except urllib.error.HTTPError as error:

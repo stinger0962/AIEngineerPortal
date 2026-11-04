@@ -32,9 +32,11 @@ class Response:
 class Opener:
     def __init__(self, error=None):
         self.calls = []
+        self.requests = []
         self.error = error
     def open(self, request, timeout):
         self.calls.append((request.full_url, timeout))
+        self.requests.append(request)
         if self.error:
             if isinstance(self.error, urllib.error.HTTPError):
                 # Real requests return a new stream, never a previously closed error.
@@ -129,6 +131,20 @@ class PublicSmokeTests(unittest.TestCase):
             ('https://portal.leipan.cc/health', 10),
             ('https://portal.leipan.cc/', 10)])
         sleep.assert_not_called()
+
+    def test_fixed_honest_application_identity_on_both_endpoints_and_retries(self):
+        for error in (None, urllib.error.HTTPError(MODULE.ORIGIN, 403, SENTINEL, {}, None)):
+            opener = Opener(error)
+            code, _ = self.run_main(opener)
+            self.assertEqual(code, 0 if error is None else 1)
+            self.assertEqual(len(opener.requests), 2 if error is None else 10)
+            for request in opener.requests:
+                self.assertEqual(request.get_method(), 'GET')
+                self.assertEqual(request.get_header('User-agent'),
+                                 'AIEngineerPortal-HealthCheck/1.0')
+                self.assertEqual(request.full_url, MODULE.ORIGIN + (
+                    '/health' if request.get_header('Accept') == 'application/json' else '/'))
+                self.assertIn(request.get_header('Accept'), ('application/json', 'text/html'))
 
     def test_certificate_and_network_errors_fail_closed_with_bounded_retries(self):
         for error in (ssl.SSLError(SENTINEL), TimeoutError(SENTINEL), ValueError(SENTINEL)):
