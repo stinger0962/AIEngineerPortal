@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 
 ORIGIN = 'https://portal.leipan.cc'
+USER_AGENT = 'AIEngineerPortal-HealthCheck/1.0'
 ATTEMPTS = 5
 DELAY_SECONDS = 10
 TIMEOUT_SECONDS = 10
@@ -17,9 +18,36 @@ CATEGORIES = frozenset({'http_status', 'redirect_refused', 'content_type',
 
 
 class ProbeError(ValueError):
-    def __init__(self, category, status=None):
+    def __init__(self, category, status=None, hints=''):
         self.category = category if category in CATEGORIES else 'probe_error'
         self.status = status if type(status) is int and 100 <= status <= 599 else None
+        self.hints = hints
+
+
+def response_hints(response):
+    """Recognized markers are hints, not proof of which layer denied access.
+
+    Never return response text, header values, identifiers, or exception text.
+    Error responses use the same bounded read as successful responses.
+    """
+    headers = response.headers or {}
+    server = headers.get('Server', '').lower().split('/', 1)[0].strip()
+    server = server if server in {'cloudflare', 'nginx', 'caddy', 'envoy', 'awselb'} else 'other_or_absent'
+    challenge = headers.get('cf-mitigated', '').lower() == 'challenge'
+    cloudflare = bool(headers.get('cf-ray'))
+    cloudfront = bool(headers.get('x-amz-cf-id'))
+    try:
+        body = response.read(MAX_BODY_BYTES + 1).lower()
+        body_hint = ('cloudflare_challenge' if b'/cdn-cgi/challenge-platform/' in body
+                     else 'cloudflare_denial' if b'cloudflare' in body and b'sorry, you have been blocked' in body
+                     else 'access_denied' if b'access denied' in body or b'forbidden' in body
+                     else 'unrecognized')
+    except Exception:
+        body_hint = 'unavailable'
+    return (' server_hint=' + server + ' cf_challenge=' + str(challenge).lower()
+            + ' cf_marker=' + str(cloudflare).lower()
+            + ' cloudfront_marker=' + str(cloudfront).lower()
+            + ' body_hint=' + body_hint)
 
 
 def classify(error):
@@ -46,10 +74,20 @@ class NoRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def probe(opener, path, kind):
-    request = urllib.request.Request(ORIGIN + path, headers={'Accept': kind})
-    with opener.open(request, timeout=TIMEOUT_SECONDS) as response:
+    # Identify this application honestly rather than inheriting a library identity.
+    request = urllib.request.Request(
+        ORIGIN + path, headers={'Accept': kind, 'User-Agent': USER_AGENT})
+    try:
+        response = opener.open(request, timeout=TIMEOUT_SECONDS)
+    except urllib.error.HTTPError as error:
+        # HTTPError is also a response stream; always close it after inspection.
+        with error:
+            hints = response_hints(error)
+        category, status = classify(error)
+        raise ProbeError(category, status, hints) from None
+    with response:
         if response.status != 200:
-            raise ProbeError('http_status', response.status)
+            raise ProbeError('http_status', response.status, response_hints(response))
         if response.headers.get_content_type() != kind:
             raise ProbeError('content_type')
         body = response.read(MAX_BODY_BYTES + 1)
@@ -65,6 +103,9 @@ def probe(opener, path, kind):
 
 
 def main():
+    proxies = urllib.request.getproxies()
+    print('Public probe context https_proxy_present=' + str(bool(proxies.get('https'))).lower()
+          + ' no_proxy_present=' + str(bool(proxies.get('no'))).lower())
     # Default context verifies certificates and hostnames; no insecure fallback.
     opener = urllib.request.build_opener(
         urllib.request.HTTPSHandler(context=ssl.create_default_context()),
@@ -80,7 +121,8 @@ def main():
                 category, status = classify(error)
                 # Only fixed labels and bounded numeric status, never exception text/body.
                 print('Public probe failed endpoint=' + endpoint + ' category=' + category
-                      + ('' if status is None else ' status=' + str(status)))
+                      + ('' if status is None else ' status=' + str(status))
+                      + (error.hints if isinstance(error, ProbeError) else ''))
         if passed:
             print('Public smoke checks passed')
             return 0

@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 import ssl
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,10 +32,17 @@ class Response:
 class Opener:
     def __init__(self, error=None):
         self.calls = []
+        self.requests = []
         self.error = error
     def open(self, request, timeout):
         self.calls.append((request.full_url, timeout))
+        self.requests.append(request)
         if self.error:
+            if isinstance(self.error, urllib.error.HTTPError):
+                # Real requests return a new stream, never a previously closed error.
+                raise urllib.error.HTTPError(self.error.url, self.error.code,
+                                             self.error.msg, self.error.headers,
+                                             io.BytesIO())
             raise self.error
         if request.full_url.endswith('/health'):
             return Response(b'{"status":"ok"}', 'application/json')
@@ -42,6 +50,70 @@ class Opener:
 
 
 class PublicSmokeTests(unittest.TestCase):
+    def test_http_denial_hints_are_allowlisted_and_body_reads_bounded(self):
+        for status in (403, 302):
+            streams = []
+            def deny(request, timeout):
+                headers = Message()
+                headers['Server'] = 'cloudflare'
+                headers['cf-ray'] = SENTINEL
+                headers['cf-mitigated'] = 'challenge'
+                headers['Set-Cookie'] = SENTINEL
+                headers['Location'] = 'https://' + SENTINEL
+                stream = io.BytesIO(b'/cdn-cgi/challenge-platform/ ' + SENTINEL.encode()
+                                    + b'x' * MODULE.MAX_BODY_BYTES)
+                stream.read = unittest.mock.Mock(wraps=stream.read)
+                streams.append(stream)
+                raise urllib.error.HTTPError(request.full_url, status, SENTINEL, headers, stream)
+            with patch.object(Opener, 'open', side_effect=deny), \
+                 patch.object(MODULE.urllib.request, 'getproxies', return_value={
+                     'https': 'http://' + SENTINEL, 'no': SENTINEL}):
+                code, _ = self.run_main(Opener())
+            self.assertEqual(code, 1)
+            self.assertIn('https_proxy_present=true no_proxy_present=true', self.output)
+            self.assertIn('server_hint=cloudflare cf_challenge=true cf_marker=true', self.output)
+            self.assertIn('body_hint=cloudflare_challenge', self.output)
+            self.assertIn('status=' + str(status), self.output)
+            for stream in streams:
+                stream.read.assert_called_once_with(MODULE.MAX_BODY_BYTES + 1)
+                self.assertTrue(stream.closed)
+
+    def test_unknown_headers_and_body_never_reach_logs(self):
+        response = Response(SENTINEL.encode(), 'text/html', 403)
+        response.headers['Server'] = SENTINEL
+        response.headers['cf-mitigated'] = SENTINEL
+        response.read = unittest.mock.Mock(wraps=response.read)
+        with patch.object(Opener, 'open', return_value=response):
+            code, _ = self.run_main(Opener())
+        self.assertEqual(code, 1)
+        self.assertIn('server_hint=other_or_absent cf_challenge=false', self.output)
+        self.assertIn('body_hint=unrecognized', self.output)
+        self.assertEqual(response.read.call_count, 10)
+        response.read.assert_called_with(MODULE.MAX_BODY_BYTES + 1)
+
+    def test_error_body_read_failure_preserves_http_status_and_closes_stream(self):
+        stream = io.BytesIO()
+        stream.read = unittest.mock.Mock(side_effect=TimeoutError(SENTINEL))
+        error = urllib.error.HTTPError(MODULE.ORIGIN, 403, SENTINEL, {}, stream)
+        with patch.object(Opener, "open", side_effect=error):
+            code, _ = self.run_main(Opener())
+        self.assertEqual(code, 1)
+        self.assertIn('category=http_status status=403', self.output)
+        self.assertIn('body_hint=unavailable', self.output)
+        self.assertTrue(stream.closed)
+
+    def test_pr_diagnostic_has_only_read_permissions_and_no_production_actions(self):
+        workflow = (ROOT / '.github/workflows/public-smoke-pr.yml').read_text()
+        self.assertIn('pull_request:', workflow)
+        self.assertIn('contents: read', workflow)
+        self.assertIn('persist-credentials: false', workflow)
+        self.assertIn('timeout-minutes: 4', workflow)
+        self.assertIn('python3 -B -m unittest discover', workflow)
+        self.assertIn('python3 -B scripts/public-smoke.py', workflow)
+        for forbidden in ('secrets.', 'ssh-action', 'deploy.yml', 'push:',
+                          'packages:', 'write', 'pull_request_target:', 'continue-on-error'):
+            self.assertNotIn(forbidden, workflow)
+
     def run_main(self, opener):
         output = io.StringIO()
         with patch.object(MODULE.urllib.request, 'build_opener', return_value=opener), \
@@ -59,6 +131,20 @@ class PublicSmokeTests(unittest.TestCase):
             ('https://portal.leipan.cc/health', 10),
             ('https://portal.leipan.cc/', 10)])
         sleep.assert_not_called()
+
+    def test_fixed_honest_application_identity_on_both_endpoints_and_retries(self):
+        for error in (None, urllib.error.HTTPError(MODULE.ORIGIN, 403, SENTINEL, {}, None)):
+            opener = Opener(error)
+            code, _ = self.run_main(opener)
+            self.assertEqual(code, 0 if error is None else 1)
+            self.assertEqual(len(opener.requests), 2 if error is None else 10)
+            for request in opener.requests:
+                self.assertEqual(request.get_method(), 'GET')
+                self.assertEqual(request.get_header('User-agent'),
+                                 'AIEngineerPortal-HealthCheck/1.0')
+                self.assertEqual(request.full_url, MODULE.ORIGIN + (
+                    '/health' if request.get_header('Accept') == 'application/json' else '/'))
+                self.assertIn(request.get_header('Accept'), ('application/json', 'text/html'))
 
     def test_certificate_and_network_errors_fail_closed_with_bounded_retries(self):
         for error in (ssl.SSLError(SENTINEL), TimeoutError(SENTINEL), ValueError(SENTINEL)):
