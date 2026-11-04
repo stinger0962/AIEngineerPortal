@@ -7,6 +7,7 @@ on:
       - 'frontend/**'
       - '.github/workflows/ziwei-test.yml'
       - '.github/workflows/deploy.yml'
+      - '.github/workflows/public-smoke.yml'
       - '.github/workflows/production-preflight.yml'
       - 'scripts/**'
       - '.gitignore'
