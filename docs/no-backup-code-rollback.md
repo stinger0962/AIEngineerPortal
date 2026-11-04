@@ -126,3 +126,10 @@ failure may leave those private state files; it does not imply an app rollout.
 The workflow skips forward deployment after capture failure. Investigate the
 reported stage rather than rerunning unchanged or bypassing a guard. An unknown
 failure remains `category=operation_failed` without disclosing its exception.
+
+The fixed Git revision read additionally classifies stderr into
+`git_dubious_ownership`, `git_not_repository`, `git_permission_denied`, or
+`git_command_failed`. These are diagnostic hints, not permission to bypass a
+check. Raw stderr/stdout remain private; no HOME/config inheritance, ownership
+change, or safe-directory exception is introduced. Unknown messages still fail
+closed. A category must be observed before attributing a production failure to it.

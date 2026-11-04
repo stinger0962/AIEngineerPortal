@@ -295,5 +295,47 @@ class ReleaseImageStateTests(unittest.TestCase):
         self.assertNotIn(SECRET, output)
 
 
+
+    def test_git_stderr_categories_are_fixed_and_never_echoed(self):
+        cases = [
+            ("fatal: detected dubious ownership in repository at '/private/" + SECRET + "'\n", 'git_dubious_ownership'),
+            ('fatal: not a git repository (or any of the parent directories): .git\n' + SECRET, 'git_not_repository'),
+            ("fatal: cannot change to '/private/" + SECRET + "': Permission denied\n", 'git_permission_denied'),
+            ('fatal: unknown problem ' + SECRET, 'git_command_failed'),
+            ('noise ' + SECRET + ' dubious ownership', 'git_command_failed'),
+            ('x' * 4096 + '\nfatal: not a git repository', 'git_command_failed'),
+            (None, 'git_command_failed'),
+        ]
+        for stderr, category in cases:
+            with self.subTest(category=category):
+                self.assertEqual(MODULE.git_failure_category(stderr), category)
+                result = type('Result', (), {'returncode': 128, 'stdout': SECRET, 'stderr': stderr})()
+                output = io.StringIO()
+                with patch.object(MODULE.subprocess, 'run', return_value=result) as run, \
+                     patch.dict(os.environ, {'EXPECTED_COMPOSE_SHA256': MODULE.compose_hash()}), \
+                     contextlib.redirect_stdout(output):
+                    self.assertEqual(MODULE.main(['prepare', CANDIDATE]), 1)
+                self.assertEqual(output.getvalue(), 'Release image state: operation failed stage=previous_commit category=' + category + '\n')
+                self.assertNotIn(SECRET, output.getvalue())
+                self.assertEqual(run.call_args.kwargs['env'], MODULE.ENV)
+                self.assertEqual(run.call_args.kwargs['stderr'], MODULE.subprocess.PIPE)
+                self.assertEqual(run.call_args.args[0], ['git', '--no-optional-locks', '-C', str(self.app), 'rev-parse', 'HEAD'])
+                self.assertFalse((self.state / (CANDIDATE + '.json')).exists())
+
+    def test_non_git_commands_still_discard_stderr(self):
+        result = type('Result', (), {'returncode': 1, 'stdout': SECRET})()
+        with patch.object(MODULE.subprocess, 'run', return_value=result) as run:
+            with self.assertRaisesRegex(ValueError, '^command_failed$'):
+                MODULE.command(MODULE.DOCKER + ['inspect', 'fixture'])
+        self.assertEqual(run.call_args.kwargs['stderr'], MODULE.subprocess.DEVNULL)
+
+    def test_successful_git_read_returns_revision_without_changing_environment(self):
+        result = type('Result', (), {'returncode': 0, 'stdout': PREVIOUS + '\n', 'stderr': SECRET})()
+        with patch.object(MODULE.subprocess, 'run', return_value=result) as run:
+            self.assertEqual(MODULE.command(['git', '--no-optional-locks', '-C', str(self.app), 'rev-parse', 'HEAD']), PREVIOUS)
+        self.assertEqual(run.call_args.kwargs['env'], {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
+        self.assertNotIn('safe.directory', str(run.call_args))
+
+
 if __name__ == '__main__':
     unittest.main()
