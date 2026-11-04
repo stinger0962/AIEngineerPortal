@@ -4,7 +4,7 @@ The user has chosen to proceed without database backups for this Portal release.
 Backups are optional risk protection, not a technical prerequisite imposed here.
 Code rollback cannot recover damaged/deleted data, files or lost writes.
 
-## Implemented helper, not activated workflow
+## Bounded helper
 
 `scripts/release-image-state.py` has two bounded operations for later integration
 into the current trusted deployment workflow:
@@ -42,19 +42,18 @@ not an automatic database restore or repeated blind retries.
 
 ## Required integration boundary
 
-This PR does not edit deployment triggers or wire these operations into a live
-workflow. It can be tested entirely with temporary files and mocked commands.
+The integration below uses only the existing manual/tag trigger family. The helper
+can be tested entirely with temporary files and mocked commands.
 
-A follow-on reviewed integration must use the current trusted fingerprint-pinned
+The reviewed integration must use the current trusted fingerprint-pinned
 SSH workflow and its existing serialized release group for both forward release
 and rollback. Capture the record before changing the checkout or aliases; preserve
 existing images; run public HTTPS smoke checks after rollback. Do not invoke an
 old tagged workflow. No deployment or rollback has been executed by this work.
 
-The existing manual workflow has no rollback selector and its forward CI gate
-only permits current main. A bounded rollback mode must bypass that forward-only
-SHA rule solely for the captured previous local images while retaining trusted
-workflow source, fixed host, serialization, state validation and health checks.
+The forward CI gate only permits current main. The bounded rollback mode bypasses
+that forward-only SHA rule solely for captured previous local images while retaining
+trusted workflow source, fixed host, serialization, state validation and health checks.
 Do not enable an automatic production trigger before that integration is reviewed.
 
 ## Health timing and configuration limits
@@ -80,3 +79,37 @@ preexisting fixture resource names to be absent, uses the already pulled officia
 PostgreSQL base image with network-disabled builds, and removes only its own
 fixture resources. It never connects to the Portal server. A successful rehearsal
 validates actual Docker/Compose command behavior on CI, not production compatibility.
+
+## Existing manual workflow integration
+
+The existing Build & Deploy workflow now offers `operation: deploy` (default)
+and `operation: rollback`. Automatic main-push deployment is still not enabled.
+No production operation has been executed by this integration work.
+
+Forward release captures previous local application images before any environment
+upserts, checkout or replacement. A rerun uses the original valid state for that
+candidate SHA and rechecks both old images remain available; it never overwrites
+the original rollback point. Corrupt/incompatible state fails closed.
+
+For rollback, select the current `main` workflow and supply the exact candidate
+release SHA that captured the desired previous images. This path does not build,
+pull, upsert environment settings or run the forward current-main CI gate. It uses
+current reviewed helper source, the same trusted SSH pin and whole-workflow
+serialization, strict recorded-image validation, internal health and public HTTPS
+checks. An unrecorded SHA fails before image mutation. Do not use an old workflow.
+
+There is no automatic database restore and no backup gate. User data and the extra
+billing table remain. Environment compatibility must still be considered because
+the environment file is not rolled back. The first production release and rollback
+remain unverified until actually run; CI's rehearsal uses disposable fixtures.
+
+Before forward capture, the renderer supplies the candidate Compose SHA256 and
+the helper requires the installed Compose to match exactly. A future Compose
+change stops before environment updates, image replacement or state creation;
+it requires a separately reviewed compatibility path, not a bypass.
+
+Immediately before rollback SSH, the workflow checks GitHub's current main SHA
+against the executing workflow SHA. Merely having a main ref name is insufficient:
+re-running an older main workflow fails closed. This check does not require
+forward-release CI eligibility for the old application images. As with the forward
+gate, it is a point-in-time check, not a lock preventing subsequent main commits.

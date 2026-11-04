@@ -5,6 +5,17 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Deploy current main or restore recorded previous application images'
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+        required: true
+      rollback_release_sha:
+        description: 'For rollback only: exact candidate release SHA whose previous images were recorded'
+        type: string
+        required: false
 
 concurrency:
   group: production-release
@@ -21,6 +32,7 @@ env:
 
 jobs:
   release_checks:
+    if: github.event_name != 'workflow_dispatch' || inputs.operation != 'rollback'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -79,6 +91,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 -B scripts/require-release-ci.py
+
+      - name: Render previous-image capture helper
+        env:
+          RELEASE_ACTION: prepare
+          RELEASE_SHA: ${{ github.sha }}
+        run: python3 -B scripts/render-release-helper.py > "$RUNNER_TEMP/release-helper.sh"
+
+      - name: Capture previous application images
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:5l+l4ylrZutSMsq0T8rtMv5jF6cDPm6XtcnbwWWNSX4
+          timeout: 30s
+          command_timeout: 2m
+          debug: false
+          script_path: ${{ runner.temp }}/release-helper.sh
 
       - name: Deploy on droplet
         uses: appleboy/ssh-action@v1.2.0
@@ -187,5 +217,39 @@ jobs:
             echo "All containers healthy"
 
       - name: Verify public HTTPS endpoints
+        timeout-minutes: 3
+        run: python3 -B scripts/public-smoke.py
+
+  rollback:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'rollback'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Require current main workflow for rollback
+        run: test "$GITHUB_REF" = refs/heads/main
+      - uses: actions/checkout@v4
+      - name: Render bounded rollback helper
+        env:
+          RELEASE_ACTION: rollback
+          RELEASE_SHA: ${{ inputs.rollback_release_sha }}
+        run: python3 -B scripts/render-release-helper.py > "$RUNNER_TEMP/release-helper.sh"
+      - name: Verify rollback workflow is still current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/require-current-rollback-source.py
+      - name: Restore recorded previous application images
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: SHA256:5l+l4ylrZutSMsq0T8rtMv5jF6cDPm6XtcnbwWWNSX4
+          timeout: 30s
+          command_timeout: 10m
+          debug: false
+          script_path: ${{ runner.temp }}/release-helper.sh
+      - name: Verify public HTTPS endpoints after rollback
         timeout-minutes: 3
         run: python3 -B scripts/public-smoke.py

@@ -101,8 +101,8 @@ class PublicSmokeTests(unittest.TestCase):
     def test_workflow_pins_both_ssh_steps_and_runs_smoke_after_health(self):
         workflow = (ROOT / '.github/workflows/deploy.yml').read_text()
         trusted = 'SHA256:5l+l4ylrZutSMsq0T8rtMv5jF6cDPm6XtcnbwWWNSX4'
-        self.assertEqual(workflow.count('uses: appleboy/ssh-action@v1.2.0'), 2)
-        self.assertEqual(workflow.count('fingerprint: ' + trusted), 2)
+        self.assertEqual(workflow.count('uses: appleboy/ssh-action@v1.2.0'), 4)
+        self.assertEqual(workflow.count('fingerprint: ' + trusted), 4)
         self.assertLess(workflow.index('- name: Verify health via SSH'),
                         workflow.index('- name: Verify public HTTPS endpoints'))
         self.assertIn('run: python3 -B scripts/public-smoke.py', workflow)
