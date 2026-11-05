@@ -69,6 +69,37 @@ class ReleaseImageStateTests(unittest.TestCase):
                 MODULE.record(CANDIDATE)
         self.assertFalse(any('tag' in call or 'compose' in call for call in self.calls))
 
+    def test_automatic_capture_is_once_per_sha_even_after_rollback(self):
+        with patch.dict(os.environ, {'EXPECTED_COMPOSE_SHA256': MODULE.compose_hash()}), \
+             patch.object(MODULE, 'command', side_effect=self.command):
+            self.assertEqual(MODULE.main(['prepare-auto', CANDIDATE]), 0)
+            path = self.state / (CANDIDATE + '.json')
+            original = path.read_bytes()
+            self.assertEqual(MODULE.main(['prepare-auto', CANDIDATE]), 1)
+            MODULE.rollback(CANDIDATE)
+            self.calls.clear()
+            self.assertEqual(MODULE.main(['prepare-auto', CANDIDATE]), 1)
+            self.assertFalse(any('tag' in call or 'compose' in call for call in self.calls))
+            self.assertEqual(path.read_bytes(), original)
+            # Deliberate manual recovery can reuse the original rollback point.
+            self.assertEqual(MODULE.main(['prepare', CANDIDATE]), 0)
+
+    def test_automatic_run_queued_behind_manual_rollback_fails_closed(self):
+        self.make_record()
+        with patch.dict(os.environ, {'EXPECTED_COMPOSE_SHA256': MODULE.compose_hash()}), \
+             patch.object(MODULE, 'command', side_effect=self.command):
+            MODULE.rollback(CANDIDATE)
+            self.calls.clear()
+            self.assertEqual(MODULE.main(['prepare-auto', CANDIDATE]), 1)
+        self.assertFalse(any('tag' in call or 'compose' in call for call in self.calls))
+
+    def test_automatic_compose_mismatch_stops_before_capture(self):
+        with patch.dict(os.environ, {'EXPECTED_COMPOSE_SHA256': 'f' * 64}), \
+             patch.object(MODULE, 'record') as record:
+            self.assertEqual(MODULE.main(['prepare-auto', CANDIDATE]), 1)
+            record.assert_not_called()
+        self.assertFalse(self.state.exists())
+
     def test_prepare_cli_rejects_candidate_compose_mismatch_before_mutation(self):
         with patch.dict(os.environ, {'EXPECTED_COMPOSE_SHA256': 'f' * 64}), \
              patch.object(MODULE, 'prepare') as prepare:

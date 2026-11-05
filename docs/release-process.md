@@ -1,57 +1,66 @@
 # Release Process
 
-This repository uses a deployment-first workflow.
+## Automatic main deployment and activation
 
-## Standard procedure for each version
+After this workflow change is merged, every push to `main` starts one deployment
+candidate using that push's exact SHA. **Merging this PR activates the trigger and
+starts a candidate for the merge commit itself.** A feature branch or draft PR
+runs nonproduction CI only. Automatic deployment is not operationally verified
+until an automatic run completes successfully.
 
-1. Make code changes locally in the repository.
-2. Run the relevant verification steps.
-3. Commit to `main`.
-4. Create a Git tag for the version.
-5. Push both the branch and the tag to GitHub.
-6. Let GitHub create a Release entry with release notes for that tag.
-7. Let GitHub Actions build/push images, then SSH into the VPS to fetch the tagged commit, pull/recreate containers, and check container health.
-8. Verify the live site at `https://portal.leipan.cc`.
+1. Make changes on a feature branch and open a PR.
+2. Run relevant tests and review the PR, including its production impact.
+3. Merge to main when ready for production. The deploy workflow waits up to about
+   15 minutes for successful push CI for that exact current main SHA.
+4. Verify the Build & Deploy Portal run, internal health and public HTTPS checks.
+5. Optionally publish a `v*` tag for release notes. Tags no longer trigger deployment;
+   this avoids deploying the main commit twice. Release notes are not rollout proof.
 
-## Default expectation
+No workflow creates commits or tags, and no CI-completion trigger retries a release.
+Manual `workflow_dispatch` on current main retains `deploy` and `rollback` choices.
+Tag-selected manual deployments are rejected. Use main for deliberate recovery.
 
-Unless the user explicitly says otherwise, changes should follow the full path:
+## Eligibility, duplicates and rollback
 
-- commit
-- push to GitHub
-- create/push version tag
-- create a GitHub Release with notes
-- deploy to VPS
+The release gate checks current main and successful exact-SHA push CI before builds
+and again immediately before production mutation. PR CI cannot authorize a release.
+Stale SHA, failed, missing, incomplete, timed-out or unverifiable CI fails closed.
+A newer main push can make an older candidate stale; the check is point-in-time,
+not a lock against subsequent commits. Each candidate builds and deploys its exact
+SHA, never a newly resolved main checkout.
 
-## Versioning
+`production-release` concurrency serializes deploy and manual rollback without
+cancelling a running operation. GitHub does not guarantee FIFO: it may replace an
+older pending run, including a pending rollback. Verify the rollback actually ran.
 
-Use simple semantic-style version tags:
+Automatic push runs require attempt 1. Rerunning such a run is rejected; use a fresh
+manual deploy on current main after investigation. Before server checkout,
+environment updates or application replacement, automatic capture exclusively
+creates the existing per-candidate image record. Any existing record blocks that
+SHA automatically, including after partial failure, a manual deployment or rollback.
+Thus an automatic run queued behind rollback of that same candidate cannot undo it.
+This durable guard depends on retaining the private release-state directory. Never
+remove its records to bypass a failure. Builds/registry pushes can precede this
+guard, but the guarded server deployment is skipped on failure.
 
-- `v0.1.0`
-- `v0.1.1`
-- `v0.2.0`
+A fresh manual deploy explicitly permits reuse of the original valid capture record
+and may redeploy a rolled-back SHA. A distinct newer main SHA is a new candidate
+and can deploy after a rollback; rollback is not a permanent deployment freeze.
+There is no automatic rollback, data restore or automatic production retry policy.
 
-## Release notes
+Previous images are retained without release-time pruning; this is not a disk-space
+guarantee. See [bounded code rollback](no-backup-code-rollback.md). The user chose
+no backup requirement. **Code-image rollback cannot recover lost or damaged data**
+and does not restore environment configuration. Compose changes fail compatibility
+checks and require separate review. Keep billing disabled unless separately approved.
 
-Each release should include:
+## Verified baseline
 
-- what changed
-- which commits are included
-- deployment target
-- what was verified
-- any known issues or follow-up work
-
-By default, the GitHub release workflow generates release notes from the commit range included in the version tag.
-
-## Deployment behavior
-
-Production deployment is tag-driven.
-
-- A pushed `v*` tag triggers the deploy workflow.
-- The workflow writes production secrets onto the VPS.
-- The VPS checks out the exact `GITHUB_SHA` tied to that workflow run.
-- GitHub Actions builds images; Docker Compose recreates services using those images with `--force-recreate --remove-orphans`.
-- GitHub Actions checks backend container health via SSH; public-site smoke testing is a separate verification step.
+[Manual production run 42012305298](https://github.com/stinger0962/AIEngineerPortal/actions/runs/42012305298)
+succeeded on `159dd483c4a6dd099201757ce9c8b62acf31974b`, including image capture,
+internal health and public HTTPS checks. That verifies the manual rollout and the
+health-check User-Agent fix. A real production rollback and the future automatic
+path remain unverified; CI rollback rehearsals use disposable fixtures.
 
 ## Read-only production preflight
 
@@ -70,25 +79,6 @@ A target mismatch or observation error stops the workflow before that action.
 This workflow only inspects fixed metadata; merging a preflight fix does not
 deploy the application, change repository secrets, or change server trust.
 
-## Release safety preparation (automatic production deployment not enabled)
-
-Main pushes now run CI. Tag/manual releases wait for successful push CI for the
-exact current main SHA, then check it again immediately before production mutation.
-PR CI alone does not authorize a release. Missing, failed, incomplete, timed-out or
-unverifiable CI stops the workflow. Workflow-wide concurrency prevents cancelling
-an in-progress release; GitHub may replace an older pending run with a newer one.
-
-Release-time image pruning is removed to preserve rollback candidates. This is
-not a disk-capacity guarantee. Captured-image rollback is described in
-[the no-backup code rollback guide](no-backup-code-rollback.md).
-
-Production triggers remain tags and manual dispatch. The user chose to proceed
-without backups for this Portal release; backup/restore verification is not a gate.
-Code rollback cannot recover damaged or lost data. Captured previous image references,
-trusted SSH and health checks support the bounded rollback path. Keep billing disabled;
-triage baseline test failures and verify the release operationally before calling
-automatic production deployment active.
-
 ## Trusted deployment endpoint and public smoke checks
 
 All deployment SSH steps now require the Portal ECDSA host-key fingerprint
@@ -103,7 +93,3 @@ and the root page to return HTTP 200 HTML. Certificate/hostname verification is
 mandatory, redirects are refused, retries/timeouts are bounded, and response
 bodies/errors are not logged. These checks confirm public routing and basic
 responses, not full application behavior or the deployed commit identity.
-
-Production remains tag/manual only. The first real rollout, disk capacity under
-actual image pulls, and baseline-test triage remain operational considerations.
-The user's no-backup decision does not imply that code rollback restores data.

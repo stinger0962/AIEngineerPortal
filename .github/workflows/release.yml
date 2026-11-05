@@ -39,8 +39,9 @@ jobs:
             echo "## Deployment"
             echo
             echo "- Target: https://portal.leipan.cc"
-            echo "- Trigger: Git tag \`${tag}\`"
-            echo "- Delivery: GitHub Actions deploy workflow"
+            echo "- Release notes: Git tag \`${tag}\` (does not trigger deployment)"
+            echo "- Delivery: main push after exact-commit CI, or manual deploy from main"
+            echo "- Deployment outcome: verify the Build & Deploy Portal run; this release is not proof of rollout"
           } > release-notes.md
 
       - name: Publish GitHub release

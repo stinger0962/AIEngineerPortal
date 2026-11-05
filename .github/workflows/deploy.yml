@@ -2,8 +2,7 @@ name: Build & Deploy Portal
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
   workflow_dispatch:
     inputs:
       operation:
@@ -32,7 +31,11 @@ env:
 
 jobs:
   release_checks:
-    if: github.event_name != 'workflow_dispatch' || inputs.operation != 'rollback'
+    if: >-
+      github.repository == 'stinger0962/AIEngineerPortal' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -94,7 +97,7 @@ jobs:
 
       - name: Render previous-image capture helper
         env:
-          RELEASE_ACTION: prepare
+          RELEASE_ACTION: ${{ github.event_name == 'push' && 'prepare-auto' || 'prepare' }}
           RELEASE_SHA: ${{ github.sha }}
         run: python3 -B scripts/render-release-helper.py > "$RUNNER_TEMP/release-helper.sh"
 
