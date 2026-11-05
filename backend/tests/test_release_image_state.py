@@ -93,6 +93,18 @@ class ReleaseImageStateTests(unittest.TestCase):
             self.assertEqual(MODULE.main(['prepare-auto', CANDIDATE]), 1)
         self.assertFalse(any('tag' in call or 'compose' in call for call in self.calls))
 
+    def test_automatic_partial_record_is_never_overwritten(self):
+        self.make_record()
+        path = self.state / (CANDIDATE + '.json')
+        path.write_text('{"partial":')
+        before = path.read_bytes()
+        self.calls.clear()
+        with patch.dict(os.environ, {'EXPECTED_COMPOSE_SHA256': MODULE.compose_hash()}), \
+             patch.object(MODULE, 'command', side_effect=self.command):
+            self.assertEqual(MODULE.main(['prepare-auto', CANDIDATE]), 1)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse(any('tag' in call or 'compose' in call for call in self.calls))
+
     def test_automatic_compose_mismatch_stops_before_capture(self):
         with patch.dict(os.environ, {'EXPECTED_COMPOSE_SHA256': 'f' * 64}), \
              patch.object(MODULE, 'record') as record:

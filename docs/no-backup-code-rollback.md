@@ -162,3 +162,15 @@ for deliberate recovery. No automatic rollback or data restore is added. A newer
 main SHA may still deploy after rollback; rollback does not freeze future releases.
 GitHub concurrency does not promise FIFO or that a queued rollback will execute:
 a newer pending run can replace it. Confirm the rollback run and health results.
+
+If rollback must remain in place, pause merges to main and inspect pending forward
+runs in GitHub Actions. Cancel pending forward runs deliberately and verify their
+status before relying on rollback; do not assume serialization freezes deployment.
+A different/newer SHA already queued can still deploy after rollback. Cancellation
+of a running deployment requires separate investigation because it may already
+have changed production.
+
+Failure after capture but before rollout still consumes the automatic attempt for
+that SHA. Preserve the record, investigate the failure, then use a fresh manual
+`operation: deploy` from current main for deliberate recovery. Do not rerun an
+automatic push workflow or delete capture evidence to force a retry.
