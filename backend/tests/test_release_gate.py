@@ -56,7 +56,8 @@ class ReleaseGateTests(unittest.TestCase):
     def run_main(self, result=None, error=None, env=None):
         stream = io.StringIO()
         context = {'GITHUB_SHA': SHA, 'GITHUB_REPOSITORY': MODULE.REPOSITORY,
-                   'GH_TOKEN': TOKEN}
+                   'GH_TOKEN': TOKEN, 'GITHUB_EVENT_NAME': 'push',
+                   'GITHUB_REF': 'refs/heads/main', 'GITHUB_RUN_ATTEMPT': '1'}
         context.update(env or {})
         with patch.dict(os.environ, context, clear=True), \
              patch.object(MODULE, 'ATTEMPTS', 2), \
@@ -81,11 +82,45 @@ class ReleaseGateTests(unittest.TestCase):
         sleep.assert_called_once_with(15)
         self.assertEqual(self.run_main(result='success')[0], 0)
 
-    def test_release_wiring_does_not_enable_auto_deployment(self):
+    def test_untrusted_events_and_refs_stop_before_api(self):
+        for event in ('pull_request', 'pull_request_target', 'workflow_run', 'schedule', ''):
+            code, check, _ = self.run_main(env={'GITHUB_EVENT_NAME': event})
+            self.assertEqual(code, 1)
+            check.assert_not_called()
+        for ref in ('refs/heads/feature', 'refs/tags/v1.0.0', ''):
+            code, check, _ = self.run_main(env={'GITHUB_REF': ref})
+            self.assertEqual(code, 1)
+            check.assert_not_called()
+        for attempt in ('2', '3', '', 'invalid'):
+            code, check, _ = self.run_main(env={'GITHUB_RUN_ATTEMPT': attempt})
+            self.assertEqual(code, 1)
+            check.assert_not_called()
+        self.assertEqual(self.run_main(result='success', env={
+            'GITHUB_EVENT_NAME': 'workflow_dispatch', 'GITHUB_RUN_ATTEMPT': '2'})[0], 0)
+
+    def test_main_advancing_while_waiting_stops_release(self):
+        responses = [{'commit': {'sha': SHA}}, {'workflow_runs': []},
+                     {'commit': {'sha': 'b' * 40}}]
+        with patch.object(MODULE, 'request_json', side_effect=responses):
+            self.assertEqual(MODULE.check(SHA, TOKEN), 'pending')
+            self.assertEqual(MODULE.check(SHA, TOKEN), 'stale')
+
+    def test_incomplete_pagination_never_accepts_success(self):
+        responses = [{'commit': {'sha': SHA}}] + [
+            {'workflow_runs': [run_record()] * 100}] * 10
+        with patch.object(MODULE, 'request_json', side_effect=responses):
+            self.assertEqual(MODULE.check(SHA, TOKEN), 'failed')
+
+    def test_release_wiring_has_one_automatic_main_trigger(self):
         deploy = (ROOT / '.github/workflows/deploy.yml').read_text()
         trigger = deploy.split('permissions:', 1)[0]
-        self.assertIn('tags:', trigger)
-        self.assertNotIn('branches:', trigger)
+        self.assertNotIn('tags:', trigger)
+        self.assertIn('branches: [main]', trigger)
+        self.assertNotIn('pull_request:', trigger)
+        self.assertNotIn('schedule:', trigger)
+        self.assertIn("github.ref == 'refs/heads/main'", deploy)
+        self.assertIn("github.event_name == 'push'", deploy)
+        self.assertIn("inputs.operation == 'deploy'", deploy)
         self.assertNotIn('workflow_run:', trigger)
         self.assertIn('cancel-in-progress: false', deploy)
         self.assertNotIn('cancel-in-progress: true', deploy)

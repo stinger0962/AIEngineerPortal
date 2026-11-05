@@ -42,7 +42,7 @@ not an automatic database restore or repeated blind retries.
 
 ## Required integration boundary
 
-The integration below uses only the existing manual/tag trigger family. The helper
+Forward releases use main pushes or manual dispatch; rollback remains manual only. The helper
 can be tested entirely with temporary files and mocked commands.
 
 The reviewed integration must use the current trusted fingerprint-pinned
@@ -83,8 +83,8 @@ validates actual Docker/Compose command behavior on CI, not production compatibi
 ## Existing manual workflow integration
 
 The existing Build & Deploy workflow now offers `operation: deploy` (default)
-and `operation: rollback`. Automatic main-push deployment is still not enabled.
-No production operation has been executed by this integration work.
+and `operation: rollback`. Merging the automatic-main workflow activates forward
+deployment, including for its own merge commit; preparation on a branch does not.
 
 Forward release captures previous local application images before any environment
 upserts, checkout or replacement. A rerun uses the original valid state for that
@@ -100,8 +100,9 @@ checks. An unrecorded SHA fails before image mutation. Do not use an old workflo
 
 There is no automatic database restore and no backup gate. User data and the extra
 billing table remain. Environment compatibility must still be considered because
-the environment file is not rolled back. The first production release and rollback
-remain unverified until actually run; CI's rehearsal uses disposable fixtures.
+the environment file is not rolled back. The manual production release was verified in [run 42012305298](https://github.com/stinger0962/AIEngineerPortal/actions/runs/42012305298).
+A production rollback and the automatic deployment path remain unverified; CI's
+rehearsal uses disposable fixtures.
 
 Before forward capture, the renderer supplies the candidate Compose SHA256 and
 the helper requires the installed Compose to match exactly. A future Compose
@@ -145,3 +146,31 @@ ownership check still applies and may still reject the repository. Docker keeps
 its original scrubbed environment and fixed local socket. This corrects a context
 difference from the successful preflight, but does not prove the server has an
 existing applicable trust entry or guarantee a successful release.
+
+## Automatic replay and manual recovery
+
+Automatic `prepare-auto` applies the same candidate Compose check and operation
+lock as manual `prepare`, but exclusively creates the capture record. An existing
+record fails closed before forward environment/checkout/image changes. It cannot
+reuse a SHA after a prior automatic/manual attempt or rollback, including when the
+automatic run was queued behind that rollback. Automatic run attempts beyond 1
+are also rejected. Keep the private state records: they now serve both rollback
+and automatic duplicate prevention. A partial record also blocks automatic replay.
+
+A fresh manual deployment on current main can reuse the original validated record
+for deliberate recovery. No automatic rollback or data restore is added. A newer
+main SHA may still deploy after rollback; rollback does not freeze future releases.
+GitHub concurrency does not promise FIFO or that a queued rollback will execute:
+a newer pending run can replace it. Confirm the rollback run and health results.
+
+If rollback must remain in place, pause merges to main and inspect pending forward
+runs in GitHub Actions. Cancel pending forward runs deliberately and verify their
+status before relying on rollback; do not assume serialization freezes deployment.
+A different/newer SHA already queued can still deploy after rollback. Cancellation
+of a running deployment requires separate investigation because it may already
+have changed production.
+
+Failure after capture but before rollout still consumes the automatic attempt for
+that SHA. Preserve the record, investigate the failure, then use a fresh manual
+`operation: deploy` from current main for deliberate recovery. Do not rerun an
+automatic push workflow or delete capture evidence to force a retry.

@@ -55,7 +55,13 @@ def check(sha, token):
 def main():
     sha = os.environ.get('GITHUB_SHA', '')
     token = os.environ.get('GH_TOKEN', '')
-    if (os.environ.get('GITHUB_REPOSITORY') != REPOSITORY or
+    # Only a main push or an explicitly requested main deployment may proceed.
+    # Re-running a production job is manual; CI completions never retry releases.
+    event = os.environ.get('GITHUB_EVENT_NAME', '')
+    if (event not in ('push', 'workflow_dispatch') or
+            (event == 'push' and os.environ.get('GITHUB_RUN_ATTEMPT') != '1') or
+            os.environ.get('GITHUB_REF') != 'refs/heads/main' or
+            os.environ.get('GITHUB_REPOSITORY') != REPOSITORY or
             not re.fullmatch(r'[0-9a-f]{40}', sha) or not token):
         print('Release gate: invalid context')
         return 1

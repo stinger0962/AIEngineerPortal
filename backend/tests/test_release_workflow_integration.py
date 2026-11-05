@@ -18,8 +18,8 @@ SHA = 'a' * 40
 class ReleaseWorkflowIntegrationTests(unittest.TestCase):
     def test_rendered_helper_passes_bash_syntax_without_execution(self):
         source = (ROOT / 'scripts/release-image-state.py').read_text()
-        for action in ('prepare', 'rollback'):
-            output = MODULE.render(action, SHA, source, 'b' * 64 if action == 'prepare' else None)
+        for action in ('prepare', 'prepare-auto', 'rollback'):
+            output = MODULE.render(action, SHA, source, 'b' * 64 if action != 'rollback' else None)
             self.assertIn(source.rstrip(), output)
             self.assertIn('python3 -B - ' + action + ' ' + SHA, output)
             result = subprocess.run(['bash', '-n'], input=output, text=True, capture_output=True)
@@ -44,7 +44,7 @@ class ReleaseWorkflowIntegrationTests(unittest.TestCase):
         deploy = text.split('  deploy:\n', 1)[1].split('  rollback:\n', 1)[0]
         self.assertLess(deploy.index('Capture previous application images'),
                         deploy.index('Deploy on droplet'))
-        self.assertIn('RELEASE_ACTION: prepare', deploy)
+        self.assertIn("RELEASE_ACTION: ${{ github.event_name == 'push' && 'prepare-auto' || 'prepare' }}", deploy)
         self.assertIn('RELEASE_SHA: ${{ github.sha }}', deploy)
         self.assertNotIn('backup-db.sh', deploy)
         self.assertNotIn('production-preflight.sh', deploy)
@@ -65,7 +65,8 @@ class ReleaseWorkflowIntegrationTests(unittest.TestCase):
                           'upsert_env', 'docker login', 'git checkout', 'pg_restore'):
             self.assertNotIn(forbidden, rollback)
         trigger = text.split('concurrency:', 1)[0]
-        self.assertNotIn('branches:', trigger)
+        self.assertIn('branches: [main]', trigger)
+        self.assertNotIn('tags:', trigger)
         self.assertNotIn('workflow_run:', trigger)
         self.assertIn('group: production-release', text)
         self.assertIn('cancel-in-progress: false', text)

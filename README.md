@@ -95,8 +95,8 @@ curl -fsSL https://raw.githubusercontent.com/stinger0962/AIEngineerPortal/main/s
 
 1. Point your DNS `A` record to the Droplet IP.
 2. Add the GitHub secrets above.
-3. Push a version tag such as `v0.2.2`.
-4. GitHub Actions SSHes into the Droplet, checks out the exact tagged commit in `/opt/ai-engineer-portal`, and pulls images built by GitHub Actions before recreating the services. Images are not built on the VPS. See `.github/workflows/deploy.yml` for the actual workflow.
+3. Merge a reviewed PR into `main`; this starts deployment after exact-commit push CI succeeds.
+4. GitHub Actions SSHes into the Droplet, checks out the exact main-push commit in `/opt/ai-engineer-portal`, and pulls images built by GitHub Actions before recreating the services. Images are not built on the VPS. See `.github/workflows/deploy.yml` for the actual workflow.
 
 The public entrypoint is handled by Caddy with HTTPS.
 
@@ -108,5 +108,12 @@ By default, each completed version should be:
 
 - committed to `main`
 - pushed to GitHub
-- tagged with a version
+- optionally tagged with a version for release notes (tags do not deploy)
 - deployed to the VPS
+
+Merging the automatic-main workflow activates production deployment for that merge
+commit too. Feature branches and draft PRs run nonproduction checks only. See the
+[release process](docs/release-process.md) for stale/duplicate guards, manual
+recovery and rollback limits. The manual rollout passed in
+[run 42012305298](https://github.com/stinger0962/AIEngineerPortal/actions/runs/42012305298);
+automatic rollout and real production rollback still need operational verification.

@@ -288,17 +288,19 @@ def rollback(candidate_sha):
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
-    if len(args) != 2 or args[0] not in ('record', 'prepare', 'rollback') or not valid_sha(args[1]):
+    if len(args) != 2 or args[0] not in ('record', 'prepare', 'prepare-auto', 'rollback') or not valid_sha(args[1]):
         print('Release image state: invalid request')
         return 1
     try:
-        if args[0] == 'prepare':
+        if args[0] in ('prepare', 'prepare-auto'):
             with diagnostic_stage('candidate_compatibility'):
                 expected = os.environ.get('EXPECTED_COMPOSE_SHA256', '')
                 if not re.fullmatch(r'[0-9a-f]{64}', expected) or compose_hash() != expected:
                     raise ValueError('candidate_compose_incompatible')
-        with operation_lock(create=args[0] in ('record', 'prepare')):
-            {'record': record, 'prepare': prepare, 'rollback': rollback}[args[0]](args[1])
+        with operation_lock(create=args[0] in ('record', 'prepare', 'prepare-auto')):
+            # Automatic releases get one capture per SHA, even after rollback or
+            # partial failure. Only deliberate manual prepare may reuse a record.
+            {'record': record, 'prepare-auto': record, 'prepare': prepare, 'rollback': rollback}[args[0]](args[1])
     except Exception as exc:
         stage = getattr(exc, '_release_stage', 'operation')
         if type(stage) is not str or stage not in STAGES:
