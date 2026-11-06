@@ -18,8 +18,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/billing", tags=["billing"])
 
 
-def get_device_id(x_device_id: str = Header(default="")) -> str:
-    return (x_device_id or "").strip()
+from app.services.account_recovery import identity as get_device_id
 
 
 def _packs() -> list[dict]:

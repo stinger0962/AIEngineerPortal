@@ -482,7 +482,7 @@ class Account(Base):
     __tablename__ = "accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    # 购买时由 Stripe 收银台带回，用于收据 + 邮箱找回；NULL = 尚未绑定邮箱的匿名账号。
+    # Historical contact field only; never proof of ownership. See VerifiedAccountEmail.
     email: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -544,3 +544,42 @@ class BillingRequest(Base):
     account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     response_json: Mapped[Dict] = mapped_column(JSON, default=dict)
+
+
+class VerifiedAccountEmail(Base):
+    """Only explicit verification can create this binding; never backfill by email."""
+    __tablename__ = "verified_account_emails"
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+
+
+class AccountSession(Base):
+    __tablename__ = "account_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class AccountChallenge(Base):
+    __tablename__ = "account_challenges"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    code_hash: Mapped[str] = mapped_column(String(64))
+    email: Mapped[str] = mapped_column(String(255))
+    purpose: Mapped[str] = mapped_column(String(12))
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True)
+    device_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class AccountRateLimit(Base):
+    __tablename__ = "account_rate_limits"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class ZiweiProfileOwner(Base):
+    __tablename__ = "ziwei_profile_owners"
+    profile_id: Mapped[int] = mapped_column(ForeignKey("ziwei_profiles.id", ondelete="CASCADE"), primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)

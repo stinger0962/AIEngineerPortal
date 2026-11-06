@@ -10,8 +10,11 @@ FREE = get_settings().ziwei_free_credits
 
 def _db() -> Session:
     engine = create_engine("sqlite://")
+    from app.models.entities import Account, AccountDevice, VerifiedAccountEmail, ZiweiProfileOwner, AccountSession
+    for recovery_model in (Account, AccountDevice, VerifiedAccountEmail, ZiweiProfileOwner, AccountSession):
+        recovery_model.__table__.create(engine, checkfirst=True)
     for m in (Account, AccountDevice, CreditLedger):
-        m.__table__.create(bind=engine)
+        m.__table__.create(bind=engine, checkfirst=True)
     return Session(engine)
 
 

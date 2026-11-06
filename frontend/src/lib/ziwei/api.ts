@@ -1,6 +1,6 @@
 import { API_BASE } from "@/lib/api";
 import { retryKeys } from "./retry-keys";
-import { getDeviceId } from "@/lib/deviceId";
+import { recoveryDeviceId as getDeviceId } from "./account";
 import type { ZiweiChart } from "./types";
 
 /** HTTP 层错误（区别于排盘错误），携带状态码与后端 detail */
@@ -13,6 +13,13 @@ export class ZiweiApiError extends Error {
   ) {
     super(detail ?? `Request failed: ${status}`);
   }
+}
+
+export function profileLoadErrorMessage(error: unknown): string {
+  if (error instanceof ZiweiApiError && error.status === 401) {
+    return "登录已过期或已退出。请在下方邮箱账号面板中找回账号，恢复点数和紫微解读。";
+  }
+  return "加载档案失败，请稍后重试。";
 }
 
 function apiError(status: number, detail: unknown, retryAfter: string | null = null): ZiweiApiError {
@@ -53,8 +60,9 @@ export type ZiweiProfileCreate = {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", "X-Device-Id": getDeviceId(), ...(init?.headers ?? {}) },
+    headers: { "Content-Type": "application/json", "X-Recovery-Client": "1", "X-Device-Id": getDeviceId(), ...(init?.headers ?? {}) },
     cache: "no-store",
+    credentials: "include",
   });
   if (!response.ok) {
     const err = await response.json().catch(() => null) as { detail?: unknown } | null;
@@ -119,9 +127,10 @@ async function streamOracle(
   const scope = `oracle:${getDeviceId()}:${profileId}:stream`;
   const response = await fetch(`${API_BASE}/ziwei/profiles/${profileId}/oracle/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Device-Id": getDeviceId(), "Idempotency-Key": retryKeys.get(scope, body) },
+    headers: { "Content-Type": "application/json", "X-Recovery-Client": "1", "X-Device-Id": getDeviceId(), "Idempotency-Key": retryKeys.get(scope, body) },
     body: JSON.stringify(body),
     cache: "no-store",
+    credentials: "include",
     signal,
   });
   if (!response.ok || !response.body) {

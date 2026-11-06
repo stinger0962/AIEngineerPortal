@@ -13,8 +13,11 @@ from app.services import stripe_billing
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'billing.db'}", connect_args={"timeout": 10})
+    from app.models.entities import Account, AccountDevice, VerifiedAccountEmail, ZiweiProfileOwner, AccountSession
+    for recovery_model in (Account, AccountDevice, VerifiedAccountEmail, ZiweiProfileOwner, AccountSession):
+        recovery_model.__table__.create(engine, checkfirst=True)
     for m in (Account, AccountDevice, CreditLedger, PaymentOrder, BillingRequest):
-        m.__table__.create(bind=engine)
+        m.__table__.create(bind=engine, checkfirst=True)
     settings = SimpleNamespace(stripe_test_enabled=True, stripe_secret_key="sk_test_mock",
         stripe_webhook_secret="whsec_mock", stripe_test_base_url="http://localhost:3000",
         public_base_url="https://portal.leipan.cc")

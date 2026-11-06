@@ -1,3 +1,11 @@
+> **Historical design — superseded for identity and launch assumptions (2026-11-06).**
+> Use [verified account recovery](../../integration/account-recovery.md) for current ownership rules.
+> Checkout email is NOT proof of ownership. Never automatically bind, recover or merge
+> accounts/credits because emails match. Only explicit verified-email proof plus
+> established ownership may bind an account. The Alipay-primary plan and live prices
+> below are historical proposals, not payment eligibility or launch approval.
+> Real payments remain disabled; this milestone prepares recovery only.
+
 # 紫微斗数 付费点数 (Paid Credits) — Design of Record
 
 **Approved:** 2026-07-22. Model = per-round credits, Stripe (Alipay primary + WeChat), keep overseas hosting.

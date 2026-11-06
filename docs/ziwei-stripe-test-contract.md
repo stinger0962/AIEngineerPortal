@@ -4,7 +4,7 @@ Base: `/api/v1`. Qian charging is out of scope. Prices remain CNY: p10 = 10 cred
 
 ## Identity and responses
 
-Use `X-Device-Id` on billing and oracle calls. This is the existing anonymous **bearer credential**, not a verified user login: protect it like a password. Possession grants account access. Missing/other device credentials cannot read an order, Ziwei profile, or Qian reading. Qian list and detail now enforce ownership; NULL legacy readings are hidden. Account recovery and stronger authentication are separate work.
+Use `X-Device-Id` on billing and oracle calls. This is the existing anonymous **bearer credential**, not a verified user login: protect it like a password. Possession grants account access. Missing/other device credentials cannot read an order, Ziwei profile, or Qian reading. Qian list and detail now enforce ownership; NULL legacy readings are hidden. Account recovery preparation is described in [verified account recovery](integration/account-recovery.md). Once verified, Ziwei/billing require a server session rather than the old device credential. Recovery enrollment and real payments remain disabled by default.
 
 - `GET /billing/balance`: `{balance, require_credits, free_credits, paid_enabled, packs, currency:"cny", mode:"test"}`. Packs contain `key`, `credits`, `amount_cents`, `label`. With a device, first access creates the account and existing welcome credit allocation. Without one, balance is zero.
 - `POST /billing/checkout`: body `{pack:"p10"}`; header `Idempotency-Key` required (8–128 chars; use a UUID). Returns `{url, order_id, mode:"test"}`. Redirect to `url`.

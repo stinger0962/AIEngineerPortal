@@ -24,6 +24,7 @@ from app.models.entities import (
     ZiweiConversation,
     ZiweiMessage,
     ZiweiProfile,
+    ZiweiProfileOwner,
 )
 from app.services import credits as credits_svc
 from app.services.ai_service import AIService
@@ -100,16 +101,14 @@ def _profile_out(p: ZiweiProfile) -> dict:
     }
 
 
-def get_device_id(x_device_id: str = Header(default="")) -> str:
-    """匿名浏览器归属：前端每台浏览器生成一个 device_id，随请求头 X-Device-Id 传来。"""
-    return (x_device_id or "").strip()
+from app.services.account_recovery import identity as get_device_id, Principal, owns_profile
 
 
 def _owned_or_404(db: Session, profile_id: int, device: str) -> ZiweiProfile:
     """取回属于本 device 的档案；否则 404（不 403——不泄露它对别的 device 存在）。
     NULL device_id（旧数据）永不匹配；空 device 什么也看不到。"""
     profile = db.get(ZiweiProfile, profile_id)
-    if not profile or not device or profile.device_id != device:
+    if not profile or not owns_profile(db, profile, device):
         raise HTTPException(404, "Profile not found")
     return profile
 
@@ -120,9 +119,12 @@ def list_profiles(db: Session = Depends(get_db), device: str = Depends(get_devic
         return []
     # Listing never claims legacy data. NULL owners remain unchanged and hidden
     # until explicit, authorized recovery; a visitor's device ID proves no ownership.
-    profiles = db.scalars(
-        select(ZiweiProfile).where(ZiweiProfile.device_id == device).order_by(ZiweiProfile.id.asc())
-    ).all()
+    query = select(ZiweiProfile)
+    if isinstance(device, Principal):
+        query = query.join(ZiweiProfileOwner).where(ZiweiProfileOwner.account_id == device.account_id)
+    else:
+        query = query.where(ZiweiProfile.device_id == device)
+    profiles = [p for p in db.scalars(query.order_by(ZiweiProfile.id.asc())).all() if owns_profile(db, p, device)]
     return [_profile_out(p) for p in profiles]
 
 
@@ -135,8 +137,17 @@ def create_profile(payload: ProfileCreate, db: Session = Depends(get_db), device
     _validate("birth_time_index", payload.birth_time_index)
     _validate("birth_date", payload.birth_date)
 
-    profile = ZiweiProfile(device_id=device, **payload.model_dump())
+    if not isinstance(device, Principal):
+        from app.models.entities import VerifiedAccountEmail
+        account = credits_svc.resolve_account(db, device)
+        credits_svc.lock_account(db, account.id)
+        if db.get(VerifiedAccountEmail, account.id):
+            raise HTTPException(401, "Verify your email to access this account")
+    profile = ZiweiProfile(device_id=None if isinstance(device, Principal) else device, **payload.model_dump())
     db.add(profile)
+    if isinstance(device, Principal):
+        db.flush()
+        db.add(ZiweiProfileOwner(profile_id=profile.id, account_id=device.account_id))
     db.commit()
     db.refresh(profile)
     return _profile_out(profile)
@@ -175,6 +186,9 @@ def update_profile(
 @router.delete("/profiles/{profile_id}")
 def delete_profile(profile_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     profile = _owned_or_404(db, profile_id, device)
+    owner = db.get(ZiweiProfileOwner, profile.id)
+    if owner:
+        db.delete(owner)
     db.delete(profile)
     db.commit()
     return {"deleted": profile_id}
@@ -191,6 +205,8 @@ def claim_legacy(payload: ClaimRequest, db: Session = Depends(get_db), device: s
     from app.models.entities import QianReading
 
     settings = get_settings()
+    if settings.account_recovery_enabled or isinstance(device, Principal):
+        raise HTTPException(403, "Bulk legacy claim is unavailable with account recovery")
     code = (settings.ziwei_claim_code or "").strip()
     if not code:
         raise HTTPException(403, "认领未启用（服务器未设置 ZIWEI_CLAIM_CODE）。")
@@ -199,7 +215,7 @@ def claim_legacy(payload: ClaimRequest, db: Session = Depends(get_db), device: s
     if (payload.code or "").strip() != code:
         raise HTTPException(403, "认领口令不正确。")
 
-    profiles = db.query(ZiweiProfile).filter(ZiweiProfile.device_id.is_(None)).update(
+    profiles = db.query(ZiweiProfile).filter(ZiweiProfile.device_id.is_(None), ~ZiweiProfile.id.in_(select(ZiweiProfileOwner.profile_id))).update(
         {ZiweiProfile.device_id: device}, synchronize_session=False
     )
     readings = db.query(QianReading).filter(QianReading.device_id.is_(None)).update(

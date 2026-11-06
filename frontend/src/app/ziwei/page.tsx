@@ -4,8 +4,10 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { ProfileForm } from "@/components/ziwei/profile-form";
 import { ZiweiWorkspace } from "@/components/ziwei/ziwei-workspace";
+import { AccountPanel } from "@/components/ziwei/account-panel";
+import { recoveryEnabled } from "@/lib/ziwei/account";
 import { OracleIdentityPanel } from "@/components/oracle/identity-panel";
-import { hasChart, ziweiApi, type ZiweiProfileOut } from "@/lib/ziwei/api";
+import { hasChart, ziweiApi, profileLoadErrorMessage, type ZiweiProfileOut } from "@/lib/ziwei/api";
 import { CreditPanel } from "@/components/ziwei/billing/credit-panel";
 import { testBillingEnabled } from "@/lib/ziwei/billing";
 import { RELATION_LABELS } from "@/lib/ziwei/constants";
@@ -15,7 +17,7 @@ export default function ZiweiPage() {
   const [profiles, setProfiles] = useState<ZiweiProfileOut[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -33,7 +35,7 @@ export default function ZiweiPage() {
         }
         else setShowForm(true);
       })
-      .catch(() => setLoadError(true))
+      .catch((error: unknown) => setLoadError(profileLoadErrorMessage(error)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -78,7 +80,7 @@ export default function ZiweiPage() {
 
       {testBillingEnabled && <Suspense fallback={null}><CreditPanel refreshKey={balanceVersion} /></Suspense>}
 
-      {loadError ? <p className="text-sm text-rose-500">加载档案失败，请确认后端已启动。</p> : null}
+      {loadError ? <p role="alert" className="text-sm text-rose-700">{loadError}</p> : null}
       {deleteError ? (
         <p className="text-sm text-rose-500" role="alert">
           {deleteError}
@@ -130,7 +132,7 @@ export default function ZiweiPage() {
             </button>
           )}
 
-          <OracleIdentityPanel />
+          {recoveryEnabled ? <AccountPanel /> : <OracleIdentityPanel />}
         </div>
 
         {/* 命盘 */}

@@ -165,6 +165,9 @@ def _valid_chart():
 
 
 def setup_module():
+    from app.models.entities import Account, AccountDevice, VerifiedAccountEmail, ZiweiProfileOwner, AccountSession, CreditLedger
+    for recovery_model in (Account, AccountDevice, VerifiedAccountEmail, ZiweiProfileOwner, AccountSession, CreditLedger):
+        recovery_model.__table__.create(engine, checkfirst=True)
     User.__table__.create(bind=engine, checkfirst=True)
     ZiweiProfile.__table__.create(bind=engine, checkfirst=True)
     ZiweiConversation.__table__.create(bind=engine, checkfirst=True)
