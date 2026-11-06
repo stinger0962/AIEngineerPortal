@@ -15,6 +15,13 @@ export class ZiweiApiError extends Error {
   }
 }
 
+export function profileLoadErrorMessage(error: unknown): string {
+  if (error instanceof ZiweiApiError && error.status === 401) {
+    return "登录已过期或已退出。请在下方邮箱账号面板中找回账号，恢复点数和紫微解读。";
+  }
+  return "加载档案失败，请稍后重试。";
+}
+
 function apiError(status: number, detail: unknown, retryAfter: string | null = null): ZiweiApiError {
   const seconds = retryAfter === null ? undefined : Number(retryAfter);
   const retryAfterSeconds = seconds !== undefined && Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;

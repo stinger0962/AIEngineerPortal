@@ -12,7 +12,17 @@ from app.db.session import get_db
 from app.models.entities import (AccountDevice, AccountSession, AccountRateLimit,
                                  VerifiedAccountEmail, ZiweiProfileOwner)
 
-COOKIE = "oracle_session"
+COOKIE = "__Host-oracle_session"
+LOCAL_COOKIE = "oracle_session_local"
+
+
+def cookie_name() -> str:
+    settings = get_settings()
+    if settings.account_session_secure:
+        return COOKIE
+    if settings.app_env not in {"development", "test"}:
+        raise HTTPException(503, "Insecure session cookies are only available in local development/tests")
+    return LOCAL_COOKIE
 
 
 def digest(value: str) -> str:
@@ -28,6 +38,7 @@ class Principal(str):
 
 
 def require_enabled():
+    cookie_name()  # fail before creating any challenge or ownership binding
     if not get_settings().account_recovery_enabled:
         raise HTTPException(404, "Recovery unavailable")
 
@@ -73,7 +84,10 @@ def validate_client(request: Request):
 
 def identity(request: Request, x_device_id: str = Header(default=""), db: Session = Depends(get_db)) -> str:
     device = x_device_id.strip()
-    token = request.cookies.get(COOKIE)
+    name = cookie_name()
+    token = request.cookies.get(name)
+    if not token and any(request.cookies.get(other) for other in {COOKIE, LOCAL_COOKIE, "oracle_session"} - {name}):
+        raise HTTPException(401, "Untrusted session cookie; clear browser session")
     if token:
         # A custom header prevents form CSRF; Origin is checked when browsers send it.
         validate_client(request)

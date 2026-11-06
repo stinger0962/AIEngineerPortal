@@ -5,7 +5,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -126,28 +126,39 @@ def verify(payload: Verify, request: Request, response: Response, db: Session = 
     except Exception:
         db.rollback()
         raise
-    response.set_cookie(auth.COOKIE, token, max_age=30 * 86400, httponly=True,
-                        secure=get_settings().account_session_secure, samesite="strict", path="/api/v1")
+    response.set_cookie(auth.cookie_name(), token, max_age=30 * 86400, httponly=True,
+                        secure=get_settings().account_session_secure, samesite="strict", path="/")
     response.headers["Cache-Control"] = "no-store"
     return {"verified": True}
 
 
 @router.get("/session")
-def session(response: Response, principal=Depends(auth.identity)):
+def session(request: Request, response: Response, db: Session = Depends(get_db)):
     response.headers["Cache-Control"] = "no-store"
+    # Session inspection ignores anonymous device ownership. A verified old device
+    # without a cookie is logged out, and may explicitly restore another legacy ID.
+    principal = auth.identity(request, "", db)
     return {"authenticated": isinstance(principal, auth.Principal)}
 
 
+def clear_cookie(response: Response):
+    response.delete_cookie(auth.COOKIE, path="/", secure=True, httponly=True, samesite="strict")
+    response.delete_cookie(auth.LOCAL_COOKIE, path="/", secure=False, httponly=True, samesite="strict")
+    # Retire the pre-hardening host-only cookie; never use it as identity proof.
+    response.delete_cookie("oracle_session", path="/api/v1", secure=True, httponly=True, samesite="strict")
+    response.delete_cookie("oracle_session", path="/", secure=True, httponly=True, samesite="strict")
+    response.headers["Cache-Control"] = "no-store"
+
+
 @router.post("/logout")
-def logout(request: Request, response: Response, db: Session = Depends(get_db), principal=Depends(auth.identity)):
-    if isinstance(principal, auth.Principal):
-        token = request.cookies.get(auth.COOKIE, "")
-        row = db.get(AccountSession, auth.digest(token))
-        if row:
-            db.delete(row)
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    # Idempotent even for expired/revoked/unknown cookies. Router CSRF checks still
+    # apply, but a valid session is not required to clear this browser's state.
+    token = request.cookies.get(auth.cookie_name())
+    if token:
+        db.execute(delete(AccountSession).where(AccountSession.token_hash == auth.digest(token)))
         db.commit()
-    response.delete_cookie(auth.COOKIE, path="/api/v1", secure=get_settings().account_session_secure,
-                           httponly=True, samesite="strict")
+    clear_cookie(response)
     return {"authenticated": False}
 
 
@@ -158,6 +169,5 @@ def logout_all(response: Response, db: Session = Depends(get_db), principal=Depe
     credits.lock_account(db, principal.account_id)
     auth.revoke_sessions(db, principal.account_id)
     db.commit()
-    response.delete_cookie(auth.COOKIE, path="/api/v1", secure=get_settings().account_session_secure,
-                           httponly=True, samesite="strict")
+    clear_cookie(response)
     return {"authenticated": False}

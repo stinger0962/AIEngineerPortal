@@ -1,5 +1,5 @@
 import { API_BASE } from "@/lib/api";
-import { getDeviceId } from "@/lib/deviceId";
+import { getDeviceId, setDeviceId } from "@/lib/deviceId";
 
 // Recovery must still work when old localStorage is corrupt or unavailable.
 export function recoveryDeviceId(): string {
@@ -26,4 +26,16 @@ export async function accountRequest<T>(path: string, body?: unknown): Promise<T
     throw new Error(messages[response.status] ?? "操作失败，请重试。");
   }
   return response.json() as Promise<T>;
+}
+
+
+export async function restoreLegacyDevice(code: string): Promise<void> {
+  const clean = code.trim();
+  if (!clean || clean.length > 64 || !/^[\x20-\x7e\x80-\xff]+$/.test(clean)) {
+    throw new Error("旧设备找回码无效。");
+  }
+  // Recheck immediately before changing shared Ziwei/Qian browser identity.
+  const session = await accountRequest<{ authenticated: boolean }>("/session");
+  if (session.authenticated) throw new Error("请先退出邮箱账号，再恢复旧设备身份。");
+  if (!setDeviceId(clean)) throw new Error("浏览器无法保存找回码，请检查存储设置。");
 }

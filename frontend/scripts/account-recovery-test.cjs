@@ -23,7 +23,19 @@ function load(file) {
   let stored = 'device-valid';
   global.localStorage = { getItem: () => stored, setItem: (_, value) => { stored = value; } };
   const account = load(path.join(root, 'lib/ziwei/account.ts'));
-  const api = load(path.join(root, 'lib/ziwei/api.ts')).ziweiApi;
+  const apiModule = load(path.join(root, 'lib/ziwei/api.ts'));
+  const api = apiModule.ziweiApi;
+  assert.match(apiModule.profileLoadErrorMessage(new apiModule.ZiweiApiError(401)), /邮箱账号.*找回/);
+  assert.doesNotMatch(apiModule.profileLoadErrorMessage(new apiModule.ZiweiApiError(401)), /后端/);
+  assert.doesNotMatch(apiModule.profileLoadErrorMessage(new apiModule.ZiweiApiError(503)), /登录已过期/);
+  const React = require('react');
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const { AccountPanel } = load(path.join(root, 'components/ziwei/account-panel.tsx'));
+  const markup = renderToStaticMarkup(React.createElement(AccountPanel));
+  assert.match(markup, /bg-white/);
+  assert.match(markup, /text-ink/);
+  assert.doesNotMatch(markup, /text-violet-100|bg-slate-900/);
+  assert.match(markup, /找回已验证账号/);
   const billing = load(path.join(root, 'lib/ziwei/billing.ts'));
   assert.equal(account.recoveryEnabled, false);
   const calls = [];
@@ -44,6 +56,14 @@ function load(file) {
     assert.equal(calls.at(-1).init.headers['X-Device-Id'], safe);
     if (value) assert.equal(stored, value, 'do not overwrite old identity');
   }
+  stored = 'old-browser';
+  global.fetch = async () => ({ ok: true, json: async () => ({authenticated:true}) });
+  await assert.rejects(account.restoreLegacyDevice('saved-code'), /先退出/);
+  assert.equal(stored, 'old-browser');
+  global.fetch = async () => ({ ok: true, json: async () => ({authenticated:false}) });
+  await account.restoreLegacyDevice('saved-code');
+  assert.equal(stored, 'saved-code');
+  global.fetch = async (url, init) => { calls.push({url,init}); return {ok:true,json:async()=>({authenticated:false})}; };
   global.localStorage = { getItem: () => { throw new Error('storage disabled'); } };
   await account.accountRequest('/challenges', { email: 'test@example.test', purpose: 'recover' });
   assert.equal(calls.at(-1).init.headers['X-Device-Id'], '');

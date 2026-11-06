@@ -93,7 +93,7 @@ def test_recovery_restores_balance_profiles_and_messages_without_merging(harness
         db.add(ZiweiMessage(conversation_id=cid, role="assistant", content="saved reading")); db.commit()
     data = challenge(c, outbox)
     assert verify(c, data).status_code == 200
-    old_cookie = c.cookies.get(auth.COOKIE)
+    old_cookie = c.cookies.get(auth.cookie_name())
     assert c.get("/api/v1/billing/balance").json()["balance"] == 43
     second = TestClient(app, headers={"X-Recovery-Client": "1", "X-Device-Id": "device-b"})
     unrelated = profile(second, "B")
@@ -107,7 +107,7 @@ def test_recovery_restores_balance_profiles_and_messages_without_merging(harness
     assert c.get("/api/v1/billing/balance").status_code == 401
     c.cookies.clear()
     assert c.get("/api/v1/ziwei/profiles").status_code == 401
-    c.cookies.set(auth.COOKIE, old_cookie)
+    c.cookies.set(auth.cookie_name(), old_cookie)
     assert c.get("/api/v1/ziwei/profiles").status_code == 401
     with Session(engine) as db:
         assert credits.balance(db, aid) == 43
@@ -127,7 +127,7 @@ def test_wrong_expired_replay_and_hashed_secrets(harness):
     assert verify(c, data).status_code == 400
     with Session(engine) as db:
         session = db.scalar(select(AccountSession))
-        assert session.token_hash != c.cookies.get(auth.COOKIE)
+        assert session.token_hash != c.cookies.get(auth.cookie_name())
         session.expires_at = datetime.utcnow() - timedelta(seconds=1); db.commit()
     assert c.get("/api/v1/ziwei/profiles").status_code == 401
     c.cookies.clear()
@@ -199,9 +199,9 @@ def test_logout_and_missing_corrupt_stale_device_storage(harness):
     assert verify(b, challenge(b, outbox, "recover")).status_code == 200
     new_pid = profile(b, "new")
     assert b.delete(f"/api/v1/ziwei/profiles/{new_pid}").status_code == 200
-    token = b.cookies.get(auth.COOKIE)
+    token = b.cookies.get(auth.cookie_name())
     assert b.post("/api/v1/account/logout-all").status_code == 200
-    b.cookies.set(auth.COOKIE, token)
+    b.cookies.set(auth.cookie_name(), token)
     assert b.get("/api/v1/billing/balance").status_code == 401
 
 
@@ -386,3 +386,69 @@ def test_logout_all_serializes_after_concurrent_recovery(harness):
     assert b.get("/api/v1/account/session").status_code == 401
     with Session(engine) as db:
         assert not db.scalars(select(AccountSession)).all()
+
+
+def test_saved_legacy_bearer_can_restore_then_bind_but_not_reopen_verified_account(harness):
+    c, _, outbox, _, app = harness
+    pid = profile(c)
+    b = TestClient(app, headers={"X-Recovery-Client": "1", "X-Device-Id": "new-browser"})
+    assert b.get(f"/api/v1/ziwei/profiles/{pid}").status_code == 404
+    b.headers["X-Device-Id"] = "device-a"  # explicit saved legacy-code restore
+    assert b.get(f"/api/v1/ziwei/profiles/{pid}").status_code == 200
+    assert verify(b, challenge(b, outbox)).status_code == 200
+    assert b.get(f"/api/v1/ziwei/profiles/{pid}").status_code == 200
+    b.cookies.clear()
+    assert b.get(f"/api/v1/ziwei/profiles/{pid}").status_code == 401
+    assert verify(b, challenge(b, outbox, "recover")).status_code == 200
+
+
+@pytest.mark.parametrize("cookie_state", ["expired", "revoked", "unknown"])
+@pytest.mark.parametrize("enrollment_enabled", [True, False])
+def test_logout_clears_stale_cookie_idempotently(harness, cookie_state, enrollment_enabled):
+    c, engine, outbox, settings, _ = harness
+    assert verify(c, challenge(c, outbox)).status_code == 200
+    with Session(engine) as db:
+        row = db.scalar(select(AccountSession))
+        if cookie_state == "expired":
+            row.expires_at = datetime.utcnow() - timedelta(seconds=1)
+        else:
+            db.delete(row)
+        db.commit()
+    if cookie_state == "unknown":
+        c.cookies.clear(); c.cookies.set(auth.cookie_name(), "unrecognized-token", domain="testserver.local", path="/")
+    assert c.get("/api/v1/account/session").status_code == 401
+    settings.account_recovery_enabled = enrollment_enabled
+    for _ in range(2):
+        response = c.post("/api/v1/account/logout")
+        assert response.status_code == 200
+        assert not c.cookies.get(auth.cookie_name())
+        assert c.get("/api/v1/account/session").json() == {"authenticated": False}
+    with Session(engine) as db:
+        assert not db.scalars(select(AccountSession)).all()
+
+
+def test_production_host_cookie_and_untrusted_cookie_names(harness):
+    c, engine, outbox, settings, app = harness
+    settings.account_session_secure = True
+    settings.app_env = "production"
+    secure = TestClient(app, base_url="https://testserver", headers={"X-Recovery-Client": "1", "X-Device-Id": "secure-device"})
+    response = verify(secure, challenge(secure, outbox))
+    cookie = response.headers["set-cookie"]
+    assert cookie.startswith("__Host-oracle_session=")
+    assert "Path=/;" in cookie and "Secure" in cookie and "HttpOnly" in cookie and "SameSite=strict" in cookie
+    assert "Domain=" not in cookie
+    token = secure.cookies.get(auth.COOKIE)
+    assert secure.get("/api/v1/account/session").json()["authenticated"]
+    for wrong_name in (auth.LOCAL_COOKIE, "oracle_session"):
+        attacker = TestClient(app, base_url="https://testserver", headers={"X-Recovery-Client": "1"})
+        attacker.cookies.set(wrong_name, token, domain="testserver.local", path="/")
+        assert attacker.get("/api/v1/account/session").status_code == 401
+        cleared = attacker.post("/api/v1/account/logout")
+        assert cleared.status_code == 200
+        assert attacker.get("/api/v1/account/session").json() == {"authenticated": False}
+    logout = secure.post("/api/v1/account/logout")
+    secure_deletion = next(h for h in logout.headers.get_list("set-cookie") if h.startswith(auth.COOKIE + "="))
+    assert "Path=/;" in secure_deletion and "Secure" in secure_deletion and "Max-Age=0" in secure_deletion
+    assert "Domain=" not in secure_deletion
+    settings.account_session_secure = False
+    assert c.post("/api/v1/account/challenges", json={"email":"new@example.test", "purpose":"recover"}).status_code == 503
