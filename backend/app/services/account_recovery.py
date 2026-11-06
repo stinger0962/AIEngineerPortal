@@ -86,8 +86,8 @@ def identity(request: Request, x_device_id: str = Header(default=""), db: Sessio
     device = x_device_id.strip()
     name = cookie_name()
     token = request.cookies.get(name)
-    if not token and any(request.cookies.get(other) for other in {COOKIE, LOCAL_COOKIE, "oracle_session"} - {name}):
-        raise HTTPException(401, "Untrusted session cookie; clear browser session")
+    # Ignore all other names: sibling-set parent-domain cookies must neither
+    # authenticate nor prevent anonymous access after logout.
     if token:
         # A custom header prevents form CSRF; Origin is checked when browsers send it.
         validate_client(request)

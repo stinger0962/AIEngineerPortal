@@ -442,7 +442,7 @@ def test_production_host_cookie_and_untrusted_cookie_names(harness):
     for wrong_name in (auth.LOCAL_COOKIE, "oracle_session"):
         attacker = TestClient(app, base_url="https://testserver", headers={"X-Recovery-Client": "1"})
         attacker.cookies.set(wrong_name, token, domain="testserver.local", path="/")
-        assert attacker.get("/api/v1/account/session").status_code == 401
+        assert attacker.get("/api/v1/account/session").json() == {"authenticated": False}
         cleared = attacker.post("/api/v1/account/logout")
         assert cleared.status_code == 200
         assert attacker.get("/api/v1/account/session").json() == {"authenticated": False}
@@ -452,3 +452,37 @@ def test_production_host_cookie_and_untrusted_cookie_names(harness):
     assert "Domain=" not in secure_deletion
     settings.account_session_secure = False
     assert c.post("/api/v1/account/challenges", json={"email":"new@example.test", "purpose":"recover"}).status_code == 503
+
+
+@pytest.mark.parametrize("wrong_name", ["oracle_session", auth.LOCAL_COOKIE])
+def test_parent_domain_cookie_cannot_authenticate_or_trap_browser(harness, wrong_name):
+    _, _, outbox, settings, app = harness
+    settings.account_session_secure = True
+    settings.app_env = "production"
+    owner = TestClient(app, base_url="https://portal.leipan.cc", headers={"X-Recovery-Client": "1", "X-Device-Id": "owner-device"})
+    pid = profile(owner)
+    assert verify(owner, challenge(owner, outbox)).status_code == 200
+    token = owner.cookies.get(auth.COOKIE)
+    visitor = TestClient(app, base_url="https://portal.leipan.cc", headers={"X-Recovery-Client": "1", "X-Device-Id": "visitor-device"})
+    # A real cookie-jar parent-domain cookie is sent to the portal subdomain and
+    # survives a host-only deletion. Even a valid token under this name is ignored.
+    visitor.cookies.set(wrong_name, token, domain=".leipan.cc", path="/")
+    response = visitor.get("/api/v1/account/session")
+    assert wrong_name in response.request.headers["cookie"]
+    assert response.json() == {"authenticated": False}
+    assert visitor.get(f"/api/v1/ziwei/profiles/{pid}").status_code == 404
+    own_pid = profile(visitor)
+    assert visitor.post("/api/v1/account/logout").status_code == 200
+    assert visitor.cookies.get(wrong_name, domain=".leipan.cc", path="/") == token
+    assert visitor.get("/api/v1/account/session").json() == {"authenticated": False}
+    assert visitor.get(f"/api/v1/ziwei/profiles/{own_pid}").status_code == 200
+    visitor.headers["X-Device-Id"] = "owner-device"
+    assert visitor.get(f"/api/v1/ziwei/profiles/{pid}").status_code == 401
+    assert visitor.get("/api/v1/billing/balance").status_code == 401
+    # Invalid current-mode cookies still fail closed; wrong names cannot mask them.
+    visitor.cookies.set(auth.COOKIE, "invalid", domain="portal.leipan.cc", path="/")
+    assert visitor.get("/api/v1/account/session").status_code == 401
+    assert visitor.post("/api/v1/account/logout").status_code == 200
+    assert visitor.get("/api/v1/account/session").json() == {"authenticated": False}
+    assert verify(visitor, challenge(visitor, outbox, "recover")).status_code == 200
+    assert visitor.get(f"/api/v1/ziwei/profiles/{pid}").status_code == 200
