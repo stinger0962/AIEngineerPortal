@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.billing_contention import bound_lock_wait
-from app.models.entities import Account, AccountDevice, CreditLedger
+from app.models.entities import Account, AccountDevice, CreditLedger, VerifiedAccountEmail
 
 # 服务端权威定价（前端只报 pack key，金额/点数一律以此为准）。amount_cents = CNY 分。
 PACKS: dict[str, dict] = {
@@ -23,12 +23,18 @@ PACKS: dict[str, dict] = {
 def resolve_account(db: Session, device_id: str, *, create: bool = True) -> Optional[Account]:
     """device_id → account。新设备（create=True 时）自动建 account + 绑定 + 赠送免费点数。
     空 device_id 返回 None。"""
+    from app.services.account_recovery import Principal
+    if isinstance(device_id, Principal):
+        return db.get(Account, device_id.account_id)
     bound_lock_wait(db)
     device_id = (device_id or "").strip()
     if not device_id:
         return None
     link = db.scalar(select(AccountDevice).where(AccountDevice.device_id == device_id))
     if link:
+        if db.get(VerifiedAccountEmail, link.account_id):
+            from fastapi import HTTPException
+            raise HTTPException(401, "Verify your email to access this account")
         return db.get(Account, link.account_id)
     if not create:
         return None

@@ -1,0 +1,33 @@
+# Verified account recovery — preparation only
+
+This milestone supersedes the email recovery/merge proposals in the July paid-credit design. A Checkout email or a historical `accounts.email` value is never identity proof. There is no email-match account merge, balance rewrite, Qian migration, domain change, real email integration or live-payment activation.
+
+## Ownership and recovery
+
+`accounts.id` remains the canonical identity for existing credits/orders. `verified_account_emails` binds a normalized email to exactly one account only after proof of both mailbox access and the original device bearer credential. `ziwei_profile_owners` gives profiles account ownership; conversations/messages inherit through their profile. New authenticated profiles use account ownership rather than a device. Original device mappings and legacy rows remain stored.
+
+Binding migrates only profiles belonging to the exact device credential presented at challenge creation AND verification. Other device mappings, ownerless profiles and historical email contacts are not backfilled. Other linked devices are blocked from accessing the now-verified credit account; their unmigrated profiles remain preserved for a separately reviewed ownership-recovery flow. This is deliberately conservative for ambiguous legacy accounts. A stolen preexisting device credential remains a risk until binding; this change cannot retroactively prove who originally controlled an anonymous credential.
+
+Recovery logs into the verified canonical account without attaching or merging the new browser's anonymous account. Its existing localStorage remains untouched, as do its balance and readings. Successful recovery revokes previous sessions. Logout revokes the current session; logout-all serializes on the account lock with recovery and revokes all sessions issued before its transaction. Pending email recovery codes remain usable until expiry: logout-all revokes sessions, not mailbox access. Requests already authorized before revocation may finish.
+
+Codes are 256-bit random values, SHA-256 hashed at rest, expire after 15 minutes and are conditionally consumed once in the same transaction as binding/migration/session issuance. Sessions use 256-bit random opaque tokens, hashed server-side, and expire after 30 days. Cookies are HttpOnly, Secure by default, SameSite=Strict, host-only, path `/api/v1`. No code, session or device credential is put in a URL or logged. Verification and all recovery endpoints require `X-Recovery-Client: 1` and reject supplied Origins outside the configured CORS list. Ziwei/billing session requests apply the same check. Fixed-hour durable rate limits: 20 starts/IP, 5 starts/email, 40 verifies/IP, 5 verifies/challenge. IP uses the direct peer, not untrusted forwarded headers; a reverse proxy may group users and requires a separately reviewed trusted-proxy policy before launch.
+
+Turning enrollment off does not weaken durable account/profile ownership checks. Old device credentials cannot reopen verified accounts, and legacy bulk claim excludes owned profiles and rejects account sessions. Qian deliberately keeps its existing device-based identity and does not use the new cookie.
+
+## Database and configuration
+
+Five new tables only: `verified_account_emails`, `account_sessions`, `account_challenges`, `account_rate_limits`, `ziwei_profile_owners`. Fresh databases use the existing metadata creation path. Existing PostgreSQL databases have additive, repeatable DDL in `backend/scripts/migrations/20261106_account_recovery.sql`. There is no automatic ownership backfill and no change to existing ledger/order rows. Do not drop these tables or roll back to pre-ownership code after enrollment: old code cannot enforce the new ownership model. No external migration has been run.
+
+`ACCOUNT_RECOVERY_ENABLED=false` (default) disables enrollment/recovery routes. `NEXT_PUBLIC_ACCOUNT_RECOVERY` must explicitly be `true` to show the new panel; its default is hidden. `ACCOUNT_SESSION_SECURE=true` must remain set for HTTPS. Only isolated localhost tests may set it false. Existing billing flags remain disabled by default and are independent. This branch does not change deployment or payment configuration.
+
+Email delivery intentionally fails closed with 503 until a reviewed transport is supplied. For local tests, override the FastAPI `get_sender` dependency with an in-memory fake, as in `backend/tests/test_account_recovery.py`; inspect that fake outbox in the test process. The API never returns the code. No credentials or email service have been installed. Delivery failure consumes that challenge; a new request is needed. If a successful verification response is lost, the code cannot be replayed; requesting a new recovery code safely establishes another session without duplicating migration or credits.
+
+Before any future activation: select the intended database, review/apply schema, separately implement and review email delivery, review trusted-proxy/rate-limit configuration and expired-record retention, validate HTTPS cookie/origin routing, and verify legacy-account ownership handling. No production activation is included here. Expired rate buckets/challenges/sessions currently remain stored; a reviewed retention job is a launch prerequisite.
+
+## Later separate domain
+
+Serve the new product and its API under the new domain's origin (or an explicitly reviewed same-site API setup). The user verifies email again there to receive a new host-only session for the same server-side account. Do not copy cookies/localStorage across domains, pass credentials in redirects, bulk-adopt legacy records or automatically merge accounts. Routing, branding and deployment are separate work; Qian recovery is a later milestone. This branch changes no domain or cookie Domain setting.
+
+## Validation
+
+`backend/tests/test_account_recovery.py` exercises fake email delivery, original-device binding, canonical balance/readings/messages restoration across clients, isolation, legacy preservation, wrong/expired/replayed codes, durable limits, CSRF, cookie security, revocation, disabled enrollment, transactional interruption/retry and concurrent consumption. Existing acceptance suites cover paid request/checkout behavior; Qian tests cover unchanged isolation. Frontend offline checks cover cookie credentials, custom headers, corrupt/unavailable storage and API errors; TypeScript/build validate integration. See the PR for executed counts and environment limitations; no real email, live payment or production rollout is implied by these checks.

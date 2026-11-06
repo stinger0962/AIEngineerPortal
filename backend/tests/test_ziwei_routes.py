@@ -27,6 +27,9 @@ def override_get_db():
 
 def setup_module():
     # 只建 ziwei_profiles 表——其他表含 SQLite 不支持的列类型
+    from app.models.entities import Account, AccountDevice, VerifiedAccountEmail, ZiweiProfileOwner, AccountSession, CreditLedger
+    for recovery_model in (Account, AccountDevice, VerifiedAccountEmail, ZiweiProfileOwner, AccountSession, CreditLedger):
+        recovery_model.__table__.create(engine, checkfirst=True)
     ZiweiProfile.__table__.create(bind=engine, checkfirst=True)
     app.dependency_overrides[get_db] = override_get_db
 
@@ -38,7 +41,7 @@ def teardown_module():
         rmtree(TEST_DB_DIR, ignore_errors=True)
 
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Device-Id": "route-test-device"})
 
 VALID_PAYLOAD = {
     "name": "妈妈",

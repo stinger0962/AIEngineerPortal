@@ -4,6 +4,8 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { ProfileForm } from "@/components/ziwei/profile-form";
 import { ZiweiWorkspace } from "@/components/ziwei/ziwei-workspace";
+import { AccountPanel } from "@/components/ziwei/account-panel";
+import { recoveryEnabled } from "@/lib/ziwei/account";
 import { OracleIdentityPanel } from "@/components/oracle/identity-panel";
 import { hasChart, ziweiApi, type ZiweiProfileOut } from "@/lib/ziwei/api";
 import { CreditPanel } from "@/components/ziwei/billing/credit-panel";
@@ -130,7 +132,7 @@ export default function ZiweiPage() {
             </button>
           )}
 
-          <OracleIdentityPanel />
+          {recoveryEnabled ? <AccountPanel /> : <OracleIdentityPanel />}
         </div>
 
         {/* 命盘 */}

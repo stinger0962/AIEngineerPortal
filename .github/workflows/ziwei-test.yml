@@ -74,13 +74,13 @@ jobs:
         run: python -m unittest discover -s backend/tests -p test_release_workflow_integration.py -v
       - name: SQLite payment and reading regressions
         run: >-
-          python -m pytest backend/tests/acceptance backend/tests/test_billing_stripe.py
+          python -m pytest backend/tests/test_account_recovery.py backend/tests/acceptance backend/tests/test_billing_stripe.py
           backend/tests/test_credits.py backend/tests/test_ziwei_oracle_routes.py
           backend/tests/test_ziwei_stream.py backend/tests/test_qian_routes.py -q --tb=short
       - name: PostgreSQL acceptance and concurrency
         env:
           ZIWEI_QA_POSTGRES_URL: postgresql+psycopg://ziwei_qa@127.0.0.1:55432/ziwei_qa
-        run: python -m pytest backend/tests/acceptance -q --tb=short
+        run: python -m pytest backend/tests/test_account_recovery.py backend/tests/acceptance -q --tb=short
   frontend:
     strategy:
       matrix:
@@ -99,4 +99,5 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: node scripts/ziwei-billing-test.cjs
+      - run: node scripts/account-recovery-test.cjs
       - run: npx tsc --noEmit

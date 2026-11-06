@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     ziwei_auto_adopt: bool = False
     # 付费点数（灰度）：默认关——一切就绪后设 ZIWEI_REQUIRE_CREDITS=true 开闸收费。
     ziwei_require_credits: bool = False
+    account_recovery_enabled: bool = False
+    account_session_secure: bool = True
     ziwei_free_credits: int = 3  # 新账号赠送点数
     # Stripe 跨境收款（支付宝/微信）。空 = 未配置，购买端点返回 503。
     billing_lock_timeout_ms: int = Field(default=2000, ge=50, le=10000)
