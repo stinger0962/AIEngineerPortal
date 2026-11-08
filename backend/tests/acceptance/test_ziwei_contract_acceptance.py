@@ -142,6 +142,7 @@ def oracle_calls(monkeypatch):
         return CompleteStream()
     monkeypatch.setattr(ziwei.ZiweiOracle, 'run', run)
     monkeypatch.setattr(ziwei.ZiweiOracle, '_system_prompt', lambda *a, **kw: 'QA')
+    monkeypatch.setattr(ziwei, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(
         is_available=True, client=SimpleNamespace(messages=SimpleNamespace(stream=stream))))
     return calls
@@ -191,6 +192,7 @@ def test_failed_reading_allows_same_key_retry(qa, oracle_calls, monkeypatch, suf
         monkeypatch.setattr(ziwei.ZiweiOracle, 'run', lambda *a, **kw: None)
     else:
         success = ziwei.AIService
+        monkeypatch.setattr(ziwei, 'interactive_oracle_client', lambda client: client)
         monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(is_available=True,
             client=SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: InterruptedStream()))))
     failed = qa.client.post(path, headers=OWNER, json=REQUEST)
@@ -200,6 +202,7 @@ def test_failed_reading_allows_same_key_retry(qa, oracle_calls, monkeypatch, suf
     else:
         assert failed.status_code == 200 and '"error"' in failed.text
         assert '"done"' not in failed.text
+        monkeypatch.setattr(ziwei, 'interactive_oracle_client', lambda client: client)
         monkeypatch.setattr(ziwei, 'AIService', success)
     assert remaining(qa) == 1
     retried = qa.client.post(path, headers=OWNER, json=REQUEST)

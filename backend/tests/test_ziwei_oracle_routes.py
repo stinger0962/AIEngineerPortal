@@ -145,6 +145,7 @@ client = TestClient(app, headers={"X-Device-Id": TEST_DEVICE})
 
 @pytest.fixture(autouse=True)
 def _patch_ai_service(monkeypatch):
+    monkeypatch.setattr(ziwei_routes, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(ziwei_routes, "AIService", _FakeAIService)
 
 

@@ -108,6 +108,7 @@ class InterruptedStream:
 def test_interrupted_stream_preserves_credit(qa, monkeypatch):
     fund(qa)
     fake_client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: InterruptedStream()))
+    monkeypatch.setattr(ziwei, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(is_available=True, client=fake_client))
     monkeypatch.setattr(ziwei.ZiweiOracle, '_system_prompt', lambda *a, **kw: 'QA')
     response = qa.client.post(f'/api/v1/ziwei/profiles/{qa.profile}/oracle/stream', headers=OWNER, json=REQUEST)
@@ -127,6 +128,7 @@ def test_closed_stream_generator_preserves_credit(qa, monkeypatch):
     from starlette.responses import StreamingResponse
     fund(qa)
     fake_client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: InterruptedStream()))
+    monkeypatch.setattr(ziwei, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(is_available=True, client=fake_client))
     monkeypatch.setattr(ziwei.ZiweiOracle, '_system_prompt', lambda *a, **kw: 'QA')
     closed = []
@@ -161,6 +163,7 @@ def test_asgi_disconnect_rolls_back_and_same_key_can_retry(qa, monkeypatch):
                 time.sleep(0.01)
                 yield 'Mock partial reading. '
     monkeypatch.setattr(ziwei.ZiweiOracle, '_system_prompt', lambda *a, **kw: 'QA')
+    monkeypatch.setattr(ziwei, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(is_available=True,
         client=SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: SlowStream()))))
     path = f'/api/v1/ziwei/profiles/{qa.profile}/oracle/stream'
@@ -188,6 +191,7 @@ def test_asgi_disconnect_rolls_back_and_same_key_can_retry(qa, monkeypatch):
         assert output_seen.is_set()
     anyio.run(disconnect)
     assert remaining(qa) == 1
+    monkeypatch.setattr(ziwei, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(is_available=True,
         client=SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: CompleteStream()))))
     retried = qa.client.post(path, headers=OWNER, json=REQUEST)
@@ -201,6 +205,7 @@ def test_rejected_stream_leaves_no_new_conversation(qa, monkeypatch, case):
     if case != 'insufficient':
         fund(qa)
     monkeypatch.setattr(ziwei.ZiweiOracle, '_system_prompt', lambda *a, **kw: 'QA')
+    monkeypatch.setattr(ziwei, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(is_available=True,
         client=SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: InterruptedStream()))))
     headers = {**OWNER, 'Idempotency-Key': 'short'} if case == 'invalid_key' else OWNER

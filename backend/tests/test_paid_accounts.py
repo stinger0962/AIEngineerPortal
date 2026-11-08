@@ -361,6 +361,7 @@ def test_qian_stream_saves_account_owner_without_device_and_can_recover(product,
         def get_final_message(self):
             return SimpleNamespace(usage=SimpleNamespace(input_tokens=4, output_tokens=5))
     fake_client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: FakeStream()))
+    monkeypatch.setattr(qian, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(qian, "AIService", lambda: SimpleNamespace(is_available=True, client=fake_client))
     login(product)
     response = product.client.post("/api/v1/qian/oracle/stream", json={"question": "测试", "sign_id": 7})

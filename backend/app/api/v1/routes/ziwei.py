@@ -3,6 +3,8 @@ import json
 import logging
 import re
 import time
+
+import httpx
 from datetime import date, datetime
 from typing import Dict, Optional
 
@@ -28,6 +30,7 @@ from app.models.entities import (
 from app.services import credits as credits_svc
 from app.services.paid_identity import PaidPrincipal
 from app.services.ai_service import AIService
+from app.services.oracle_transport import interactive_oracle_client
 from app.services.podcast_service import _tts_bytes
 from app.services.ziwei.oracle import ZiweiOracle
 from app.services.ziwei.oracle_tools import StreamMarkerParser
@@ -305,7 +308,7 @@ def ask_oracle(profile_id: int, payload: OracleRequest, db: Session = Depends(ge
     messages.append({"role": "user", "content": payload.message})
 
     _reserve_credit(db, account_id, profile_id, payload, idempotency_key)
-    oracle = ZiweiOracle(client=svc.client, model=settings.oracle_model)
+    oracle = ZiweiOracle(client=interactive_oracle_client(svc.client), model=settings.oracle_model)
     result = oracle.run(
         chart_json=profile.chart_json, persona=profile.persona, scenario=payload.scenario,
         portrait=profile.portrait_json or {}, messages=messages,
@@ -369,12 +372,12 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
     messages.append({"role": "user", "content": payload.message})
     claude_messages = messages[-10:] if len(messages) > 10 else messages
 
-    oracle = ZiweiOracle(client=svc.client, model=settings.oracle_model)
+    client = interactive_oracle_client(svc.client)
+    oracle = ZiweiOracle(client=client, model=settings.oracle_model)
     system_prompt = oracle._system_prompt(profile.chart_json, profile.persona, payload.scenario, profile.portrait_json or {})
 
     conv_id = conv.id if conv else None
     new_conversation = conv is None
-    client = svc.client
     model = settings.oracle_model
     user_message = payload.message
     scenario = payload.scenario
@@ -425,7 +428,7 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
         start = time.time()
         persistence_attempted = False
         try:
-            with client.messages.stream(model=model, max_tokens=1200, system=system_prompt, messages=claude_messages) as stream:
+            with client.messages.stream(model=model, max_tokens=1200, system=system_prompt, messages=claude_messages, timeout=60.0) as stream:
                 for delta in stream.text_stream:
                     for kind, val in parser.feed(delta):
                         if kind == "text":
@@ -500,8 +503,12 @@ def ziwei_tts(payload: TtsRequest):
             settings.minimax_group_id,
             settings.minimax_model,
             settings.minimax_api_base,
+            timeout=10.0,
         )
+    except httpx.TimeoutException:
+        logger.warning("ziwei tts provider timeout")
+        raise HTTPException(504, "TTS upstream timeout") from None
     except Exception as exc:  # noqa: BLE001
-        logger.exception("ziwei tts failed")
+        logger.warning("ziwei tts provider failure")
         raise HTTPException(502, "TTS upstream error") from exc
     return Response(content=mp3, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})

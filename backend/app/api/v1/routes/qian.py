@@ -16,6 +16,7 @@ from app.db.session import SessionLocal, get_db
 from app.models.entities import AIFeedback, QianReading, User
 from app.services.paid_identity import PaidPrincipal
 from app.services.ai_service import AIService
+from app.services.oracle_transport import interactive_oracle_client
 from app.services.qian.draw import draw_sign
 from app.services.qian.oracle import QianOracle
 from app.services.qian.signs import get_sign
@@ -62,9 +63,10 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db), devi
     if sign is None:
         raise HTTPException(404, "签不存在")
 
-    oracle = QianOracle(client=svc.client, model=settings.oracle_model)
+    client = interactive_oracle_client(svc.client)
+    oracle = QianOracle(client=client, model=settings.oracle_model)
     system_prompt = oracle.system_prompt(sign, question)
-    model, client = settings.oracle_model, svc.client
+    model = settings.oracle_model
     uid = _get_user_id(db)
     # Persist streaming output in the request database, including isolated products.
     persistence_bind = db.get_bind()
@@ -103,7 +105,7 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db), devi
         yield {"data": json.dumps({"type": "sign", "sign": sign}, ensure_ascii=False)}
         try:
             with client.messages.stream(model=model, max_tokens=1200, system=system_prompt,
-                                        messages=[{"role": "user", "content": question}]) as stream:
+                                        messages=[{"role": "user", "content": question}], timeout=60.0) as stream:
                 for delta in stream.text_stream:
                     for kind, val in parser.feed(delta):
                         if kind == "text":

@@ -92,6 +92,7 @@ def qa(tmp_path, monkeypatch):
     application.include_router(ziwei.router, prefix='/api/v1')
     application.dependency_overrides[get_db] = db_override
     monkeypatch.setattr(ziwei, 'SessionLocal', sessions)
+    monkeypatch.setattr(ziwei, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(ziwei, 'AIService', lambda: SimpleNamespace(is_available=True, client=None))
     with sessions() as db:
         a = credits.resolve_account(db, 'qa-owner')
