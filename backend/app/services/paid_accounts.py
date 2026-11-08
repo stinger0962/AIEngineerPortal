@@ -43,9 +43,10 @@ def require_enabled():
 
 
 def send_code(email: str, code: str):
-    # Intentionally fail closed. Tests replace get_sender with an in-memory fake.
-    # Never expose a code in a response, URL, log or developer-only API.
-    raise HTTPException(503, "Email delivery unavailable")
+    # Explicit provider configuration is required; the default stays fail-closed.
+    # Tests still replace get_sender with an in-memory fake.
+    from app.services.paid_email import send_verification_email
+    send_verification_email(get_settings(), email, code)
 
 
 def get_sender():

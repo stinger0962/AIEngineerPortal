@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import List
+from typing import List, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     paid_database_url: str = ""
     paid_accounts_enabled: bool = False
     paid_session_secure: bool = True
+    paid_email_provider: Literal["disabled", "resend"] = "disabled"
+    paid_email_from: str = ""
+    paid_email_resend_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
     redis_url: str = "redis://localhost:6379/0"
     cors_origins: str = Field(default="http://localhost:3000")
     anthropic_api_key: str = ""
