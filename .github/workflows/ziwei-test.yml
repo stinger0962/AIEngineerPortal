@@ -145,12 +145,15 @@ jobs:
           done
           node scripts/paid-product-browser-test.cjs
           node scripts/paid-account-browser-test.cjs
+          node scripts/paid-discovery-browser-test.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: paid-product-ui
           path: |
             /tmp/paid-home-*.png
+            /tmp/paid-discovery-*.png
+            /tmp/paid-disabled-*.png
             /tmp/paid-preview.log
             /tmp/paid-integration-api.log
             /tmp/paid-integration-web.log

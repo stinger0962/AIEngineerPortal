@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { accountRequest, type AccountSession } from "@/lib/product/account";
+import type { ProductFeature } from "@/lib/product/config";
 import { PaidAccountPanel } from "./account-panel";
 
-export function PaidAccountGate({ children }: { children: React.ReactNode }) {
+export function PaidAccountGate({ children, feature }: { children: React.ReactNode; feature?: ProductFeature }) {
   const [session, setSession] = useState<AccountSession | null>(null);
   const [checking, setChecking] = useState(true);
   const requestRef = useRef<AbortController | null>(null);
@@ -41,6 +42,14 @@ export function PaidAccountGate({ children }: { children: React.ReactNode }) {
   return <>
     {checking && <p role="status" className="p-4 text-sm text-ink/65">正在检查登录状态…</p>}
     {authenticated ? <div key={session.account_id} hidden={checking}>{children}</div>
-      : <div hidden={checking}><PaidAccountPanel onAuthenticated={refresh} /></div>}
+      : <div hidden={checking}>
+        {feature && <section aria-label="当前体验" className="mx-auto mb-5 max-w-xl rounded-xl border border-violet-200 bg-white/70 p-5">
+          <p className="text-sm text-violet-900">你选择了 · {feature.english}</p>
+          <h2 className="mt-1 text-xl font-semibold">{feature.label}</h2>
+          <p className="mt-2 text-sm leading-relaxed text-ink/85">{feature.purpose}</p>
+          <p className="mt-2 text-sm leading-relaxed text-ink/75">{feature.preparation}</p>
+        </section>}
+        <PaidAccountPanel onAuthenticated={refresh} />
+      </div>}
   </>;
 }

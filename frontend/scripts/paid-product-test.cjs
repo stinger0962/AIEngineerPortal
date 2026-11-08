@@ -33,7 +33,23 @@ for (const mode of ['portal', 'paid']) {
     for (const href of ['/ziwei', '/qian', '/features']) assert.ok(html.includes(`href="${href}"`));
     for (const href of ['/grow', '/toolkits', '/xuan']) assert.ok(!html.includes(`href="${href}"`));
     const Catalogue = load(path.join(root, 'app/features/page.tsx')).default;
-    assert.match(renderToStaticMarkup(React.createElement(Catalogue)), /真实付费尚未开放/);
+    const catalogue = renderToStaticMarkup(React.createElement(Catalogue));
+    assert.match(catalogue, /真实付费尚未开放/);
+    for (const feature of c.paidFeatures) {
+      assert.ok(feature.purpose && feature.preparation);
+      assert.ok(catalogue.includes(`了解${feature.label}`));
+      assert.ok(catalogue.includes(feature.purpose));
+    }
+    assert.equal((catalogue.match(/<article/g) || []).length, c.paidFeatures.length);
+    const Panel = load(path.join(root, 'components/product/account-panel.tsx')).PaidAccountPanel;
+    const initial = renderToStaticMarkup(React.createElement(Panel));
+    assert.ok(!initial.includes('type="email"'), 'No email entry before account availability is known');
+    assert.match(initial, /正在确认账号是否开放/);
+    const Shell = load(path.join(root, 'components/layout/domain-shell.tsx')).DomainShell;
+    const shell = renderToStaticMarkup(React.createElement(Shell, { config: {wordmark:'方寸',accent:'#7c5cf0',bg:'#fff',links:[{href:'/ziwei',label:'紫微'}]} }, 'content'));
+    assert.match(shell, /aria-current="page"/);
+    assert.match(shell, /href="#paid-main"/);
+    assert.match(shell, /aria-label="产品导航"/);
   } else {
     for (const href of ['/grow', '/toolkits', '/xuan']) assert.ok(html.includes(`href="${href}"`));
   }

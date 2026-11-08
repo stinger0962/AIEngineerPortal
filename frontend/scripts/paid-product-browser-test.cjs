@@ -34,7 +34,7 @@ if (!['localhost', '127.0.0.1'].includes(new URL(base).hostname)) throw Error('L
       await explore.click();
       await page.waitForURL('**/features');
       await page.getByRole('heading', { name: '探索功能' }).waitFor();
-      await page.getByRole('link', { name: /灵签求签.*进入体验/ }).click();
+      await page.getByRole('link', { name: '了解灵签求签' }).click();
       await page.waitForURL('**/qian');
       await page.getByRole('link', { name: '全部功能', exact: true }).click();
       await page.waitForURL('**/features');

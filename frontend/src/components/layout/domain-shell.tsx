@@ -28,9 +28,10 @@ export function DomainShell({ config, children }: { config: DomainConfig; childr
 
   return (
     <div className="min-h-screen text-ink" style={{ background: config.bg }}>
+      {paidProduct && <a href="#paid-main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-white focus:p-3 focus:text-violet-900">跳到主要内容</a>}
       {/* Top strip */}
       <header className="sticky top-0 z-30 border-b border-ink/10 bg-white/75 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center gap-4 px-4 py-3 lg:px-8">
+        <div className={`mx-auto flex max-w-[1600px] items-center gap-4 px-4 py-3 lg:px-8 ${paidProduct ? "flex-wrap" : ""}`}>
           <Link
             href="/"
             className="flex shrink-0 items-center gap-1.5 text-[13px] text-ink/55 transition-colors hover:text-ink"
@@ -53,14 +54,15 @@ export function DomainShell({ config, children }: { config: DomainConfig; childr
             {config.wordmark}
           </span>
 
-          <nav className="ml-auto flex items-center gap-1 overflow-x-auto">
+          <nav aria-label={paidProduct ? "产品导航" : undefined} className={paidProduct ? "flex w-full flex-wrap items-center gap-1 sm:ml-auto sm:w-auto" : "ml-auto flex items-center gap-1 overflow-x-auto"}>
             {config.links.map((l) => {
               const on = active(l.href);
               return (
                 <Link
                   key={l.href}
                   href={l.href}
-                  className="shrink-0 rounded-full px-3 py-1.5 text-[13px] transition-colors"
+                  aria-current={paidProduct && on ? "page" : undefined}
+                  className="shrink-0 rounded-full px-3 py-1.5 text-[13px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-700"
                   style={
                     on
                       ? { color: config.accent, background: `${config.accent}1a`, fontWeight: 500 }
@@ -75,7 +77,7 @@ export function DomainShell({ config, children }: { config: DomainConfig; childr
         </div>
       </header>
 
-      <main className="mx-auto min-h-[calc(100vh-57px)] max-w-[1600px] px-4 py-5 lg:px-8 lg:py-7">
+      <main id={paidProduct ? "paid-main" : undefined} tabIndex={paidProduct ? -1 : undefined} className="mx-auto min-h-[calc(100vh-57px)] max-w-[1600px] px-4 py-5 lg:px-8 lg:py-7">
         {children}
       </main>
     </div>
