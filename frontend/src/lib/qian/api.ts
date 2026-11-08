@@ -1,3 +1,5 @@
+import { paidProduct } from "@/lib/product/config";
+import { paidRequestHeaders, paidRequestOptions, invalidatePaidSession } from "@/lib/product/account";
 import { API_BASE } from "@/lib/api";
 import { getDeviceId } from "@/lib/deviceId";
 import type { CameraCommand } from "@/lib/ziwei/api";
@@ -27,10 +29,11 @@ async function streamOracle(
   signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/qian/oracle/stream`, {
-    method: "POST", headers: { "Content-Type": "application/json", "X-Device-Id": getDeviceId() },
-    body: JSON.stringify(body), cache: "no-store", signal,
+    method: "POST", headers: { "Content-Type": "application/json", ...(paidProduct ? paidRequestHeaders() : { "X-Device-Id": getDeviceId() }) },
+    body: JSON.stringify(body), cache: "no-store", ...paidRequestOptions(), signal,
   });
   if (!res.ok || !res.body) {
+    if (res.status === 401) invalidatePaidSession();
     const err = (await res.json().catch(() => null)) as { detail?: unknown } | null;
     throw new QianApiError(res.status, typeof err?.detail === "string" ? err.detail : undefined);
   }
@@ -62,6 +65,6 @@ async function streamOracle(
 export const qianApi = {
   streamOracle,
   listReadings: () =>
-    fetch(`${API_BASE}/qian/readings`, { cache: "no-store", headers: { "X-Device-Id": getDeviceId() } })
-      .then((r) => r.json() as Promise<QianReadingOut[]>),
+    fetch(`${API_BASE}/qian/readings`, { cache: "no-store", ...paidRequestOptions(), headers: { ...(paidProduct ? paidRequestHeaders() : { "X-Device-Id": getDeviceId() }) } })
+      .then((r) => { if (!r.ok) { if (r.status === 401) invalidatePaidSession(); throw new QianApiError(r.status); } return r.json() as Promise<QianReadingOut[]>; }),
 };

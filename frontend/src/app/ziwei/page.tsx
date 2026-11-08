@@ -1,5 +1,6 @@
 "use client";
 
+import { paidProduct } from "@/lib/product/config";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { ProfileForm } from "@/components/ziwei/profile-form";
@@ -130,7 +131,7 @@ export default function ZiweiPage() {
             </button>
           )}
 
-          <OracleIdentityPanel />
+          {!paidProduct && <OracleIdentityPanel />}
         </div>
 
         {/* 命盘 */}

@@ -8,7 +8,7 @@ This opt-in product starts fresh on a future domain. It reuses the existing lacq
 - Paid home has Ziwei, Qian and Explore doors. `src/lib/product/config.ts` is the feature registry; the catalogue and navigation derive from it. The original door renderer is shared, not copied.
 - The middleware returns 404 for personal-portal routes in paid mode. This is route isolation, not authentication. The API must use the dedicated paid entrypoint below, never the portal API.
 - Shared Next.js source still builds personal pages into the artifact. They are blocked by middleware, not removed from source. Do not treat this as a code-confidentiality boundary.
-- Browser identity uses a new storage key. Local anonymous device recovery is retained for this new product only; legacy bulk claiming is unavailable. Existing portal storage is never read or imported by paid mode.
+- The fresh-account layer now gates private features with verified email sessions. Legacy device identity/recovery is not used for paid-product authorization. Existing portal storage is never imported. See [fresh accounts](paid-fresh-accounts.md).
 - Live payments remain unavailable. No plan, pricing or payment-provider eligibility is asserted by the catalogue.
 - `SITE_URL` supplies metadata for the eventual new domain. Current branding is provisional 方寸 · 玄. There is no hard-coded new domain.
 
@@ -45,7 +45,9 @@ Use the same environment when building and starting: `npm run build` then `npm r
 
 ## PR #19 assessment and next milestones
 
-PR #19 is not a dependency. Its legacy binding, adoption and domain migration work are not needed for this fresh product. Its proof-of-mailbox, hashed one-time challenges, secure sessions, revocation and rate-limit approach can inform a fresh-account implementation, but should be extracted and tested without the legacy adoption flow. Email delivery still needs implementation and testing; no signup or cross-device email recovery is claimed here.
+Fresh verified accounts are implemented separately in [this nonproduction milestone](paid-fresh-accounts.md), without legacy adoption; real email remains disconnected.
+
+PR #19 is not a dependency. Its legacy binding, adoption and domain migration work are not needed for this fresh product. Its proof-of-mailbox, hashed one-time challenges, secure sessions, revocation and rate-limit approach can inform a fresh-account implementation, but should be extracted and tested without the legacy adoption flow. Email delivery still needs implementation and testing; the foundation alone does not supply signup.
 
 Before a paid launch: implement fresh verified accounts and shared entitlements for both features; select sender/domain and test email transport; review proxy/rate limits and retention; confirm Stripe card/business eligibility independently (Alipay fortune-telling restriction still applies); test payment webhooks and refunds; choose and authorize deployment/DNS. None is silently enabled by this foundation.
 

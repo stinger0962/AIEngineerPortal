@@ -14,6 +14,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.core.config import get_settings
 from app.db.session import SessionLocal, get_db
 from app.models.entities import AIFeedback, QianReading, User
+from app.services.paid_identity import PaidPrincipal
 from app.services.ai_service import AIService
 from app.services.qian.draw import draw_sign
 from app.services.qian.oracle import QianOracle
@@ -74,10 +75,15 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db), devi
         _db = SessionLocal(bind=persistence_bind)
         try:
             if clean:
-                _db.add(QianReading(
-                    device_id=device or None, question=question, sign_id=sign["id"], grade=sign["grade"], response=clean,
+                reading = QianReading(
+                    device_id=None if isinstance(device, PaidPrincipal) else device or None, question=question, sign_id=sign["id"], grade=sign["grade"], response=clean,
                     context_json={"sign": sign, "camera_commands": cameras, "segments": segments},
-                ))
+                )
+                _db.add(reading)
+                if isinstance(device, PaidPrincipal):
+                    from app.models.paid_accounts import PaidQianOwner
+                    _db.flush()
+                    _db.add(PaidQianOwner(reading_id=reading.id, account_id=device.account_id))
             _db.add(AIFeedback(
                 user_id=uid, feature="qian_oracle", reference_id=sign["id"],
                 user_input_hash="", prompt_template=None,
@@ -143,9 +149,14 @@ def _device_label(device_id: str | None) -> str:
 def list_readings(db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     if not device:
         return []
-    rows = db.scalars(
-        select(QianReading).where(QianReading.device_id == device).order_by(QianReading.id.desc()).limit(50)
-    ).all()
+    query = select(QianReading)
+    if isinstance(device, PaidPrincipal):
+        from app.models.paid_accounts import PaidQianOwner
+        query = query.join(PaidQianOwner, PaidQianOwner.reading_id == QianReading.id).where(
+            PaidQianOwner.account_id == device.account_id)
+    else:
+        query = query.where(QianReading.device_id == device)
+    rows = db.scalars(query.order_by(QianReading.id.desc()).limit(50)).all()
     return [{
         "id": r.id, "question": _mask_question(r.question), "sign_id": r.sign_id, "grade": r.grade,
         "device": _device_label(r.device_id),
@@ -156,7 +167,13 @@ def list_readings(db: Session = Depends(get_db), device: str = Depends(get_devic
 @router.get("/readings/{reading_id}")
 def get_reading(reading_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     r = db.get(QianReading, reading_id)
-    if not r or not device or r.device_id != device:
+    if isinstance(device, PaidPrincipal):
+        from app.models.paid_accounts import PaidQianOwner
+        owner = db.get(PaidQianOwner, reading_id)
+        owned = owner is not None and owner.account_id == device.account_id
+    else:
+        owned = bool(device and r and r.device_id == device)
+    if not r or not owned:
         raise HTTPException(404, "记录不存在")
     return {
         "id": r.id, "question": r.question, "sign_id": r.sign_id, "grade": r.grade,

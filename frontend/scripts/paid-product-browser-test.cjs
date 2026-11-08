@@ -10,6 +10,7 @@ if (!['localhost', '127.0.0.1'].includes(new URL(base).hostname)) throw Error('L
       const context = await browser.newContext({ viewport: { width, height: 900 } });
       await context.route('**/*', route => {
         const url = new URL(route.request().url());
+        if (url.pathname === '/api/v1/account/session') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ authenticated: true, enabled: true, account_id: 1 }) });
         if (url.pathname.startsWith('/api/v1/')) return route.fulfill({ contentType: 'application/json', body: '[]' });
         if (url.origin !== new URL(base).origin) return route.abort();
         return route.continue();
