@@ -91,3 +91,101 @@ def test_private_generation_closed_without_accounts(product):
 def test_shared_ziwei_router_is_unchanged():
     from app.api.v1.routes import ziwei
     assert "/ziwei/claim" in {r.path for r in ziwei.router.routes}
+
+
+@pytest.mark.parametrize("alias", ["relative", "symlink", "hardlink", "missing-parent-alias"])
+def test_database_file_alias_rejected_before_connect(product, tmp_path, monkeypatch, alias):
+    settings, app = product
+    target = tmp_path / "same.db"
+    if alias != "missing-parent-alias":
+        target.touch()
+    if alias == "relative":
+        monkeypatch.chdir(tmp_path)
+        paid_url = "sqlite:///./same.db"
+    elif alias == "symlink":
+        (tmp_path / "alias.db").symlink_to(target)
+        paid_url = f"sqlite:///{tmp_path / 'alias.db'}"
+    elif alias == "hardlink":
+        import os
+        os.link(target, tmp_path / "alias.db")
+        paid_url = f"sqlite:///{tmp_path / 'alias.db'}"
+    else:
+        (tmp_path / "alias-dir").symlink_to(tmp_path, target_is_directory=True)
+        paid_url = f"sqlite:///{tmp_path / 'alias-dir' / 'same.db'}"
+    settings.database_url = f"sqlite:///{target}"
+    settings.paid_database_url = paid_url
+    before = target.read_bytes() if target.exists() else None
+    monkeypatch.setattr(paid_main, "create_engine", lambda *a, **k: pytest.fail("alias must fail before opening storage"))
+    with pytest.raises(RuntimeError, match="portal DATABASE_URL"):
+        with TestClient(app):
+            pass
+    assert (target.read_bytes() if target.exists() else None) == before
+
+
+@pytest.mark.parametrize("paid,portal", [
+    ("postgresql://alice:secret@LOCALHOST/paid", "postgresql+psycopg://bob:other@localhost:5432/paid"),
+    ("postgresql://alice:secret@db.example./paid", "postgresql://bob:other@db.example:5432/paid"),
+    ("postgresql://alice:secret@[0:0:0:0:0:0:0:1]/paid", "postgresql://bob:other@[::1]:5432/paid"),
+])
+def test_postgres_login_driver_and_host_alias_rejected_before_connect(product, monkeypatch, paid, portal):
+    settings, app = product
+    settings.paid_database_url, settings.database_url = paid, portal
+    monkeypatch.setattr(paid_main, "create_engine", lambda *a, **k: pytest.fail("alias must fail before connect"))
+    with pytest.raises(RuntimeError, match="portal DATABASE_URL"):
+        with TestClient(app):
+            pass
+
+
+@pytest.mark.parametrize("url", [
+    "sqlite:///file:paid.db?uri=true", "sqlite:///paid.db?mode=ro", "sqlite:///:memory:",
+    "postgresql://user:secret@host/paid?host=other", "postgresql:///paid",
+    "postgresql://user:secret@host:bad/paid",
+])
+def test_ambiguous_database_url_rejected_before_connect(product, monkeypatch, url):
+    settings, app = product
+    settings.paid_database_url = url
+    monkeypatch.setattr(paid_main, "create_engine", lambda *a, **k: pytest.fail("unsafe URL must fail before connect"))
+    with pytest.raises(RuntimeError) as error:
+        with TestClient(app):
+            pass
+    assert "secret" not in str(error.value)
+
+
+def test_portal_sqlite_uri_cannot_hide_alias(product, monkeypatch):
+    settings, app = product
+    settings.database_url = settings.paid_database_url + "?uri=true"
+    monkeypatch.setattr(paid_main, "create_engine", lambda *a, **k: pytest.fail("unsafe URL must fail before connect"))
+    with pytest.raises(RuntimeError, match="plain dedicated SQLite"):
+        with TestClient(app):
+            pass
+
+
+@pytest.mark.parametrize("paid,portal", [
+    ("postgresql://one:secret@localhost/paid", "postgresql://two:other@localhost/portal"),
+    ("postgresql://one:secret@localhost:5433/db", "postgresql://two:other@localhost:5432/db"),
+    ("postgresql://one:secret@localhost/Paid", "postgresql://two:other@localhost/paid"),
+])
+def test_distinct_postgres_targets_validate_without_network(paid, portal):
+    paid_main.validate_database_isolation(paid, portal)
+
+
+def test_safe_postgres_schema_option_does_not_change_database_identity():
+    from app.db.paid_isolation import validate_database_isolation
+    validate_database_isolation(
+        "postgresql://user:secret@127.0.0.1:55432/ziwei_qa?options=-csearch_path%3Dpaid_qa_fixture",
+        "sqlite:////tmp/unused-portal-isolation-test.db")
+    with pytest.raises(RuntimeError, match="portal DATABASE_URL"):
+        validate_database_isolation(
+            "postgresql://user:secret@LOCALHOST/paid?options=-csearch_path%3Dpaid_qa_fixture",
+            "postgresql://other:other@localhost:5432/paid?options=-csearch_path%3Dpublic")
+
+
+@pytest.mark.parametrize("query", [
+    "options=-csearch_path%3Dpaid%20-cport%3D5433", "options=-csearch_path%3Dpaid,public",
+    "options=-csearch_path%3Dpaid&host=other", "host=other", "port=5433", "dbname=portal",
+    "options=-csearch_path%3Dpaid&options=-csearch_path%3Dother", "options=-csearch_path%3D%22paid%22",
+])
+def test_postgres_connection_options_cannot_bypass_isolation(query):
+    from app.db.paid_isolation import validate_database_isolation
+    with pytest.raises(RuntimeError):
+        validate_database_isolation(f"postgresql://user:secret@localhost/paid?{query}", "sqlite:////tmp/portal-options-test.db")

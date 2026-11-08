@@ -162,7 +162,7 @@ def test_exact_cutoff_boundaries(fixture_db, monkeypatch):
 @pytest.mark.parametrize('paid,portal', [
     ('postgresql://one:secret@localhost/db', 'postgresql+psycopg://two:other@localhost:5432/db'),
     ('sqlite:///:memory:', 'sqlite:///portal.db'),
-    ('postgresql://user:secret@host/db?options=-csearch_path=portal', 'sqlite:///portal.db'),
+    ('postgresql://user:secret@host/db?options=-csearch_path=portal%20-cstatement_timeout=0', 'sqlite:///portal.db'),
 ])
 def test_unsafe_url_refused_without_connect(paid, portal):
     with pytest.raises(retention.RetentionError):
@@ -232,3 +232,31 @@ def test_postgres_disposable_database():
             with admin.connect() as conn:
                 conn.exec_driver_sql(f'DROP DATABASE {name}')
         admin.dispose()
+
+
+def test_maintenance_rejects_portal_uri_alias_before_engine(fixture_db, monkeypatch):
+    env, engine = fixture_db
+    path = engine.url.database
+    env['DATABASE_URL'] = f'sqlite:///file:{path}?uri=true'
+    monkeypatch.setattr(retention, 'create_engine', lambda *a, **k: pytest.fail('must reject alias before opening storage'))
+    with pytest.raises(retention.RetentionError):
+        retention._engine(env, False)
+
+
+def test_maintenance_normalizes_postgres_host_before_engine(monkeypatch):
+    monkeypatch.setattr(retention, 'create_engine', lambda *a, **k: pytest.fail('must reject alias before connecting'))
+    with pytest.raises(retention.RetentionError):
+        retention._engine({'PAID_DATABASE_URL':'postgresql://alice:secret@LOCALHOST/db',
+                          'DATABASE_URL':'postgresql://bob:other@localhost:5432/db'}, False)
+
+
+def test_safe_schema_option_engine_construction_without_connection(monkeypatch):
+    sentinel = object()
+    seen = []
+    def capture(url, **kwargs):
+        seen.append(url)
+        return sentinel
+    monkeypatch.setattr(retention, 'create_engine', capture)
+    assert retention._engine({'PAID_DATABASE_URL':'postgresql://user:secret@127.0.0.1:55432/ziwei_qa?options=-csearch_path%3Dpaid_qa_fixture',
+                              'DATABASE_URL':'sqlite:////tmp/unused-portal-retention-test.db'}, False) is sentinel
+    assert seen[0].query == {'options':'-csearch_path=paid_qa_fixture'}

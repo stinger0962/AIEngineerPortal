@@ -1,3 +1,4 @@
+import { retryKeys } from "@/lib/ziwei/retry-keys";
 import { API_BASE } from "@/lib/api";
 import { paidProduct } from "./config";
 
@@ -30,10 +31,11 @@ export async function accountRequest<T>(path: string, body?: unknown, signal?: A
 /** Remove retry references, not user records, when switching accounts. */
 export function clearPaidRetryState() {
   if (typeof window === "undefined") return;
+  retryKeys.clearMemory();
   try {
     for (let i = sessionStorage.length - 1; i >= 0; i--) {
       const key = sessionStorage.key(i);
-      if (key?.startsWith("ziwei-request:") || key === "ziwei-selected-profile") sessionStorage.removeItem(key);
+      if (key?.startsWith("ziwei-request:") || key?.startsWith("ziwei-question:") || key === "ziwei-selected-profile") sessionStorage.removeItem(key);
     }
   } catch { /* Authentication is independent of browser storage. */ }
 }
@@ -50,4 +52,23 @@ export function notifyPaidAccountChange() {
 
 export function invalidatePaidSession() {
   if (paidProduct && typeof window !== "undefined") window.dispatchEvent(new Event("paid-session-invalid"));
+}
+
+
+let currentPaidAccount: number | null | undefined;
+/** Called before private children mount. Session storage is tab-local, not identity. */
+export function syncPaidAccountSession(accountId: number | null) {
+  if (!paidProduct || typeof window === "undefined") return;
+  let stored: string | null = null;
+  try { stored = sessionStorage.getItem("paid-session-account"); } catch { /* memory still isolates account switches */ }
+  if (currentPaidAccount !== accountId || stored !== String(accountId)) {
+    // Preserve a same-account tab reload only if its marker is trustworthy enough
+    // for noncredential local drafts. Never reuse unlabelled legacy state.
+    if (currentPaidAccount !== undefined || stored !== String(accountId) || accountId === null) clearPaidRetryState();
+  }
+  currentPaidAccount = accountId;
+  try {
+    if (accountId === null) sessionStorage.removeItem("paid-session-account");
+    else sessionStorage.setItem("paid-session-account", String(accountId));
+  } catch { /* no stored identity is needed to authenticate */ }
 }

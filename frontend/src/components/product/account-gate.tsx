@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { accountRequest, type AccountSession } from "@/lib/product/account";
+import { accountRequest, clearPaidRetryState, syncPaidAccountSession, type AccountSession } from "@/lib/product/account";
 import type { ProductFeature } from "@/lib/product/config";
 import { PaidAccountPanel } from "./account-panel";
 
@@ -14,14 +14,14 @@ export function PaidAccountGate({ children, feature }: { children: React.ReactNo
     const controller = new AbortController(); requestRef.current = controller;
     setChecking(true);
     accountRequest<AccountSession>("/session", undefined, controller.signal)
-      .then(value => { if (!controller.signal.aborted) setSession(value); })
+      .then(value => { if (!controller.signal.aborted) { syncPaidAccountSession(value.authenticated && Number.isInteger(value.account_id) ? value.account_id! : null); setSession(value); } })
       .catch(() => { if (!controller.signal.aborted) setSession(null); })
       .finally(() => { if (!controller.signal.aborted) setChecking(false); });
   }, []);
   useEffect(() => {
     refresh();
     const visible = () => { if (document.visibilityState === "visible") refresh(); };
-    const invalidate = () => { requestRef.current?.abort(); setSession(null); setChecking(false); };
+    const invalidate = () => { requestRef.current?.abort(); clearPaidRetryState(); setSession(null); setChecking(false); };
     window.addEventListener("focus", refresh);
     window.addEventListener("pageshow", refresh);
     window.addEventListener("paid-account-changed", refresh);

@@ -40,6 +40,7 @@ async function streamOracle(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let terminal = false;
   while (true) {
     const { done, value } = await reader.read();
     if (done || signal?.aborted) break;
@@ -53,13 +54,22 @@ async function streamOracle(
       if (!raw) continue;
       let ev: { type: string; [k: string]: unknown };
       try { ev = JSON.parse(raw); } catch { continue; }
+      if (!ev || typeof ev !== "object" || terminal) continue;
       if (ev.type === "sign") handlers.onSign(ev.sign as QianSign);
       else if (ev.type === "text") handlers.onText(ev.delta as string);
       else if (ev.type === "camera") handlers.onCamera(ev.command as CameraCommand);
-      else if (ev.type === "done") handlers.onDone((ev.meta as { model?: string; total_tokens?: number }) ?? {});
-      else if (ev.type === "error") handlers.onError();
+      else if (ev.type === "done") {
+        terminal = true;
+        handlers.onDone((ev.meta as { model?: string; total_tokens?: number }) ?? {});
+      } else if (ev.type === "error") {
+        terminal = true;
+        handlers.onError();
+      }
     }
   }
+  // Closing the HTTP stream is not a successful reading. Release the narration
+  // queue on truncated SSE so the workspace can leave its reading/shaking phase.
+  if (!terminal && !signal?.aborted) handlers.onError();
 }
 
 export const qianApi = {
