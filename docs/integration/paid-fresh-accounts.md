@@ -18,7 +18,7 @@ For isolated tests only, explicitly enable accounts and choose local cookie mode
 
 ## Retention and launch requirements
 
-Challenges expire after 15 minutes and are one-use. Sessions expire after 30 days; stored values are hashes. Rate limits count failed attempts, using per-IP/per-email/per-challenge hourly buckets. `purge_expired_auth_records` removes only expired auth material and is a maintenance primitive, not an installed scheduler. Before public launch, review proxy trust and retention scheduling, choose and authorize a sender, validate real delivery and browser-to-backend HTTPS flows, and review final account/payment security. These tasks are not implied complete by mocked browser or fake-email tests.
+Challenges expire after 15 minutes and are one-use. Sessions expire after 30 days; stored values are hashes. Rate limits count failed attempts, using per-IP/per-email/per-challenge hourly buckets. `purge_expired_auth_records` removes only expired auth material and is a maintenance primitive. A [dry-run-default maintenance CLI](paid-account-retention.md) is available; no scheduler is installed. Before public launch, review proxy trust and retention scheduling, choose and authorize a sender, validate real delivery and browser-to-backend HTTPS flows, and review final account/payment security. These tasks are not implied complete by mocked browser or fake-email tests.
 
 ## Verification
 
