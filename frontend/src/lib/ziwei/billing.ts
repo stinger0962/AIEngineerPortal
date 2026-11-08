@@ -9,6 +9,7 @@ export const testBillingEnabled = process.env.NEXT_PUBLIC_ZIWEI_TEST_BILLING ===
 export type CreditPack = { key: string; label: string; credits: number; amount_cents: number; currency?: string };
 export type Balance = { balance: number; paid_enabled: boolean; require_credits: boolean; mode?: string; currency?: string; packs: CreditPack[] };
 export type PaymentStatus = "pending" | "paid" | "cancelled" | "failed";
+export type TestOrder = { order_id: number; status: "pending" | "paid" | "failed"; pack: string; credits: number; amount_cents: number; currency: string; created_at: string };
 export class CheckoutStateError extends Error {
   constructor(public code: string, public orderId: string, public status: PaymentStatus) {
     super(code);
@@ -19,6 +20,7 @@ export interface BillingAdapter {
   checkout(pack: string): Promise<string>;
   status(orderId: string): Promise<PaymentStatus>;
   resetCheckout?(orderId: string): void;
+  orders?(): Promise<TestOrder[]>;
 }
 
 export function paymentReturn(search: string): { status: PaymentStatus; orderId?: string } | null {
@@ -66,7 +68,19 @@ export function createBillingAdapter(base: string, deviceId: () => string, trans
   }
   return {
     resetCheckout: (orderId) => retryKeys.complete(`checkout:${deviceId()}`, orderId),
-    balance: () => request<Balance>("/balance"),
+    balance: async () => {
+      const result = await request<Balance>("/balance");
+      if (result.mode !== "test" || !Number.isFinite(result.balance) || !Array.isArray(result.packs)) throw new Error("Unverified test balance");
+      return result;
+    },
+    orders: async () => {
+      const result = await request<{mode?: string; orders: TestOrder[]}>("/orders?limit=10");
+      if (result.mode !== "test" || !Array.isArray(result.orders) || result.orders.some(order =>
+        !Number.isSafeInteger(order.order_id) || order.order_id < 1 || !["pending", "paid", "failed"].includes(order.status)
+        || !Number.isFinite(order.amount_cents) || order.amount_cents < 0 || !Number.isFinite(order.credits)
+        || typeof order.currency !== "string" || typeof order.created_at !== "string")) throw new Error("Unverified order history");
+      return result.orders;
+    },
     checkout: async (pack) => {
       // Recheck server mode immediately before creating a session.
       if (!canPurchase(await request<Balance>("/balance"))) throw new Error("Test payments unavailable");

@@ -1,8 +1,9 @@
 "use client";
 
+import { paidProduct } from "@/lib/product/config";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckoutStateError, billingApi, canPurchase, paymentReturn, type Balance, type BillingAdapter, type PaymentStatus } from "@/lib/ziwei/billing";
+import { CheckoutStateError, billingApi, canPurchase, paymentReturn, testBillingEnabled, type Balance, type BillingAdapter, type PaymentStatus } from "@/lib/ziwei/billing";
 
 const statusText: Record<PaymentStatus, string> = {
   pending: "测试付款待确认：正在等待服务器入账，请勿重复购买。",
@@ -15,17 +16,23 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
   const search = useSearchParams().toString();
   const [balance, setBalance] = useState<Balance | null>(null);
   const [payment, setPayment] = useState<ReturnType<typeof paymentReturn>>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reconciliationOrder, setReconciliationOrder] = useState<string | null>(null);
   const buying = useRef(false);
   const mounted = useRef(false);
   const returnVersion = useRef(0);
+  const balanceRequest = useRef(0);
+  const statusRequest = useRef(0);
+  const purchaseAllowed = canPurchase(balance) && (!paidProduct || testBillingEnabled);
   const refresh = useCallback(async () => {
+    const version = ++balanceRequest.current;
     try {
       const value = await adapter.balance();
-      if (mounted.current) { setBalance(value); setError(null); }
-    } catch { if (mounted.current) setError("余额暂不可用，请刷新重试。"); }
+      if (mounted.current && version === balanceRequest.current) { setBalance(value); setBalanceError(null); }
+    } catch { if (mounted.current && version === balanceRequest.current) { setBalance(null); setBalanceError("余额暂不可用，请刷新重试。"); } }
   }, [adapter]);
 
   useEffect(() => {
@@ -33,7 +40,7 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
     const restore = () => {
       ++returnVersion.current;
       const returned = paymentReturn(window.location.search);
-      setPayment(returned);
+      setPayment(returned); setPaymentError(null);
       void refresh();
     };
     restore();
@@ -44,15 +51,16 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
 
   const checkPayment = useCallback(async (orderId: string, preserveCancellation = false) => {
     const version = returnVersion.current;
+    const request = ++statusRequest.current;
     try {
       const status = await adapter.status(orderId);
-      if (!mounted.current || version !== returnVersion.current) return;
+      if (!mounted.current || version !== returnVersion.current || request !== statusRequest.current) return;
       setPayment({ status: status === "pending" && preserveCancellation ? "cancelled" : status, orderId });
-      setError(null);
+      setPaymentError(null);
       if (status === "paid" || status === "failed") adapter.resetCheckout?.(orderId);
       if (status === "paid") await refresh();
     } catch {
-      if (mounted.current && version === returnVersion.current) setError("付款状态暂无法确认；请稍后刷新，勿重复付款。");
+      if (mounted.current && version === returnVersion.current && request === statusRequest.current) setPaymentError("付款状态暂无法确认；请稍后刷新，勿重复付款。");
     }
   }, [adapter, refresh]);
 
@@ -79,35 +87,36 @@ export function CreditPanel({ refreshKey, adapter = billingApi }: { refreshKey: 
   }, [payment?.status, payment?.orderId, checkPayment]);
 
   async function buy(pack: string) {
-    if (buying.current || !canPurchase(balance)) return;
+    if (buying.current || !purchaseAllowed) return;
+    ++returnVersion.current;
     buying.current = true;
     setBusy(true);
-    setError(null);
+    setCheckoutError(null);
     try { window.location.assign(await adapter.checkout(pack)); }
     catch (error) {
       if (error instanceof CheckoutStateError) {
         setPayment({ status: error.status, orderId: error.orderId });
         if (error.status === "pending") setReconciliationOrder(error.orderId);
         if (error.status !== "pending") void refresh();
-      } else setError("无法开启测试收银台。请稍后重试。问题已保留。");
+      } else setCheckoutError("无法开启测试收银台。请稍后重试。问题已保留。");
     }
     finally { buying.current = false; setBusy(false); }
   }
 
   return (
-    <section id="ziwei-test-credits" aria-label="紫微测试点数" className="space-y-3 rounded-2xl border border-violet-300 bg-violet-50 p-4 text-sm text-ink">
-      <h2 className="font-semibold">紫微点数 · Stripe TEST 测试模式</h2>
-      <p>仅用于测试，请勿使用真实付款资料。点数属于当前浏览器身份。</p>
-      <p aria-live="polite">{balance ? `可用点数：${balance.balance}` : "正在读取余额…"}</p>
+    <section id="ziwei-test-credits" aria-label={paidProduct ? "账号测试点数" : "紫微测试点数"} className="space-y-3 rounded-2xl border border-violet-300 bg-violet-50 p-4 text-sm text-ink">
+      <h2 className="font-semibold">{paidProduct ? "账号点数 · 测试模式" : "紫微点数 · Stripe TEST 测试模式"}</h2>
+      <p>{paidProduct ? "仅用于测试，请勿使用真实付款资料。点数属于当前登录账号，与浏览器设备无关。" : "仅用于测试，请勿使用真实付款资料。点数属于当前浏览器身份。"}</p>
+      <p aria-live="polite">{balance ? `可用点数：${balance.balance}` : balanceError ? "余额暂不可用" : "正在读取余额…"}</p>
       {payment && <p role="status">{statusText[payment.status]}</p>}
       {payment?.status === "pending" && !payment.orderId && <p>缺少订单标识，无法确认付款。请保留测试收据。</p>}
       {payment?.status === "pending" && payment.orderId === reconciliationOrder && <p role="alert">结账已超过安全重试时限，请核对付款状态；不要重复购买。</p>}
-      {error && <p role="alert" className="text-rose-700">{error}</p>}
+      {[balanceError, paymentError, checkoutError].filter(Boolean).map(message => <p key={message} role="alert" className="text-rose-700">{message}</p>)}
       <button type="button" className="underline" onClick={() => { void refresh(); if (payment?.orderId) void checkPayment(payment.orderId, payment.status === "cancelled"); }}>刷新余额与付款状态</button>
-      {!canPurchase(balance) && <p>测试支付尚未开放，购买已停用。</p>}
+      {!purchaseAllowed && <p>测试支付尚未开放，购买已停用。</p>}
       <div className="flex flex-wrap gap-2">
-        {balance?.packs.map((pack) => (
-          <button key={pack.key} type="button" disabled={!canPurchase(balance) || busy || payment?.status === "pending"} onClick={() => void buy(pack.key)} className="rounded-xl border border-violet-300 px-3 py-2 text-left disabled:opacity-50">
+        {(!paidProduct || testBillingEnabled) && balance?.packs.map((pack) => (
+          <button key={pack.key} type="button" disabled={!purchaseAllowed || busy || payment?.status === "pending"} onClick={() => void buy(pack.key)} className="rounded-xl border border-violet-300 px-3 py-2 text-left disabled:opacity-50">
             {pack.label} · {pack.credits} 点 · {(pack.amount_cents / 100).toFixed(2)} {(pack.currency ?? balance.currency ?? "CNY").toUpperCase()}{busy ? " · 正在开启…" : " · 测试购买"}
           </button>
         ))}

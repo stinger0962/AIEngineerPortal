@@ -43,7 +43,7 @@ export function PaidAccountPanel({ onAuthenticated }: { onAuthenticated?: () => 
     <div className="mt-4"><PaidPreviewNotice /></div>
     {session?.authenticated ? <div className="mt-5 space-y-4">
       <p role="status">已登录</p>
-      {session.enabled ? <div className="flex flex-wrap gap-3"><Link href="/ziwei" className={button}>紫微斗数</Link><Link href="/qian" className={button}>灵签求签</Link></div> : <p>账号功能暂未开放，仍可退出登录。</p>}
+      {session.enabled ? <div className="flex flex-wrap gap-3"><Link href="/ziwei" className={button}>紫微斗数</Link><Link href="/qian" className={button}>灵签求签</Link><Link href="/credits" className={button}>点数与订单</Link></div> : <p>账号功能暂未开放，仍可退出登录。</p>}
       <div className="flex flex-wrap gap-3"><button className={button} disabled={busy} onClick={() => void run(signal => logout(false, signal))}>退出此浏览器</button><button className={button} disabled={busy} onClick={() => void run(signal => logout(true, signal))}>退出所有浏览器</button></div>
     </div> : session === null ? <p role="status" className="mt-5 text-sm text-ink/80">{message ? "暂时无法确认账号状态，请重试。" : "正在确认账号是否开放…"}</p> : session.enabled === false ? <div className="mt-5 space-y-3"><p role="status" className="font-medium">邮箱登录尚未开放，预览期间暂不保存个人记录。</p><p className="text-sm leading-relaxed text-ink/80">现在可以先了解紫微和灵签的区别。无需填写邮箱、提供付款信息或反复尝试登录。</p><Link href="/features" className={`${button} inline-flex items-center`}>返回探索功能</Link></div> : <form className="mt-5 space-y-4" onSubmit={event => {
       event.preventDefault(); void run(async signal => {

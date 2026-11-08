@@ -2,8 +2,9 @@
 见 docs/superpowers/specs/2026-07-22-ziwei-paid-credits-design.md"""
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import DBAPIError
 from app.db.billing_contention import retryable_contention
@@ -97,6 +98,24 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     if status == "order_not_found":
         raise HTTPException(503, "order not ready; retry")
     return {"status": status}
+
+
+@router.get("/orders")
+@retryable_contention
+def order_history(limit: int = Query(default=10, ge=1, le=20),
+                  db: Session = Depends(get_db), device: str = Depends(get_device_id)):
+    """Bounded, owner-only history; reading never creates accounts or calls Stripe."""
+    acct = credits_svc.resolve_account(db, device, create=False)
+    orders = [] if acct is None else db.scalars(
+        select(PaymentOrder).where(PaymentOrder.account_id == acct.id)
+        .order_by(PaymentOrder.created_at.desc(), PaymentOrder.id.desc()).limit(limit)
+    ).all()
+    return {"mode": "test", "orders": [
+        {"order_id": order.id, "status": order.status, "pack": order.pack,
+         "credits": order.credits, "amount_cents": order.amount_cents,
+         "currency": order.currency, "created_at": order.created_at.isoformat() + "Z"}
+        for order in orders
+    ]}
 
 
 @router.get("/orders/{order_id}")

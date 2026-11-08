@@ -48,7 +48,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       ...paidFeatures.map(({ label, href }) => ({ label, href })),
       { label: "全部功能", href: "/features" },
       { label: "账号", href: "/account" },
-    ] }}>{inDomain(pathname, "/ziwei") || inDomain(pathname, "/qian") ? <PaidAccountGate key={pathname} feature={paidFeatures.find(feature => inDomain(pathname, feature.href))}>{children}</PaidAccountGate> : children}</DomainShell>;
+      { label: "点数与订单", href: "/credits" },
+    ] }}>{inDomain(pathname, "/ziwei") || inDomain(pathname, "/qian") || pathname === "/credits" ? <PaidAccountGate key={pathname} feature={paidFeatures.find(feature => inDomain(pathname, feature.href))}>{children}</PaidAccountGate> : children}</DomainShell>;
   }
 
   // Full-bleed immersive routes — no chrome at all.

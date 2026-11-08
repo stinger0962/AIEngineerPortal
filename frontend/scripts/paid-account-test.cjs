@@ -37,6 +37,13 @@ function load(file) {
  global.fetch=async(url,init)=>{assert.equal(init.credentials,'include');assert.equal(init.headers['X-Paid-Client'],'1');assert.equal(init.headers['X-Device-Id'],undefined);return {ok:true,json:async()=>[]};};
  assert.deepEqual(await z.ziweiApi.listProfiles(),[]);
  const b=load(path.join(root,'lib/ziwei/billing.ts'));
- await b.createBillingAdapter('/mock',()=>'',async(url,init)=>{assert.equal(init.credentials,'include');assert.equal(init.headers['X-Paid-Client'],'1');assert.equal(init.headers['X-Device-Id'],undefined);return {ok:true,json:async()=>({balance:0})};}).balance();
+ await b.createBillingAdapter('/mock',()=>'',async(url,init)=>{assert.equal(init.credentials,'include');assert.equal(init.headers['X-Paid-Client'],'1');assert.equal(init.headers['X-Device-Id'],undefined);return {ok:true,json:async()=>({balance:0,mode:"test",packs:[]})};}).balance();
+ const order={order_id:1,status:'pending',pack:'small',credits:10,amount_cents:100,currency:'usd',created_at:'2026-01-01T00:00:00Z'};
+ for(const body of [{mode:'live',orders:[order]},{mode:'test',orders:[{...order,status:'refunded'}]},{mode:'test',orders:[{...order,order_id:-1}]},{mode:'test',orders:null}]) {
+   const adapter=b.createBillingAdapter('/mock',()=>'',async()=>({ok:true,json:async()=>body}));
+   await assert.rejects(adapter.orders());
+ }
+ const history=b.createBillingAdapter('/mock',()=>'',async(url,init)=>{assert.equal(url,'/mock/billing/orders?limit=10');assert.equal(init.credentials,'include');return {ok:true,json:async()=>({mode:'test',orders:[order]})};});
+ assert.deepEqual(await history.orders(),[order]);
  console.log('PASS paid accounts: cookie-only transport, failures, storage independence, feature headers');
 })().catch(error=>{console.error(error);process.exit(1)});

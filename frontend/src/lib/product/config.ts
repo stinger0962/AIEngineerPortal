@@ -21,7 +21,7 @@ export const paidFeatures: readonly ProductFeature[] = [
 ];
 
 export function isPaidProductPath(pathname: string): boolean {
-  return pathname === "/" || pathname === "/features" || pathname === "/account" || paidFeatures.some(
+  return pathname === "/" || pathname === "/features" || pathname === "/account" || pathname === "/credits" || paidFeatures.some(
     ({ href }) => pathname === href || pathname.startsWith(`${href}/`),
   );
 }
