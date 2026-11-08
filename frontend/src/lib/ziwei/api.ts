@@ -95,6 +95,26 @@ export type MessageOut = {
   created_at: string | null;
 };
 
+function historyId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+function historyDate(value: unknown): boolean { return value === null || typeof value === "string"; }
+function historyCamera(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const command = value as Record<string, unknown>;
+  return command.type === "overview"
+    || (command.type === "focus_palace" && typeof command.palace === "string")
+    || (command.type === "explain_term" && typeof command.term === "string" && typeof command.explanation === "string");
+}
+function historyContext(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const context = value as MessageOut["chart_context_json"];
+  return (context.scenario === undefined || typeof context.scenario === "string")
+    && (context.camera_commands === undefined || (Array.isArray(context.camera_commands) && context.camera_commands.every(historyCamera)))
+    && (context.segments === undefined || (Array.isArray(context.segments) && context.segments.every(segment =>
+      segment && typeof segment.text === "string" && Array.isArray(segment.commands) && segment.commands.every(historyCamera))));
+}
+
 export type OracleAsk = { scenario: string; message: string; conversation_id?: number };
 
 /** 流式解盘的 SSE 事件 */
@@ -190,10 +210,22 @@ export const ziweiApi = {
     return reply;
   },
   streamOracle,
-  listConversations: (profileId: number) =>
-    request<ConversationOut[]>(`/ziwei/profiles/${profileId}/conversations`),
-  listMessages: (conversationId: number) =>
-    request<MessageOut[]>(`/ziwei/conversations/${conversationId}/messages`),
+  listConversations: async (profileId: number, signal?: AbortSignal) => {
+    if (!historyId(profileId)) throw new ZiweiApiError(400, "Invalid profile");
+    const rows = await request<ConversationOut[]>(`/ziwei/profiles/${profileId}/conversations`, { signal });
+    if (!Array.isArray(rows) || rows.some(row => !row || !historyId(row.id) || typeof row.title !== "string"
+      || typeof row.scenario !== "string" || !historyDate(row.created_at))) throw new ZiweiApiError(502, "Invalid history");
+    return rows;
+  },
+  listMessages: async (conversationId: number, signal?: AbortSignal) => {
+    if (!historyId(conversationId)) throw new ZiweiApiError(400, "Invalid conversation");
+    const rows = await request<MessageOut[]>(`/ziwei/conversations/${conversationId}/messages`, { signal });
+    if (!Array.isArray(rows) || rows.some(row => !row || !historyId(row.id) || !["user", "assistant"].includes(row.role)
+      || typeof row.content !== "string" || !historyDate(row.created_at) || !historyContext(row.chart_context_json))) {
+      throw new ZiweiApiError(502, "Invalid saved messages");
+    }
+    return rows;
+  },
   /** 一次性认领无归属旧数据（紫微档案 + 灵签记录）到本浏览器，需服务器口令。 */
   claimLegacy: (code: string) =>
     request<{ claimed_profiles: number; claimed_readings: number }>("/ziwei/claim", {
