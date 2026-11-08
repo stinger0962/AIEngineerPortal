@@ -79,11 +79,11 @@ jobs:
           python -m pytest backend/tests/acceptance backend/tests/test_billing_stripe.py
           backend/tests/test_credits.py backend/tests/test_ziwei_oracle_routes.py
           backend/tests/test_ziwei_stream.py backend/tests/test_qian_routes.py
-          backend/tests/test_paid_product.py backend/tests/test_paid_accounts.py backend/tests/test_paid_email.py backend/tests/test_paid_email_routes.py backend/tests/test_paid_retention.py -q --tb=short
+          backend/tests/test_paid_product.py backend/tests/test_paid_accounts.py backend/tests/test_paid_email.py backend/tests/test_paid_email_routes.py backend/tests/test_paid_retention.py backend/tests/test_paid_order_history.py -q --tb=short
       - name: PostgreSQL acceptance and concurrency
         env:
           ZIWEI_QA_POSTGRES_URL: postgresql+psycopg://ziwei_qa@127.0.0.1:55432/ziwei_qa
-        run: python -m pytest backend/tests/acceptance backend/tests/test_paid_accounts.py backend/tests/test_paid_retention.py -q --tb=short
+        run: python -m pytest backend/tests/acceptance backend/tests/test_paid_accounts.py backend/tests/test_paid_retention.py backend/tests/test_paid_order_history.py -q --tb=short
   frontend:
     strategy:
       matrix:
@@ -146,6 +146,7 @@ jobs:
           node scripts/paid-product-browser-test.cjs
           node scripts/paid-account-browser-test.cjs
           node scripts/paid-discovery-browser-test.cjs
+          node scripts/paid-credits-browser-test.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -154,6 +155,7 @@ jobs:
             /tmp/paid-home-*.png
             /tmp/paid-discovery-*.png
             /tmp/paid-disabled-*.png
+            /tmp/paid-credits-*.png
             /tmp/paid-preview.log
             /tmp/paid-integration-api.log
             /tmp/paid-integration-web.log

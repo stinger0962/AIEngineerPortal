@@ -23,7 +23,7 @@ for (const mode of ['portal', 'paid']) {
   process.env.NEXT_PUBLIC_PRODUCT_MODE = mode;
   const c = load(path.join(root, 'lib/product/config.ts'));
   assert.equal(c.paidProduct, mode === 'paid');
-  for (const p of ['/', '/features', '/ziwei', '/qian', '/ziwei/opengraph-image']) assert.equal(c.isPaidProductPath(p), true);
+  for (const p of ['/', '/features', '/credits', '/ziwei', '/qian', '/ziwei/opengraph-image']) assert.equal(c.isPaidProductPath(p), true);
   for (const p of ['/grow', '/settings', '/toolkits', '/ziweievil', '/xuan', '/api/v1/projects']) assert.equal(c.isPaidProductPath(p), false);
   assert.equal(new Set(c.paidFeatures.map(f => f.id)).size, c.paidFeatures.length);
   const Home = load(path.join(root, 'components/home/folding-screen-hub.tsx')).default;
