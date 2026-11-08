@@ -1,7 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
-import { qianApi, QianApiError, type QianSign, type QianReadingOut } from "@/lib/qian/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { qianApi, QianApiError, type QianSign, type QianReadingOut, type QianReadingDetail } from "@/lib/qian/api";
 import { useOracleTour } from "@/components/ziwei/chat-dock/use-oracle-tour";
 import { TermCard, type TermInfo } from "@/components/ziwei/term-card";
 import { makeQianFireCommand } from "./qian-camera";
@@ -10,7 +10,7 @@ import { makeQianFireCommand } from "./qian-camera";
 const KAITI = "'STKaiti','KaiTi STD','KaiTi','楷体','Kaiti SC',serif";
 const SONGTI = "'Songti SC','Noto Serif CJK SC','SimSun',serif";
 
-// ── 历史问题脱敏：只露前一小段（后端已把后半截掉，前端不可展开）——保护隐私 ─────────
+// History list stays masked; authenticated owners explicitly open private details.
 function MaskedQuestion({ text }: { text: string }) {
   return (
     <span className="ml-2" style={{ color: "rgba(233,220,196,.7)" }}>
@@ -45,6 +45,19 @@ export function QianWorkspace() {
   const [term, setTerm] = useState<TermInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<QianReadingOut[]>([]);
+  const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">("loading");
+  const [expandedHistory, setExpandedHistory] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<QianReadingDetail | null>(null);
+  const [detailState, setDetailState] = useState<"loading" | "ready" | "error">("loading");
+  const [detailError, setDetailError] = useState("");
+  const historyRequest = useRef(0);
+  const detailRequest = useRef(0);
+  const historyController = useRef<AbortController | null>(null);
+  const detailController = useRef<AbortController | null>(null);
+  const detailHeading = useRef<HTMLHeadingElement | null>(null);
+  const detailTrigger = useRef<HTMLButtonElement | null>(null);
+  const historyMounted = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const tour = useOracleTour();
 
@@ -54,8 +67,59 @@ export function QianWorkspace() {
   useEffect(() => () => { abortRef.current?.abort(); cancelTour(); }, [cancelTour]);
 
   useEffect(() => {
-    if (phase === "idle") qianApi.listReadings().then(setHistory).catch(() => {});
-  }, [phase]);
+    historyMounted.current = true;
+    return () => {
+      historyMounted.current = false;
+      ++historyRequest.current; ++detailRequest.current;
+      historyController.current?.abort(); detailController.current?.abort();
+    };
+  }, []);
+
+  const refreshHistory = useCallback(async () => {
+    const request = ++historyRequest.current;
+    historyController.current?.abort();
+    const controller = new AbortController();
+    historyController.current = controller;
+    setHistoryState("loading");
+    try {
+      const rows = await qianApi.listReadings(controller.signal);
+      if (!Array.isArray(rows)) throw new Error("Invalid history");
+      if (historyMounted.current && request === historyRequest.current) {
+        setHistory(rows.slice(0, 50)); setHistoryState("ready");
+      }
+    } catch {
+      if (historyMounted.current && request === historyRequest.current && !controller.signal.aborted) {
+        setHistory([]); setHistoryState("error");
+      }
+    }
+  }, []);
+  useEffect(() => { if (phase === "idle") void refreshHistory(); }, [phase, refreshHistory]);
+
+  const openDetail = async (id: number) => {
+    const request = ++detailRequest.current;
+    detailController.current?.abort();
+    const controller = new AbortController();
+    detailController.current = controller;
+    setSelectedId(id); setDetail(null); setDetailState("loading");
+    try {
+      const saved = await qianApi.getReading(id, controller.signal);
+      if (historyMounted.current && request === detailRequest.current) {
+        setDetail(saved); setDetailState("ready");
+      }
+    } catch (error) {
+      if (historyMounted.current && request === detailRequest.current && !controller.signal.aborted) {
+        setDetailError(error instanceof QianApiError && error.status === 404
+          ? "记录不存在或已不可访问。" : "历史详情暂不可用，请重试。");
+        setDetailState("error");
+      }
+    }
+  };
+  useEffect(() => { if (selectedId !== null) detailHeading.current?.focus(); }, [selectedId]);
+  const closeDetail = () => {
+    ++detailRequest.current; detailController.current?.abort();
+    setSelectedId(null); setDetail(null);
+    detailTrigger.current?.focus();
+  };
 
   const shake = async () => {
     const q = question.trim();
@@ -147,11 +211,11 @@ export function QianWorkspace() {
         borderRadius: "24px",
       }}
     >
-      <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
+      <div className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
 
         {/* ── Left: 3D Scene ─────────────────────────────────────────────────── */}
         <div
-          className="relative min-h-[420px] h-[64vh] overflow-hidden"
+          className="relative min-w-0 min-h-[420px] h-[64vh] overflow-hidden"
           style={{
             borderRadius: "18px",
             border: "1px solid rgba(214,168,74,.25)",
@@ -187,7 +251,7 @@ export function QianWorkspace() {
         </div>
 
         {/* ── Right: Controls + signcard + 解签 ──────────────────────────────── */}
-        <div className="flex flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4">
 
           {/* Question textarea */}
           <textarea
@@ -343,33 +407,40 @@ export function QianWorkspace() {
           ) : null}
 
           {/* ── History 我的灵签 ──────────────────────────────────────────────── */}
-          {history.length > 0 ? (
-            <div className="mt-2">
-              <p
-                className="text-xs uppercase tracking-[0.2em]"
-                style={{ color: "rgba(214,168,74,.6)" }}
-              >
-                我的灵签
-              </p>
-              <div className="mt-2 space-y-1.5">
-                {history.slice(0, 5).map((h) => (
-                  <div
-                    key={h.id}
-                    className="rounded-xl px-3 py-2 text-xs"
-                    style={{
-                      background: "rgba(28,18,9,.4)",
-                      border: "1px solid rgba(214,168,74,.15)",
-                    }}
-                  >
-                    <span style={{ color: "#d6a84a" }}>
-                      第{h.sign_id}签 · {h.grade}
-                    </span>
-                    <MaskedQuestion text={h.question} />
-                  </div>
-                ))}
-              </div>
+          <section className="mt-2 space-y-3" aria-label="我的灵签">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm" style={{ color: "#d6a84a" }}>我的灵签</h2>
+              <button type="button" className="rounded border border-amber-200/40 px-3 py-2 text-xs text-amber-100" onClick={() => void refreshHistory()}>刷新历史记录</button>
             </div>
-          ) : null}
+            {historyState === "loading" && <p role="status" className="text-sm text-amber-100">正在读取历史记录…</p>}
+            {historyState === "error" && <p role="alert" className="text-sm text-orange-300">历史记录暂不可用，请刷新重试。</p>}
+            {historyState === "ready" && history.length === 0 && <p className="text-sm text-amber-100">暂无已保存的灵签记录。</p>}
+            <ul className="space-y-2">
+              {history.slice(0, expandedHistory ? 50 : 5).map(h => <li key={h.id}>
+                <button type="button" aria-label={`查看第${h.sign_id}签记录 ${h.id}`} aria-expanded={selectedId === h.id}
+                  className="w-full break-words rounded-xl border border-amber-200/20 px-3 py-2 text-left text-xs"
+                  onClick={event => { detailTrigger.current = event.currentTarget; void openDetail(h.id); }}>
+                  <span style={{ color: "#d6a84a" }}>第{h.sign_id}签 · {h.grade}</span><MaskedQuestion text={h.question} />
+                </button>
+              </li>)}
+            </ul>
+            {history.length > 5 && <button type="button" className="rounded border border-amber-200/40 px-3 py-2 text-xs text-amber-100" onClick={() => setExpandedHistory(value => !value)}>{expandedHistory ? "收起记录" : "展开全部记录"}</button>}
+            {selectedId !== null && <section aria-label="灵签历史详情" className="space-y-3 rounded-xl border border-amber-200/30 p-4 text-amber-100">
+              <div className="flex flex-wrap justify-between gap-2">
+                <h3 ref={detailHeading} tabIndex={-1} className="font-medium">已保存的解签内容</h3>
+                <button type="button" className="rounded border border-amber-200/40 px-3 py-2 text-xs" onClick={closeDetail}>关闭详情</button>
+              </div>
+              <p className="text-xs">这里只展示已保存内容，可能包含中断时保存的部分结果；不代表解签完整完成，也不代表付款状态。不会自动播放或重新解签。</p>
+              {detailState === "loading" && <p role="status">读取历史详情中…</p>}
+              {detailState === "error" && <div><p role="alert">{detailError}</p><button type="button" className="mt-2 rounded border border-amber-200/40 px-3 py-2" onClick={() => void openDetail(selectedId)}>重试读取详情</button></div>}
+              {detailState === "ready" && detail && <>
+                <p className="text-sm">第{detail.sign_id}签 · {detail.grade}</p>
+                <p className="whitespace-pre-wrap break-words text-sm">{detail.question}</p>
+                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{detail.response}</p>
+                {detail.created_at && <p className="break-words text-xs">保存时间：{detail.created_at}</p>}
+              </>}
+            </section>}
+          </section>
         </div>
       </div>
     </div>
