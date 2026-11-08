@@ -2,6 +2,8 @@
 
 import React, { useRef, useState } from "react";
 
+import { paidFeatures, paidProduct } from "@/lib/product/config";
+
 import { DoorLink } from "@/components/transitions/door-link";
 
 /**
@@ -18,7 +20,7 @@ import { DoorLink } from "@/components/transitions/door-link";
 const SERIF = "'Songti SC','Noto Serif CJK SC','STSong','SimSun',serif";
 
 type Domain = {
-  key: "xue" | "zao" | "xuan";
+  key: string;
   href: string;
   numeral: string; // 壹 / 贰 / 叁
   char: string; // giant watermark
@@ -117,6 +119,24 @@ const DOMAINS: Domain[] = [
       </svg>
     ),
   },
+];
+
+// Reuse the lacquer frame, responsive pager, sound and DoorLink animation.
+const PRODUCT_DOORS: Domain[] = [
+  ...paidFeatures.slice(0, 2).map((feature, index) => ({
+    ...DOMAINS[2],
+    key: feature.id,
+    href: feature.href,
+    numeral: ["壹", "贰"][index] || String(index + 1),
+    char: feature.character,
+    enLabel: feature.english,
+    verticalName: feature.label,
+    index: feature.description,
+    accent: feature.accent,
+    accentLight: feature.accent,
+    nameColor: index === 1 ? "#e7c372" : "#cdbfff",
+  })),
+  { ...DOMAINS[1], key: "features", href: "/features", numeral: "叁", char: "境", enLabel: "Explore", verticalName: "探索 · 更多可能", index: "功能一览 · 持续生长" },
 ];
 
 function DomainDoor({ domain }: { domain: Domain }) {
@@ -271,6 +291,7 @@ function GoldSeam() {
 }
 
 export default function FoldingScreenHub() {
+  const domains = paidProduct ? PRODUCT_DOORS : DOMAINS;
   const pagerRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
 
@@ -340,17 +361,17 @@ export default function FoldingScreenHub() {
               flexShrink: 0,
             }}
           >
-            磊
+            {paidProduct ? "玄" : "磊"}
           </div>
-          <div style={{ fontSize: 20, color: "#ecdfc6", letterSpacing: 4, fontFamily: SERIF }}>方寸</div>
+          <div style={{ fontSize: 20, color: "#ecdfc6", letterSpacing: 4, fontFamily: SERIF }}>{paidProduct ? "方寸 · 玄" : "方寸"}</div>
           <div style={{ fontSize: 11.5, color: "#9c8456", letterSpacing: 2, fontFamily: "system-ui", marginTop: 4 }}>
-            三域门户
+            {paidProduct ? "文化探索 · 产品预览" : "三域门户"}
           </div>
           <div
             aria-hidden="true"
             style={{ marginLeft: "auto", fontSize: 12, color: "#9c8456", letterSpacing: 3, fontFamily: SERIF }}
           >
-            学 · 造 · 玄
+            {paidProduct ? "紫微 · 灵签 · 更多" : "学 · 造 · 玄"}
           </div>
         </header>
 
@@ -378,7 +399,7 @@ export default function FoldingScreenHub() {
           >
             {/* Desktop: three doors side by side */}
             <div className="hidden lg:flex" style={{ flex: 1, minWidth: 0 }}>
-              {DOMAINS.map((domain, i) => (
+              {domains.map((domain, i) => (
                 <React.Fragment key={domain.key}>
                   {i > 0 && <GoldSeam />}
                   <DomainDoor domain={domain} />
@@ -390,7 +411,7 @@ export default function FoldingScreenHub() {
             <div className="flex flex-col lg:hidden" style={{ flex: 1, minHeight: 0 }}>
               {/* ==——  position indicator */}
               <div style={{ display: "flex", justifyContent: "center", gap: 7, padding: "2px 0 11px", flexShrink: 0 }}>
-                {DOMAINS.map((domain, i) => (
+                {domains.map((domain, i) => (
                   <span
                     key={domain.key}
                     aria-hidden="true"
@@ -421,7 +442,7 @@ export default function FoldingScreenHub() {
                   WebkitOverflowScrolling: "touch",
                 }}
               >
-                {DOMAINS.map((domain) => (
+                {domains.map((domain) => (
                   <div
                     key={domain.key}
                     style={{ flex: "0 0 100%", minWidth: 0, display: "flex", scrollSnapAlign: "center" }}

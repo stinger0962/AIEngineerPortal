@@ -1,3 +1,5 @@
+import { productName } from "@/lib/product/config";
+
 import type { Metadata } from "next";
 
 const title = "紫微斗数 · 星盘命理";
@@ -6,7 +8,7 @@ const description = "输入生辰起盘，3D 星盘徐徐飞入，AI 解盘师�
 export const metadata: Metadata = {
   title,
   description,
-  openGraph: { title, description, type: "website", siteName: "AI Engineer Portal", locale: "zh_CN" },
+  openGraph: { title, description, type: "website", siteName: productName, locale: "zh_CN" },
   twitter: { card: "summary_large_image", title, description },
 };
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { paidProduct } from "@/lib/product/config";
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -41,7 +43,7 @@ export function DomainShell({ config, children }: { config: DomainConfig; childr
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[13px] text-[#f3e6cf]"
             style={{ background: "#b9472f", fontFamily: "'Songti SC','SimSun',serif" }}
           >
-            磊
+            {paidProduct ? "玄" : "磊"}
           </span>
 
           <span

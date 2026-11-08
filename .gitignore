@@ -26,3 +26,5 @@ frontend/node_modules/
 
 # Database dumps retained on the deployment host
 /backups/
+
+frontend/.next-paid/

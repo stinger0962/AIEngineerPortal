@@ -117,3 +117,10 @@ commit too. Feature branches and draft PRs run nonproduction checks only. See th
 recovery and rollback limits. The manual rollout passed in
 [run 42012305298](https://github.com/stinger0962/AIEngineerPortal/actions/runs/42012305298);
 automatic rollout and real production rollback still need operational verification.
+
+## Separate paid-product preview
+
+The optional paid-product mode reuses the door-opening homepage for Ziwei, Qian
+and an extensible feature catalogue, with a separate API and fresh database.
+It does not migrate personal-portal data or enable real payments. See
+[the local setup and readiness notes](docs/integration/paid-product-foundation.md).
