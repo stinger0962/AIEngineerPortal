@@ -21,6 +21,8 @@ export type QianStreamHandlers = {
   onError: () => void;
 };
 
+export type QianReadingDetail = { id: number; question: string; sign_id: number; grade: string; response: string; created_at: string | null };
+
 export type QianReadingOut = { id: number; question: string; sign_id: number; grade: string; created_at: string | null };
 
 async function streamOracle(
@@ -74,7 +76,32 @@ async function streamOracle(
 
 export const qianApi = {
   streamOracle,
-  listReadings: () =>
-    fetch(`${API_BASE}/qian/readings`, { cache: "no-store", ...paidRequestOptions(), headers: { ...(paidProduct ? paidRequestHeaders() : { "X-Device-Id": getDeviceId() }) } })
-      .then((r) => { if (!r.ok) { if (r.status === 401) invalidatePaidSession(); throw new QianApiError(r.status); } return r.json() as Promise<QianReadingOut[]>; }),
+  getReading: async (id: number, signal?: AbortSignal): Promise<QianReadingDetail> => {
+    if (!Number.isSafeInteger(id) || id < 1) throw new QianApiError(400, "Invalid reading");
+    const response = await fetch(`${API_BASE}/qian/readings/${id}`, {
+      cache: "no-store", ...paidRequestOptions(), signal,
+      headers: { ...(paidProduct ? paidRequestHeaders() : { "X-Device-Id": getDeviceId() }) },
+    });
+    if (!response.ok) {
+      if (response.status === 401) invalidatePaidSession();
+      throw new QianApiError(response.status);
+    }
+    const result = await response.json() as QianReadingDetail;
+    if (!result || result.id !== id || typeof result.question !== "string" || typeof result.response !== "string"
+        || !Number.isSafeInteger(result.sign_id) || result.sign_id < 1 || typeof result.grade !== "string"
+        || (result.created_at !== null && typeof result.created_at !== "string")) throw new QianApiError(502, "Invalid reading response");
+    return result;
+  },
+  listReadings: (signal?: AbortSignal) =>
+    fetch(`${API_BASE}/qian/readings`, { signal, cache: "no-store", ...paidRequestOptions(), headers: { ...(paidProduct ? paidRequestHeaders() : { "X-Device-Id": getDeviceId() }) } })
+      .then(async (r) => {
+        if (!r.ok) { if (r.status === 401) invalidatePaidSession(); throw new QianApiError(r.status); }
+        const rows = await r.json() as QianReadingOut[];
+        if (!Array.isArray(rows) || rows.some(row => !row || !Number.isSafeInteger(row.id) || row.id < 1
+          || !Number.isSafeInteger(row.sign_id) || row.sign_id < 1 || typeof row.question !== "string"
+          || typeof row.grade !== "string" || (row.created_at !== null && typeof row.created_at !== "string"))) {
+          throw new QianApiError(502, "Invalid reading history");
+        }
+        return rows;
+      }),
 };
