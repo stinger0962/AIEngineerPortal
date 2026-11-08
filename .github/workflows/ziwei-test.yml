@@ -79,11 +79,11 @@ jobs:
           python -m pytest backend/tests/acceptance backend/tests/test_billing_stripe.py
           backend/tests/test_credits.py backend/tests/test_ziwei_oracle_routes.py
           backend/tests/test_ziwei_stream.py backend/tests/test_qian_routes.py
-          backend/tests/test_paid_product.py backend/tests/test_paid_accounts.py backend/tests/test_paid_email.py backend/tests/test_paid_email_routes.py -q --tb=short
+          backend/tests/test_paid_product.py backend/tests/test_paid_accounts.py backend/tests/test_paid_email.py backend/tests/test_paid_email_routes.py backend/tests/test_paid_retention.py -q --tb=short
       - name: PostgreSQL acceptance and concurrency
         env:
           ZIWEI_QA_POSTGRES_URL: postgresql+psycopg://ziwei_qa@127.0.0.1:55432/ziwei_qa
-        run: python -m pytest backend/tests/acceptance backend/tests/test_paid_accounts.py -q --tb=short
+        run: python -m pytest backend/tests/acceptance backend/tests/test_paid_accounts.py backend/tests/test_paid_retention.py -q --tb=short
   frontend:
     strategy:
       matrix:
@@ -188,6 +188,8 @@ jobs:
             sleep 2
           done
           python scripts/check-paid-preview.py
+          # Count expired auth material only; never apply cleanup in this smoke job.
+          docker compose -f compose.paid-local.yml exec -T backend python -m app.cli.paid_retention
       - uses: actions/upload-artifact@v4
         if: always()
         with:
