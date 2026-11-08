@@ -189,7 +189,9 @@ def test_signature_verification_uses_raw_body(db):
 
 def test_unknown_checkout_is_retryable(db):
     payload = {"type": "checkout.session.completed", "livemode": False,
-               "data": {"object": {"id": "cs_unknown", "livemode": False}}}
+               "data": {"object": {"id": "cs_unknown", "livemode": False, "mode": "payment",
+                               "amount_total": 990, "currency": "cny", "payment_status": "paid",
+                               "metadata": {"order_id": "1", "account_id": "1"}}}}
     assert stripe_billing.process_event(db, payload) == "order_not_found"
 
 
