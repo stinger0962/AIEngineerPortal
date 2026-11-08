@@ -106,6 +106,7 @@ jobs:
       - run: node scripts/paid-account-test.cjs
       - run: node scripts/qian-stream-test.cjs
       - run: node scripts/qian-history-test.cjs
+      - run: node scripts/ziwei-history-test.cjs
       - run: node scripts/narration-reliability-test.cjs
       - run: npx tsc --noEmit
   paid-product-ui:
@@ -152,6 +153,7 @@ jobs:
           node scripts/paid-credits-browser-test.cjs
           node scripts/qian-workspace-browser-test.cjs
           node scripts/paid-qian-history-browser-test.cjs
+          node scripts/paid-ziwei-history-browser-test.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -162,6 +164,7 @@ jobs:
             /tmp/paid-disabled-*.png
             /tmp/paid-credits-*.png
             /tmp/paid-qian-history-*.png
+            /tmp/paid-ziwei-history-*.png
             /tmp/paid-preview.log
             /tmp/paid-integration-api.log
             /tmp/paid-integration-web.log

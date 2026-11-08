@@ -36,6 +36,7 @@ export function ZiweiWorkspace({
       <ChartView chart={chart} selectedBranch={selectedBranch} onSelectBranch={setSelectedBranch} tourActive={tourActive} />
       {term ? <TermCard info={term} onClose={() => setTerm(null)} /> : null}
       <ChatDock
+        key={profile.id}
         profileId={profile.id}
         onReadingSuccess={onReadingSuccess}
         persona={profile.persona}
