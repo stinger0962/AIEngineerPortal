@@ -24,7 +24,8 @@ No registry push or deploy action is configured.
 
 Only the proxy is published, bound to loopback port 3100. It serves Next and the
 paid API at the same origin. Backend/frontend ports are not published. The
-runtime network is internal, the containers run without root and with read-only
+backend/frontend network is internal; only nginx also joins a host-facing bridge
+so its loopback port is reachable. The containers run without root and with read-only
 root filesystems, and writable caches/database live in tmpfs. Dependencies still
 need Internet access at image-build time. Restarting the backend loses preview
 data deliberately. Do not use this package for real customers or records.

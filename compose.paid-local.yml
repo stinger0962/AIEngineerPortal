@@ -87,8 +87,11 @@ services:
         condition: service_healthy
       frontend:
         condition: service_healthy
-    networks: [paid-local]
+    # Published loopback port requires a bridge with a host-facing gateway.
+    # Only nginx joins this edge; backend/frontend remain internal-only.
+    networks: [paid-local, paid-edge]
 
 networks:
   paid-local:
     internal: true
+  paid-edge: {}

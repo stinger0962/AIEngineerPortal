@@ -14,9 +14,9 @@ def test_preview_only_exposes_loopback_proxy_and_uses_internal_network():
     config = configuration()
     assert set(config["services"]) == {"backend", "frontend", "proxy"}
     assert config["services"]["proxy"]["ports"] == ["127.0.0.1:3100:8080"]
-    assert config["networks"] == {"paid-local": {"internal": True}}
+    assert config["networks"] == {"paid-local": {"internal": True}, "paid-edge": {}}
     for name, service in config["services"].items():
-        assert service["networks"] == ["paid-local"]
+        assert service["networks"] == (["paid-local", "paid-edge"] if name == "proxy" else ["paid-local"])
         if name != "proxy":
             assert "ports" not in service
         assert service["read_only"] is True
