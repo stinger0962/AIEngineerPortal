@@ -1,4 +1,5 @@
 """Explicitly opt-in Stripe TEST checkout and atomic fulfillment."""
+from collections.abc import Mapping
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from ipaddress import ip_address
@@ -113,14 +114,36 @@ def verify_event(payload: bytes, sig_header: str):
 
 
 def process_event(db: Session, event) -> str:
-    bound_lock_wait(db)
-    obj = event["data"]["object"]
+    # Verified signatures establish origin, not a usable payload shape. Reject
+    # malformed input before even touching the database or acquiring locks.
+    if not isinstance(event, Mapping) or not isinstance(event.get("type"), str) or not event["type"]:
+        return "invalid_event"
+    data = event.get("data")
+    if not isinstance(data, Mapping) or not isinstance(data.get("object"), Mapping):
+        return "invalid_event"
+    obj = data["object"]
     if event.get("livemode") is not False or obj.get("livemode") is not False:
         return "live_or_unknown_mode_rejected"
     etype = event["type"]
+    if etype.startswith(("refund.", "charge.refund", "charge.dispute.")):
+        # Acknowledge unsupported lifecycle explicitly, without pretending a
+        # reversal was applied or changing purchased credit/account history.
+        return "unsupported_financial_event"
     if etype not in ("checkout.session.completed", "checkout.session.async_payment_succeeded",
                      "checkout.session.async_payment_failed"):
         return "ignored"
+    metadata = obj.get("metadata")
+    if (not isinstance(obj.get("id"), str) or not obj["id"]
+            or type(obj.get("amount_total")) is not int or obj["amount_total"] < 0
+            or not isinstance(obj.get("currency"), str)
+            or not isinstance(obj.get("mode"), str)
+            or not isinstance(obj.get("payment_status"), str)
+            or not isinstance(metadata, Mapping)
+            or any(key in metadata and not isinstance(metadata[key], str) for key in ("order_id", "account_id"))):
+        return "invalid_event"
+    if not metadata.get("order_id") or not metadata.get("account_id"):
+        return "payment_mismatch"
+    bound_lock_wait(db)
     order = db.scalar(select(PaymentOrder).where(PaymentOrder.stripe_session_id == obj.get("id")))
     if not order:
         # Delivery can precede saving the Checkout response; ask Stripe to retry.

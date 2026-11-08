@@ -205,6 +205,10 @@ def test_postgres_disposable_database():
             conn.execute(PaidSession.__table__.insert().values(token_hash='expired', account_id=123, expires_at=datetime.utcnow() - timedelta(days=1)))
         env = {'PAID_DATABASE_URL': url.set(database=name).render_as_string(hide_password=False), 'DATABASE_URL': raw}
         before = snapshot(target)
+        from app.cli.paid_billing_audit import run_audit
+        report = run_audit(env)
+        assert report['local_ledger_consistent'] is True and report['provider_reconciled'] is False
+        assert snapshot(target) == before
         assert retention.run_retention(env)['counts']['paid_sessions'] == 1
         assert snapshot(target) == before
         assert retention.run_retention(env, apply=True, max_delete=1)['counts']['paid_sessions'] == 1
