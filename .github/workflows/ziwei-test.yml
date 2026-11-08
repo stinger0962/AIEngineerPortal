@@ -10,6 +10,8 @@ on:
       - '.github/workflows/public-smoke.yml'
       - '.github/workflows/production-preflight.yml'
       - 'scripts/**'
+      - 'compose.paid-local.yml'
+      - 'infra/paid-local/**'
       - '.gitignore'
   push:
     branches: [main, integration/ziwei-stripe-test]
@@ -153,3 +155,40 @@ jobs:
             /tmp/paid-integration-api.log
             /tmp/paid-integration-web.log
             /tmp/paid-integration-proxy.log
+  paid-local-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest==8.3.4 PyYAML==6.0.2
+      - name: Read-only preview checker tests
+        run: python -m pytest backend/tests/test_paid_preview_check.py backend/tests/test_paid_local_packaging.py -q
+      - name: Validate isolated Compose configuration
+        run: docker compose -f compose.paid-local.yml config --quiet
+      - name: Build and check disposable local package
+        run: |
+          set -euo pipefail
+          # Unique project, no production context/env files, no credentials or emails.
+          export COMPOSE_PROJECT_NAME="paid-qa-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            docker compose -f compose.paid-local.yml logs --no-color > /tmp/paid-package.log 2>&1 || true
+            docker compose -f compose.paid-local.yml down --volumes --remove-orphans || true
+          }
+          trap cleanup EXIT
+          docker compose -f compose.paid-local.yml build
+          docker compose -f compose.paid-local.yml up -d --wait --wait-timeout 120
+          for attempt in $(seq 1 30); do
+            if python scripts/check-paid-preview.py > /tmp/paid-package-check.json; then break; fi
+            sleep 2
+          done
+          python scripts/check-paid-preview.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: paid-local-package
+          path: |
+            /tmp/paid-package.log
+            /tmp/paid-package-check.json
