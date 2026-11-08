@@ -77,11 +77,11 @@ jobs:
           python -m pytest backend/tests/acceptance backend/tests/test_billing_stripe.py
           backend/tests/test_credits.py backend/tests/test_ziwei_oracle_routes.py
           backend/tests/test_ziwei_stream.py backend/tests/test_qian_routes.py
-          backend/tests/test_paid_product.py -q --tb=short
+          backend/tests/test_paid_product.py backend/tests/test_paid_accounts.py -q --tb=short
       - name: PostgreSQL acceptance and concurrency
         env:
           ZIWEI_QA_POSTGRES_URL: postgresql+psycopg://ziwei_qa@127.0.0.1:55432/ziwei_qa
-        run: python -m pytest backend/tests/acceptance -q --tb=short
+        run: python -m pytest backend/tests/acceptance backend/tests/test_paid_accounts.py -q --tb=short
   frontend:
     strategy:
       matrix:
@@ -101,6 +101,7 @@ jobs:
       - run: npm ci
       - run: node scripts/ziwei-billing-test.cjs
       - run: node scripts/paid-product-test.cjs
+      - run: node scripts/paid-account-test.cjs
       - run: npx tsc --noEmit
   paid-product-ui:
     runs-on: ubuntu-latest
@@ -110,7 +111,7 @@ jobs:
         working-directory: frontend
     env:
       NEXT_PUBLIC_PRODUCT_MODE: paid
-      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8001/api/v1
+      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:3001/api/v1
       SITE_URL: http://127.0.0.1:3001
     steps:
       - uses: actions/checkout@v4
@@ -133,6 +134,7 @@ jobs:
             sleep 1
           done
           node scripts/paid-product-browser-test.cjs
+          node scripts/paid-account-browser-test.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

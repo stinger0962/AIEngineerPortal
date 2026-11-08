@@ -1,3 +1,5 @@
+import { paidProduct } from "@/lib/product/config";
+import { paidRequestHeaders, paidRequestOptions, invalidatePaidSession } from "@/lib/product/account";
 import { API_BASE } from "@/lib/api";
 import { retryKeys } from "./retry-keys";
 import { getDeviceId } from "@/lib/deviceId";
@@ -53,10 +55,11 @@ export type ZiweiProfileCreate = {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", "X-Device-Id": getDeviceId(), ...(init?.headers ?? {}) },
-    cache: "no-store",
+    headers: { "Content-Type": "application/json", ...(paidProduct ? paidRequestHeaders() : { "X-Device-Id": getDeviceId() }), ...(init?.headers ?? {}) },
+    cache: "no-store", ...paidRequestOptions(),
   });
   if (!response.ok) {
+      if (response.status === 401) invalidatePaidSession();
     const err = await response.json().catch(() => null) as { detail?: unknown } | null;
     throw apiError(response.status, err?.detail, response.headers.get("Retry-After"));
   }
@@ -119,12 +122,13 @@ async function streamOracle(
   const scope = `oracle:${getDeviceId()}:${profileId}:stream`;
   const response = await fetch(`${API_BASE}/ziwei/profiles/${profileId}/oracle/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Device-Id": getDeviceId(), "Idempotency-Key": retryKeys.get(scope, body) },
+    headers: { "Content-Type": "application/json", ...(paidProduct ? paidRequestHeaders() : { "X-Device-Id": getDeviceId() }), "Idempotency-Key": retryKeys.get(scope, body) },
     body: JSON.stringify(body),
-    cache: "no-store",
+    cache: "no-store", ...paidRequestOptions(),
     signal,
   });
   if (!response.ok || !response.body) {
+    if (response.status === 401) invalidatePaidSession();
     const err = (await response.json().catch(() => null)) as { detail?: unknown } | null;
     throw apiError(response.status, err?.detail, response.headers.get("Retry-After"));
   }

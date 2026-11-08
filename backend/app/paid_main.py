@@ -6,13 +6,16 @@ Existing portal data is neither copied nor upgraded. Checkout remains test-only.
 """
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
-from app.api.v1.routes import billing, qian, ziwei
+from app.api.v1.routes import billing, paid_accounts, qian, ziwei
+from app.services import paid_accounts as auth
+from app.models.paid_accounts import (PaidChallenge, PaidSession, PaidRateLimit,
+                                      PaidVerifiedEmail, PaidZiweiOwner, PaidQianOwner)
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import get_db
@@ -28,6 +31,7 @@ from app.models.entities import (
 PAID_TABLES = tuple(model.__table__ for model in (
     User, AIFeedback, ZiweiProfile, ZiweiConversation, ZiweiMessage,
     QianReading, Account, AccountDevice, CreditLedger, PaymentOrder, BillingRequest,
+    PaidChallenge, PaidSession, PaidRateLimit, PaidVerifiedEmail, PaidZiweiOwner, PaidQianOwner,
 ))
 
 
@@ -38,6 +42,8 @@ def validate_configuration(settings):
         raise RuntimeError("Paid product must not use the portal DATABASE_URL")
     if settings.stripe_secret_key and not settings.stripe_secret_key.startswith("sk_test_"):
         raise RuntimeError("Paid product foundation accepts Stripe test keys only")
+    if not settings.paid_session_secure and settings.app_env not in {"development", "test"}:
+        raise RuntimeError("Insecure paid session cookies are only supported in local development/tests")
     if settings.ziwei_claim_code or settings.ziwei_auto_adopt:
         raise RuntimeError("Legacy claim and migration are not supported in the fresh product")
 
@@ -76,8 +82,25 @@ def create_app():
     # Copy, do not mutate the shared router: the portal retains its existing API.
     product_ziwei = APIRouter()
     product_ziwei.routes.extend(route for route in ziwei.router.routes if route.path != "/ziwei/claim")
-    for router in (product_ziwei, qian.router, billing.router):
-        app.include_router(router, prefix="/api/v1")
+    for router in (product_ziwei, qian.router):
+        app.include_router(router, prefix="/api/v1", dependencies=[Depends(auth.require_private_access)])
+    # Stripe's test webhook authenticates by signature, not a browser session.
+    private_billing = APIRouter()
+    webhook = APIRouter()
+    for route in billing.router.routes:
+        (webhook if route.path == "/billing/webhook" else private_billing).routes.append(route)
+    app.include_router(private_billing, prefix="/api/v1", dependencies=[Depends(auth.require_private_access)])
+    app.include_router(webhook, prefix="/api/v1")
+    app.include_router(paid_accounts.router, prefix="/api/v1")
+    for dependency in (ziwei.get_device_id, qian.get_device_id, billing.get_device_id):
+        app.dependency_overrides[dependency] = auth.require_principal
+
+    @app.middleware("http")
+    async def private_responses(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/api/v1/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/health")
     def health():

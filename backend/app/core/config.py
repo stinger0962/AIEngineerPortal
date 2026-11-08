@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./backend/test.db"
     # Explicitly separate storage for app.paid_main; never falls back to DATABASE_URL.
     paid_database_url: str = ""
+    paid_accounts_enabled: bool = False
+    paid_session_secure: bool = True
     redis_url: str = "redis://localhost:6379/0"
     cors_origins: str = Field(default="http://localhost:3000")
     anthropic_api_key: str = ""

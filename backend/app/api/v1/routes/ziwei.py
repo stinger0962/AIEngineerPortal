@@ -8,7 +8,7 @@ from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
@@ -26,6 +26,7 @@ from app.models.entities import (
     ZiweiProfile,
 )
 from app.services import credits as credits_svc
+from app.services.paid_identity import PaidPrincipal
 from app.services.ai_service import AIService
 from app.services.podcast_service import _tts_bytes
 from app.services.ziwei.oracle import ZiweiOracle
@@ -109,7 +110,13 @@ def _owned_or_404(db: Session, profile_id: int, device: str) -> ZiweiProfile:
     """取回属于本 device 的档案；否则 404（不 403——不泄露它对别的 device 存在）。
     NULL device_id（旧数据）永不匹配；空 device 什么也看不到。"""
     profile = db.get(ZiweiProfile, profile_id)
-    if not profile or not device or profile.device_id != device:
+    if isinstance(device, PaidPrincipal):
+        from app.models.paid_accounts import PaidZiweiOwner
+        owner = db.get(PaidZiweiOwner, profile_id)
+        owned = owner is not None and owner.account_id == device.account_id
+    else:
+        owned = bool(device and profile and profile.device_id == device)
+    if not profile or not owned:
         raise HTTPException(404, "Profile not found")
     return profile
 
@@ -120,9 +127,14 @@ def list_profiles(db: Session = Depends(get_db), device: str = Depends(get_devic
         return []
     # Listing never claims legacy data. NULL owners remain unchanged and hidden
     # until explicit, authorized recovery; a visitor's device ID proves no ownership.
-    profiles = db.scalars(
-        select(ZiweiProfile).where(ZiweiProfile.device_id == device).order_by(ZiweiProfile.id.asc())
-    ).all()
+    query = select(ZiweiProfile)
+    if isinstance(device, PaidPrincipal):
+        from app.models.paid_accounts import PaidZiweiOwner
+        query = query.join(PaidZiweiOwner, PaidZiweiOwner.profile_id == ZiweiProfile.id).where(
+            PaidZiweiOwner.account_id == device.account_id)
+    else:
+        query = query.where(ZiweiProfile.device_id == device)
+    profiles = db.scalars(query.order_by(ZiweiProfile.id.asc())).all()
     return [_profile_out(p) for p in profiles]
 
 
@@ -135,8 +147,12 @@ def create_profile(payload: ProfileCreate, db: Session = Depends(get_db), device
     _validate("birth_time_index", payload.birth_time_index)
     _validate("birth_date", payload.birth_date)
 
-    profile = ZiweiProfile(device_id=device, **payload.model_dump())
+    profile = ZiweiProfile(device_id=None if isinstance(device, PaidPrincipal) else device, **payload.model_dump())
     db.add(profile)
+    if isinstance(device, PaidPrincipal):
+        from app.models.paid_accounts import PaidZiweiOwner
+        db.flush()
+        db.add(PaidZiweiOwner(profile_id=profile.id, account_id=device.account_id))
     db.commit()
     db.refresh(profile)
     return _profile_out(profile)
@@ -175,6 +191,9 @@ def update_profile(
 @router.delete("/profiles/{profile_id}")
 def delete_profile(profile_id: int, db: Session = Depends(get_db), device: str = Depends(get_device_id)):
     profile = _owned_or_404(db, profile_id, device)
+    if isinstance(device, PaidPrincipal):
+        from app.models.paid_accounts import PaidZiweiOwner
+        db.execute(delete(PaidZiweiOwner).where(PaidZiweiOwner.profile_id == profile.id))
     db.delete(profile)
     db.commit()
     return {"deleted": profile_id}

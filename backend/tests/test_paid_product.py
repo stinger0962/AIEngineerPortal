@@ -19,8 +19,11 @@ def product(tmp_path, monkeypatch):
         "paid_database_url": f"sqlite:///{tmp_path / 'paid.db'}",
         "stripe_secret_key": "", "stripe_test_enabled": False,
         "ziwei_claim_code": "", "ziwei_auto_adopt": False,
+        "paid_accounts_enabled": False,
     })
     monkeypatch.setattr(paid_main, "get_settings", lambda: settings)
+    from app.services import paid_accounts as auth
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
     return settings, paid_main.create_app()
 
 
@@ -31,17 +34,17 @@ def test_fresh_start_only_product_tables_and_no_seed(product, tmp_path):
         assert set(inspect(app.state.paid_engine).get_table_names()) == {t.name for t in paid_main.PAID_TABLES}
         with Session(app.state.paid_engine) as db:
             assert db.scalars(select(User)).all() == []
-        assert client.get("/api/v1/ziwei/profiles", headers={"X-Device-Id": "fresh"}).json() == []
-        assert client.get("/api/v1/qian/readings", headers={"X-Device-Id": "fresh"}).json() == []
+        assert client.get("/api/v1/ziwei/profiles", headers={"X-Device-Id": "fresh"}).status_code == 503
+        assert client.get("/api/v1/qian/readings", headers={"X-Device-Id": "fresh"}).status_code == 503
         assert client.post("/api/v1/billing/checkout", json={"pack": "p10"}).status_code == 503
-        assert client.get("/api/v1/billing/balance", headers={"X-Device-Id": "fresh"}).status_code == 200
+        assert client.get("/api/v1/billing/balance", headers={"X-Device-Id": "fresh"}).status_code == 503
         for path in ("/dashboard", "/projects", "/learning/paths", "/copilot", "/memory"):
             assert client.get("/api/v1" + path).status_code == 404
         assert client.post("/api/v1/ziwei/claim", json={"code": "old"}).status_code == 404
     assert not (tmp_path / "portal.db").exists()
     # Restart reuses only its own fresh-product records.
     with TestClient(app) as client:
-        assert client.get("/api/v1/billing/balance", headers={"X-Device-Id": "fresh"}).status_code == 200
+        assert client.get("/api/v1/billing/balance", headers={"X-Device-Id": "fresh"}).status_code == 503
 
 
 @pytest.mark.parametrize("changes, message", [
@@ -77,28 +80,12 @@ def test_unrelated_database_is_not_modified(product):
     engine.dispose()
 
 
-def test_qian_stream_persists_in_product_database(product, monkeypatch, tmp_path):
+def test_private_generation_closed_without_accounts(product):
     _, app = product
-
-    class FakeStream:
-        text_stream = ["一切顺利。"]
-        def __enter__(self): return self
-        def __exit__(self, *args): return False
-        def get_final_message(self):
-            return SimpleNamespace(usage=SimpleNamespace(input_tokens=4, output_tokens=5))
-
-    fake_client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: FakeStream()))
-    monkeypatch.setattr(qian, "AIService", lambda: SimpleNamespace(is_available=True, client=fake_client))
     with TestClient(app) as client:
-        response = client.post("/api/v1/qian/oracle/stream", json={"question": "测试", "sign_id": 7},
-                               headers={"X-Device-Id": "fresh-device"})
-        assert response.status_code == 200, response.text
-        assert '"type": "done"' in response.text
-        with Session(app.state.paid_engine) as db:
-            rows = db.scalars(select(QianReading)).all()
-            assert len(rows) == 1
-            assert rows[0].device_id == "fresh-device"
-        assert not (tmp_path / "portal.db").exists()
+        for path, payload in (("/qian/oracle/stream", {"question": "test"}),
+                              ("/ziwei/tts", {"text": "test"})):
+            assert client.post("/api/v1" + path, json=payload).status_code == 503
 
 
 def test_shared_ziwei_router_is_unchanged():

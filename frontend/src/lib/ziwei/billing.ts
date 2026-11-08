@@ -1,3 +1,5 @@
+import { paidProduct } from "@/lib/product/config";
+import { paidRequestHeaders, paidRequestOptions, invalidatePaidSession } from "@/lib/product/account";
 import { API_BASE } from "@/lib/api";
 import { retryKeys } from "./retry-keys";
 import { getDeviceId } from "@/lib/deviceId";
@@ -42,12 +44,13 @@ export function testCheckoutUrl(value: string): string {
 export function createBillingAdapter(base: string, deviceId: () => string, transport: typeof fetch = fetch): BillingAdapter {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const device = deviceId();
-    if (!device) throw new Error("Device identity unavailable");
+    if (!paidProduct && !device) throw new Error("Device identity unavailable");
     const response = await transport(`${base}/billing${path}`, {
-      ...init, cache: "no-store",
-      headers: { "Content-Type": "application/json", "X-Device-Id": device, ...init?.headers },
+      ...init, cache: "no-store", ...paidRequestOptions(),
+      headers: { "Content-Type": "application/json", ...(paidProduct ? paidRequestHeaders() : { "X-Device-Id": device }), ...init?.headers },
     });
     if (!response.ok) {
+      if (response.status === 401) invalidatePaidSession();
       if (response.status === 409) {
         const detail = (await response.json()).detail;
         if (detail?.mode === "test" && /^[0-9]+$/.test(String(detail.order_id)) &&

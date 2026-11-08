@@ -1,5 +1,6 @@
 "use client";
 
+import { PaidAccountGate } from "@/components/product/account-gate";
 import { paidFeatures, paidProduct } from "@/lib/product/config";
 
 import { usePathname } from "next/navigation";
@@ -46,7 +47,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return <DomainShell config={{ ...XUAN, wordmark: "方寸 · 玄", links: [
       ...paidFeatures.map(({ label, href }) => ({ label, href })),
       { label: "全部功能", href: "/features" },
-    ] }}>{children}</DomainShell>;
+      { label: "账号", href: "/account" },
+    ] }}>{inDomain(pathname, "/ziwei") || inDomain(pathname, "/qian") ? <PaidAccountGate key={pathname}>{children}</PaidAccountGate> : children}</DomainShell>;
   }
 
   // Full-bleed immersive routes — no chrome at all.
