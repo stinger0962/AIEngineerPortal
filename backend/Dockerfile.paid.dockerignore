@@ -1,0 +1,18 @@
+# Allow only the application and dependency manifest into this build context.
+*
+!requirements.txt
+!app/
+!app/**
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.env
+**/.env.*
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite3
+**/*.pem
+**/*.key
+**/*.p12
+**/*.log

@@ -1,0 +1,21 @@
+# Paid-image-only context exclusions; personal portal builds are unchanged.
+.env
+.env.*
+!.env.example
+node_modules
+.next
+.next-*
+.git
+*.log
+*.tsbuildinfo
+coverage
+playwright-report
+test-results
+**/.env
+**/.env.*
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/*.pem
+**/*.key
+**/*.p12

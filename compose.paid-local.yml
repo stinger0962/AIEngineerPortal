@@ -1,0 +1,94 @@
+# Disposable, loopback-only preview. This file does not configure a public domain.
+# Build/run explicitly: docker compose -f compose.paid-local.yml up --build
+# Stop: docker compose -f compose.paid-local.yml down
+# The database is tmpfs: stopping/recreating the backend discards preview data.
+name: paid-features-local
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.paid
+    init: true
+    restart: "no"
+    environment:
+      APP_ENV: development
+      DATABASE_URL: sqlite:////tmp/unused-portal.db
+      PAID_DATABASE_URL: sqlite:////data/paid.db
+      CORS_ORIGINS: http://localhost:3100,http://127.0.0.1:3100
+      PAID_ACCOUNTS_ENABLED: "false"
+      PAID_SESSION_SECURE: "false"
+      PAID_EMAIL_PROVIDER: disabled
+      PAID_EMAIL_FROM: ""
+      PAID_EMAIL_RESEND_API_KEY: ""
+      STRIPE_TEST_ENABLED: "false"
+      STRIPE_SECRET_KEY: ""
+      STRIPE_WEBHOOK_SECRET: ""
+      STRIPE_TEST_BASE_URL: ""
+      ZIWEI_REQUIRE_CREDITS: "false"
+      ZIWEI_CLAIM_CODE: ""
+      ZIWEI_AUTO_ADOPT: "false"
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+      MINIMAX_API_KEY: ""
+      MINIMAX_GROUP_ID: ""
+      SMTP_HOST: ""
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      SMTP_FROM: ""
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+      - /data:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700
+    networks: [paid-local]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.paid
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /api/v1
+        SITE_URL: http://localhost:3100
+    init: true
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+      - /app/.next-paid/cache:rw,noexec,nosuid,size=64m,uid=1000,gid=1000,mode=0700
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+    networks: [paid-local]
+
+  proxy:
+    image: nginx:1.28-alpine
+    user: "101:101"
+    restart: "no"
+    ports:
+      - "127.0.0.1:3100:8080"
+    volumes:
+      - ./infra/paid-local/nginx.conf:/etc/nginx/nginx.conf:ro
+    # Run directly: no entrypoint scripts attempt writes to the read-only rootfs.
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    networks: [paid-local]
+
+networks:
+  paid-local:
+    internal: true
