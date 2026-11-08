@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, delete, func, inspect, select, text
 from sqlalchemy.engine import make_url
 
 from app.models.paid_accounts import PaidChallenge, PaidRateLimit, PaidSession
+from app.db.paid_isolation import DatabaseIsolationError, validate_database_isolation
 
 EXPECTED_TABLES = frozenset({
     "users", "ai_feedback", "ziwei_profiles", "ziwei_conversations", "ziwei_messages",
@@ -34,6 +35,10 @@ def _engine(environment, apply):
     portal_raw = environment.get("DATABASE_URL", "")
     if not paid_raw or not portal_raw:
         raise RetentionError("Both dedicated PAID_DATABASE_URL and portal DATABASE_URL are required.")
+    try:
+        validate_database_isolation(paid_raw, portal_raw)
+    except DatabaseIsolationError as error:
+        raise RetentionError(str(error)) from None
     paid, portal = make_url(paid_raw), make_url(portal_raw)
     if paid == portal:
         raise RetentionError("Paid and portal databases must differ.")
@@ -49,7 +54,7 @@ def _engine(environment, apply):
                 raise RetentionError("Paid and portal databases must differ.")
         uri = "file:" + quote(str(path), safe="/") + ("?mode=rw" if apply else "?mode=ro")
         return create_engine("sqlite://", creator=lambda: sqlite3.connect(uri, uri=True, timeout=5))
-    if paid.get_backend_name() != "postgresql" or paid.query or not paid.database:
+    if paid.get_backend_name() != "postgresql" or not paid.database:
         raise RetentionError("Only plain PostgreSQL URLs or existing SQLite files are supported.")
     # Ignore login identity/driver spelling: different users can access the same DB.
     if portal.get_backend_name() == "postgresql" and (paid.host, paid.port or 5432, paid.database) == (portal.host, portal.port or 5432, portal.database):

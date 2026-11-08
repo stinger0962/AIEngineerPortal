@@ -2,6 +2,7 @@
 export function createRetryKeys(storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">, uuid: () => string = () => crypto.randomUUID()) {
   const memory = new Map<string, { payload: string; key: string; orderId?: string }>();
   return {
+    clearMemory() { memory.clear(); },
     get(scope: string, payload: unknown): string {
       const fingerprint = JSON.stringify(payload);
       let current = memory.get(scope);

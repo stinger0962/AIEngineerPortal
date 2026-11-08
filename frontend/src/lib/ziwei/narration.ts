@@ -1,5 +1,7 @@
 // frontend/src/lib/ziwei/narration.ts
 
+import { paidProduct } from "@/lib/product/config";
+import { paidRequestHeaders, paidRequestOptions, invalidatePaidSession } from "@/lib/product/account";
 import { API_BASE } from "@/lib/api";
 import { stripMarkdown } from "./text";
 
@@ -108,12 +110,15 @@ export class CloudNarration implements NarrationSource {
     try {
       const res = await fetch(`${API_BASE}/ziwei/tts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...paidRequestHeaders() },
+        ...paidRequestOptions(),
+        cache: "no-store",
         body: JSON.stringify({ text: clean }),
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
       if (!res.ok) {
+        if (paidProduct && res.status === 401) { invalidatePaidSession(); return; }
         if (res.status === 503) this.cloudDisabled = true;
         return this.fallback.speak(clean);
       }

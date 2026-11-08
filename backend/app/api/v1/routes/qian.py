@@ -99,6 +99,7 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db), devi
         parser = StreamMarkerParser()
         in_tok = out_tok = 0
         start = time.time()
+        persistence_attempted = False
         yield {"data": json.dumps({"type": "sign", "sign": sign}, ensure_ascii=False)}
         try:
             with client.messages.stream(model=model, max_tokens=1200, system=system_prompt,
@@ -114,13 +115,19 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db), devi
             trailing, clean, segments, cameras = parser.finish()
             if trailing:
                 yield {"data": json.dumps({"type": "text", "delta": trailing}, ensure_ascii=False)}
+            if not clean.strip():
+                raise ValueError("empty_generation")
+            persistence_attempted = True
             _persist(clean, cameras, segments, in_tok, out_tok, start)
             yield {"data": json.dumps({"type": "done", "meta": {"model": model, "total_tokens": in_tok + out_tok}}, ensure_ascii=False)}
         except Exception:
             logger.exception("qian oracle stream failed (sign=%s)", sign["id"])
+            # A failed commit may already have succeeded remotely. Never retry
+            # persistence blindly; salvage is only for provider/parse failures.
             try:
                 _, clean, segments, cameras = parser.finish()
-                _persist(clean, cameras, segments, in_tok, out_tok, start)
+                if not persistence_attempted:
+                    _persist(clean, cameras, segments, in_tok, out_tok, start)
             except Exception:
                 logger.exception("qian salvage-persist failed")
             yield {"data": json.dumps({"type": "error"}, ensure_ascii=False)}

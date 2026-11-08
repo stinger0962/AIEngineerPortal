@@ -42,10 +42,13 @@ if (!['localhost','127.0.0.1'].includes(new URL(base).hostname)) throw Error('Lo
    await page.getByRole('heading',{name:'紫微斗数',exact:true}).waitFor();
    assert.equal(starts,2); assert.equal(verifies,2);
    await page.getByText('Account 1 profile',{exact:true}).waitFor();
+   await page.evaluate(()=>{sessionStorage.setItem('ziwei-question:1','private old account draft');sessionStorage.setItem('ziwei-request:checkout:test','old retry');});
    accountId=2;
    await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
    await page.getByText('Account 2 profile',{exact:true}).waitFor();
    assert.equal(await page.getByText('Account 1 profile',{exact:true}).count(),0);
+   assert.equal(await page.evaluate(()=>sessionStorage.getItem('ziwei-question:1')),null);
+   assert.equal(await page.evaluate(()=>sessionStorage.getItem('ziwei-request:checkout:test')),null);
    const secondTab=await context.newPage();await secondTab.goto(base+'/account');
    await secondTab.getByRole('button',{name:'退出此浏览器',exact:true}).click();
    await page.getByRole('button',{name:'发送验证码',exact:true}).waitFor();

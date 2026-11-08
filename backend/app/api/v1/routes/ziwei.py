@@ -423,6 +423,7 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
         parser = StreamMarkerParser()
         in_tok = out_tok = 0
         start = time.time()
+        persistence_attempted = False
         try:
             with client.messages.stream(model=model, max_tokens=1200, system=system_prompt, messages=claude_messages) as stream:
                 for delta in stream.text_stream:
@@ -439,6 +440,7 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
                 yield {"data": json.dumps({"type": "text", "delta": trailing}, ensure_ascii=False)}
             if not clean.strip():
                 raise ValueError("empty_generation")
+            persistence_attempted = True
             _persist(clean, cameras, segments, in_tok, out_tok, start)
             yield {"data": json.dumps({"type": "done", "conversation_id": conv_id, "meta": {"model": model, "total_tokens": in_tok + out_tok, "latency_ms": int((time.time() - start) * 1000)}}, ensure_ascii=False)}
         except Exception as exc:
@@ -449,9 +451,11 @@ def ask_oracle_stream(profile_id: int, payload: OracleRequest, db: Session = Dep
                 return
             # 流中途失败：尽力保住已生成的文字 + 计量（非原子；前端收到 error 应清掉屏幕上的半截文本）
             logger.exception("ziwei oracle stream failed (profile=%s conv=%s)", profile_id, conv_id)
+            # A failed commit may already have succeeded remotely. Never retry
+            # persistence blindly; salvage is only for provider/parse failures.
             try:
                 _, clean, segments, cameras = parser.finish()
-                if not new_conversation:
+                if not persistence_attempted and not new_conversation:
                     _persist(clean, cameras, segments, in_tok, out_tok, start)
             except Exception:
                 logger.exception("ziwei oracle stream salvage-persist failed")

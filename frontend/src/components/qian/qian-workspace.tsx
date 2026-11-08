@@ -72,12 +72,20 @@ export function QianWorkspace() {
     const reduced =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let incomplete = false;
+    const failReading = () => {
+      incomplete = true;
+      tour.cancel();
+      setAnswer("");
+      setTerm(null);
+      setError("解签未完整完成，结果可能已保存。请先查看历史记录，再决定是否重试；问题已保留。");
+    };
     const { queue, handlers } = tour.begin();
     const playPromise = tour.play(queue, {
       fireCommand: makeQianFireCommand(setTerm),
       onCaption: () => {},
       onReveal: (full) => {
-        setAnswer(full);
+        if (!incomplete) setAnswer(full);
       },
       onTourActiveChange: () => {},
       reducedMotion: reduced,
@@ -93,12 +101,12 @@ export function QianWorkspace() {
           onText: handlers.onText,
           onCamera: handlers.onCamera,
           onDone: () => handlers.onDone(0, {}),
-          onError: handlers.onError,
+          onError: failReading,
         },
         controller.signal,
       );
     } catch (e) {
-      tour.cancel();
+      failReading();
       if (e instanceof DOMException && e.name === "AbortError") {
         await playPromise;
         setPhase("idle"); // 主动中止后解锁，避免卡在 shaking/reading
@@ -108,7 +116,7 @@ export function QianWorkspace() {
         setError("解签师未启用（缺少 API Key）");
       else if (e instanceof QianApiError && e.status === 429)
         setError("今日额度已用尽，请明日再来");
-      else setError("解签暂不可用，请稍后再试");
+      // Network/persistence uncertainty keeps the history-before-retry message.
       await playPromise;
       setPhase("idle");
       return;

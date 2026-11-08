@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, inspect
-from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.routes import billing, paid_accounts, qian, ziwei
@@ -18,6 +17,7 @@ from app.models.paid_accounts import (PaidChallenge, PaidSession, PaidRateLimit,
                                       PaidVerifiedEmail, PaidZiweiOwner, PaidQianOwner)
 from app.core.config import get_settings
 from app.db.base import Base
+from app.db.paid_isolation import validate_database_isolation
 from app.db.session import get_db
 from app.middleware.error_handler import ErrorHandlerMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
@@ -38,8 +38,7 @@ PAID_TABLES = tuple(model.__table__ for model in (
 def validate_configuration(settings):
     if not settings.paid_database_url:
         raise RuntimeError("PAID_DATABASE_URL must name a dedicated fresh database")
-    if make_url(settings.paid_database_url) == make_url(settings.database_url):
-        raise RuntimeError("Paid product must not use the portal DATABASE_URL")
+    validate_database_isolation(settings.paid_database_url, settings.database_url)
     if settings.stripe_secret_key and not settings.stripe_secret_key.startswith("sk_test_"):
         raise RuntimeError("Paid product foundation accepts Stripe test keys only")
     if not settings.paid_session_secure and settings.app_env not in {"development", "test"}:
