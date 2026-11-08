@@ -1,10 +1,12 @@
+import { paidProduct } from "@/lib/product/config";
+
 // Anonymous per-browser identity for 命理 (紫微/灵签) — the site has no login, so
 // each browser gets a random device id (its "找回码"). Sent as X-Device-Id on all
 // 紫微/灵签 requests; the backend scopes profiles/readings to it. Persisted in
 // localStorage so it survives refresh / leaving / VPN toggle. Save it to restore
 // access on another browser (paste via setDeviceId).
 
-const KEY = "oracle_device_id";
+const KEY = paidProduct ? "paid_product_device_id" : "oracle_device_id";
 
 export function getDeviceId(): string {
   if (typeof window === "undefined") return "";

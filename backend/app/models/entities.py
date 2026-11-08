@@ -150,7 +150,7 @@ class AIFeedback(Base):
     reference_id: Mapped[int] = mapped_column(Integer, nullable=False)
     user_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
     prompt_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    response_json: Mapped[Optional[Dict]] = mapped_column(JSONB, nullable=True)
+    response_json: Mapped[Optional[Dict]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
     model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

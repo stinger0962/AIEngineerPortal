@@ -1,5 +1,7 @@
 "use client";
 
+import { paidFeatures, paidProduct } from "@/lib/product/config";
+
 import { usePathname } from "next/navigation";
 
 import { ConditionalHeader } from "@/components/layout/conditional-header";
@@ -38,6 +40,14 @@ function inDomain(pathname: string, root: string): boolean {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+
+  if (paidProduct) {
+    if (pathname === "/") return <div className="min-h-screen">{children}</div>;
+    return <DomainShell config={{ ...XUAN, wordmark: "方寸 · 玄", links: [
+      ...paidFeatures.map(({ label, href }) => ({ label, href })),
+      { label: "全部功能", href: "/features" },
+    ] }}>{children}</DomainShell>;
+  }
 
   // Full-bleed immersive routes — no chrome at all.
   // / = 屏风 hub homepage; /xuan = 命理 · 玄 domain landing.

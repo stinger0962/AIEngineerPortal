@@ -1,5 +1,7 @@
 "use client";
 
+import { paidProduct } from "@/lib/product/config";
+
 import { useEffect, useState } from "react";
 import { KeyRound, Copy, Check, ChevronDown, ShieldCheck } from "lucide-react";
 import { getDeviceId, setDeviceId } from "@/lib/deviceId";
@@ -91,7 +93,7 @@ export function OracleIdentityPanel() {
           className="flex items-center gap-1 pt-0.5 text-[12px] font-medium text-violet-200/70 transition-colors hover:text-violet-100"
         >
           <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
-          换设备找回 · 认领旧档案
+          {paidProduct ? "换设备找回" : "换设备找回 · 认领旧档案"}
         </button>
 
         {open && (
@@ -111,7 +113,7 @@ export function OracleIdentityPanel() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
+            {!paidProduct && <div className="space-y-1.5">
               <p className="text-[11px] font-semibold text-violet-100/55">认领无归属旧数据（需服务器口令）</p>
               <div className="flex items-center gap-2">
                 <input
@@ -124,7 +126,7 @@ export function OracleIdentityPanel() {
                   认领
                 </button>
               </div>
-            </div>
+            </div>}
           </div>
         )}
 

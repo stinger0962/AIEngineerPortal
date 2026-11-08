@@ -65,11 +65,13 @@ def qian_oracle_stream(payload: QianRequest, db: Session = Depends(get_db), devi
     system_prompt = oracle.system_prompt(sign, question)
     model, client = settings.oracle_model, svc.client
     uid = _get_user_id(db)
+    # Persist streaming output in the request database, including isolated products.
+    persistence_bind = db.get_bind()
 
     def _persist(clean, cameras, segments, in_tok, out_tok, start):
         if not clean and not (in_tok or out_tok):
             return
-        _db = SessionLocal()
+        _db = SessionLocal(bind=persistence_bind)
         try:
             if clean:
                 _db.add(QianReading(

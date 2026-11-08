@@ -1,3 +1,4 @@
+import { paidProduct, productName } from "@/lib/product/config";
 // 蒸馏所分享配图共享渲染器（next/og + 子集化中文字体）。
 // 每个工具的 opengraph-image.tsx 调 renderOgCard 生成 1200×630 PNG。
 import { ImageResponse } from "next/og";
@@ -77,7 +78,7 @@ export function renderOgCard({ char, title, category, accent, eyebrow = "蒸馏�
 
         {/* 站点（底部，非安全区无妨） */}
         <div style={{ display: "flex", position: "absolute", bottom: 42, fontSize: 24, color: "#6f6f80" }}>
-          portal.leipan.cc
+          {paidProduct ? productName : "portal.leipan.cc"}
         </div>
       </div>
     ),
