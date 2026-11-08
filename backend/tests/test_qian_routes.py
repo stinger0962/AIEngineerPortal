@@ -72,6 +72,7 @@ client = TestClient(app)
 
 def _patch(monkeypatch):
     monkeypatch.setattr(qian_routes, "AIService", _FakeAIService)
+    monkeypatch.setattr(qian_routes, "interactive_oracle_client", lambda client: client)
     monkeypatch.setattr(qian_routes, "SessionLocal", TestingSessionLocal)
 
 

@@ -201,6 +201,7 @@ client = TestClient(app, headers={"X-Device-Id": "stream-owner"})
 
 @pytest.fixture(autouse=True)
 def _patch_ai_service(monkeypatch):
+    monkeypatch.setattr(ziwei_routes, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(ziwei_routes, "AIService", _FakeAIService)
     # The generator persists via app.db.session.SessionLocal directly; point it at the test DB.
     monkeypatch.setattr(ziwei_routes, "SessionLocal", TestingSessionLocal)
@@ -306,6 +307,7 @@ class _RaisingAIService(_FakeAIService):
 
 
 def test_oracle_stream_emits_error_without_orphan_conversation(monkeypatch):
+    monkeypatch.setattr(ziwei_routes, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(ziwei_routes, "AIService", _RaisingAIService)
     pid = _seed_profile()
     r = client.post(f"/api/v1/ziwei/profiles/{pid}/oracle/stream", json={"scenario": "natal", "message": "事业如何？"})

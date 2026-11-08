@@ -19,6 +19,7 @@ def test_empty_generation_is_error_not_done(product, monkeypatch, chunks):
         def get_final_message(self):
             return SimpleNamespace(usage=SimpleNamespace(input_tokens=4, output_tokens=1))
     client = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: Stream()))
+    monkeypatch.setattr(qian, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(qian, 'AIService', lambda: SimpleNamespace(is_available=True, client=client))
     login(product)
     response = product.client.post('/api/v1/qian/oracle/stream', json={'question':'synthetic','sign_id':7})
@@ -44,6 +45,7 @@ def test_persistence_failure_never_blindly_retried(product, monkeypatch, feature
             return SimpleNamespace(usage=SimpleNamespace(input_tokens=1, output_tokens=1))
     fake = SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: Stream()))
     route = qian if feature == 'qian' else ziwei
+    monkeypatch.setattr(route, 'interactive_oracle_client', lambda client: client)
     monkeypatch.setattr(route, 'AIService', lambda: SimpleNamespace(is_available=True, client=fake))
     login(product)
     if feature == 'ziwei':

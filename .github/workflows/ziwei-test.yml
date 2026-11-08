@@ -79,11 +79,11 @@ jobs:
           python -m pytest backend/tests/acceptance backend/tests/test_billing_stripe.py
           backend/tests/test_credits.py backend/tests/test_ziwei_oracle_routes.py
           backend/tests/test_ziwei_stream.py backend/tests/test_qian_routes.py
-          backend/tests/test_paid_product.py backend/tests/test_paid_accounts.py backend/tests/test_paid_email.py backend/tests/test_paid_email_routes.py backend/tests/test_paid_retention.py backend/tests/test_paid_order_history.py backend/tests/test_paid_billing_audit.py backend/tests/test_paid_webhook_reliability.py backend/tests/test_qian_stream_reliability.py -q --tb=short
+          backend/tests/test_paid_product.py backend/tests/test_paid_accounts.py backend/tests/test_paid_email.py backend/tests/test_paid_email_routes.py backend/tests/test_paid_retention.py backend/tests/test_paid_order_history.py backend/tests/test_paid_billing_audit.py backend/tests/test_paid_webhook_reliability.py backend/tests/test_qian_stream_reliability.py backend/tests/test_oracle_provider_timeouts.py -q --tb=short
       - name: PostgreSQL acceptance and concurrency
         env:
           ZIWEI_QA_POSTGRES_URL: postgresql+psycopg://ziwei_qa@127.0.0.1:55432/ziwei_qa
-        run: python -m pytest backend/tests/acceptance backend/tests/test_paid_accounts.py backend/tests/test_paid_retention.py backend/tests/test_paid_order_history.py backend/tests/test_paid_billing_audit.py backend/tests/test_paid_webhook_reliability.py backend/tests/test_qian_stream_reliability.py -q --tb=short
+        run: python -m pytest backend/tests/acceptance backend/tests/test_paid_accounts.py backend/tests/test_paid_retention.py backend/tests/test_paid_order_history.py backend/tests/test_paid_billing_audit.py backend/tests/test_paid_webhook_reliability.py backend/tests/test_qian_stream_reliability.py backend/tests/test_oracle_provider_timeouts.py -q --tb=short
   frontend:
     strategy:
       matrix:
@@ -105,6 +105,7 @@ jobs:
       - run: node scripts/paid-product-test.cjs
       - run: node scripts/paid-account-test.cjs
       - run: node scripts/qian-stream-test.cjs
+      - run: node scripts/narration-reliability-test.cjs
       - run: npx tsc --noEmit
   paid-product-ui:
     runs-on: ubuntu-latest
