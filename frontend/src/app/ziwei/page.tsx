@@ -1,7 +1,7 @@
 "use client";
 
 import { paidProduct } from "@/lib/product/config";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
 import { ProfileForm } from "@/components/ziwei/profile-form";
 import { ZiweiWorkspace } from "@/components/ziwei/ziwei-workspace";
@@ -20,23 +20,46 @@ export default function ZiweiPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    ziweiApi
-      .listProfiles()
-      .then((data) => {
-        setProfiles(data);
-        if (data.length > 0) {
-          let restored: number | null = null;
-          if (testBillingEnabled) {
-            try { restored = Number(sessionStorage.getItem("ziwei-selected-profile")); } catch { /* storage unavailable */ }
-          }
-          setSelectedId(data.find((profile) => profile.id === restored)?.id ?? data[0].id);
+  const loadController = useRef<AbortController | null>(null);
+  const loadVersion = useRef(0);
+  const mounted = useRef(false);
+  const loadProfiles = useCallback(async () => {
+    const version = ++loadVersion.current;
+    loadController.current?.abort();
+    const controller = new AbortController(); loadController.current = controller;
+    setLoading(true); setLoadError(false);
+    const current = () => mounted.current && loadVersion.current === version && !controller.signal.aborted;
+    try {
+      const data = await ziweiApi.listProfiles(controller.signal);
+      if (!Array.isArray(data) || data.some(profile => !profile || !Number.isSafeInteger(profile.id) || profile.id < 1
+        || typeof profile.name !== "string" || typeof profile.relation !== "string" || typeof profile.gender !== "string"
+        || typeof profile.birth_date !== "string" || typeof profile.persona !== "string"
+        || !profile.chart_json || typeof profile.chart_json !== "object" || Array.isArray(profile.chart_json)
+        || ("palaces" in profile.chart_json && !Array.isArray(profile.chart_json.palaces)))) {
+        throw new Error("Invalid profile list");
+      }
+      if (!current()) return;
+      setProfiles(data);
+      if (data.length > 0) {
+        let restored: number | null = null;
+        if (testBillingEnabled) {
+          try { restored = Number(sessionStorage.getItem("ziwei-selected-profile")); } catch { /* storage unavailable */ }
         }
-        else setShowForm(true);
-      })
-      .catch(() => setLoadError(true))
-      .finally(() => setLoading(false));
+        setSelectedId(previous => data.find(profile => profile.id === previous)?.id
+          ?? data.find(profile => profile.id === restored)?.id ?? data[0].id);
+        setShowForm(false);
+      } else { setSelectedId(null); setShowForm(true); }
+    } catch {
+      if (current()) setLoadError(true);
+    } finally {
+      if (current()) setLoading(false);
+    }
   }, []);
+  useEffect(() => {
+    mounted.current = true;
+    void loadProfiles();
+    return () => { mounted.current = false; ++loadVersion.current; loadController.current?.abort(); };
+  }, [loadProfiles]);
 
   useEffect(() => {
     if (!testBillingEnabled || selectedId === null) return;
@@ -79,7 +102,11 @@ export default function ZiweiPage() {
 
       {testBillingEnabled && <Suspense fallback={null}><CreditPanel refreshKey={balanceVersion} /></Suspense>}
 
-      {loadError ? <p className="text-sm text-rose-500">加载档案失败，请确认后端已启动。</p> : null}
+      {loadError && <div className="space-y-2">
+        <p className="text-sm text-rose-500" role="alert">暂时无法读取档案，请重试。已有档案不会因此丢失。</p>
+        <button type="button" className="rounded-lg border border-violet-300 px-4 py-2 text-sm text-violet-800" onClick={() => void loadProfiles()}>重试读取档案</button>
+      </div>}
+      {loading && <p role="status" className="text-sm text-ink/70">正在读取档案…</p>}
       {deleteError ? (
         <p className="text-sm text-rose-500" role="alert">
           {deleteError}
@@ -120,7 +147,7 @@ export default function ZiweiPage() {
             </div>
           ))}
 
-          {showForm ? (
+          {!loading && !loadError && (showForm ? (
             <ProfileForm onCreated={handleCreated} onCancel={() => setShowForm(false)} />
           ) : (
             <button
@@ -129,7 +156,7 @@ export default function ZiweiPage() {
             >
               <Plus size={16} /> 新建命主档案
             </button>
-          )}
+          ))}
 
           {!paidProduct && <OracleIdentityPanel />}
         </div>

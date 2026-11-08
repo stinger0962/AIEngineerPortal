@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PaidPreviewNotice } from "./preview-notice";
 import { accountRequest, clearPaidRetryState, notifyPaidAccountChange, type AccountSession } from "@/lib/product/account";
 
@@ -14,17 +14,53 @@ export function PaidAccountPanel({ onAuthenticated }: { onAuthenticated?: () => 
   const [message, setMessage] = useState("");
   const busyRef = useRef(false);
   const requestRef = useRef<AbortController | null>(null);
-  useEffect(() => {
+  const [checking, setChecking] = useState(false);
+  const checkingRef = useRef(false);
+  const mounted = useRef(false);
+  const sessionVersion = useRef(0);
+  const sessionRequest = useRef<AbortController | null>(null);
+  const authenticatedCallback = useRef(onAuthenticated);
+  authenticatedCallback.current = onAuthenticated;
+  const notifiedAuthenticated = useRef(false);
+  const notifyAuthenticated = useCallback(() => {
+    if (!notifiedAuthenticated.current) {
+      notifiedAuthenticated.current = true;
+      authenticatedCallback.current?.();
+    }
+  }, []);
+  const checkSession = useCallback(async () => {
+    if (busyRef.current || checkingRef.current) return;
+    const version = ++sessionVersion.current;
+    sessionRequest.current?.abort();
     const controller = new AbortController();
-    accountRequest<AccountSession>("/session", undefined, controller.signal).then(value => {
+    sessionRequest.current = controller;
+    checkingRef.current = true; setChecking(true); setMessage("");
+    const current = () => mounted.current && version === sessionVersion.current && !controller.signal.aborted;
+    try {
+      const value = await accountRequest<AccountSession>("/session", undefined, controller.signal);
+      if (!value || typeof value.authenticated !== "boolean" || typeof value.enabled !== "boolean") throw new Error("暂时无法检查登录状态。");
+      if (!current()) return;
       setSession(value);
-      if (value.authenticated && value.enabled) onAuthenticated?.();
-    }).catch(error => { if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "暂时无法检查登录状态。"); });
-    return () => { controller.abort(); requestRef.current?.abort(); };
-  }, [onAuthenticated]);
+      if (value.authenticated && value.enabled) notifyAuthenticated();
+      else notifiedAuthenticated.current = false;
+    } catch (error) {
+      if (current()) setMessage(error instanceof Error ? error.message : "暂时无法检查登录状态。");
+    } finally {
+      if (current()) { checkingRef.current = false; setChecking(false); }
+    }
+  }, [notifyAuthenticated]);
+  useEffect(() => {
+    mounted.current = true;
+    void checkSession();
+    return () => {
+      mounted.current = false; ++sessionVersion.current;
+      checkingRef.current = false;
+      sessionRequest.current?.abort(); requestRef.current?.abort();
+    };
+  }, [checkSession]);
 
   async function run(action: (signal: AbortSignal) => Promise<void>) {
-    if (busyRef.current) return;
+    if (busyRef.current || checkingRef.current) return;
     busyRef.current = true; setBusy(true); setMessage("");
     const controller = new AbortController(); requestRef.current = controller;
     try { await action(controller.signal); }
@@ -50,7 +86,7 @@ export function PaidAccountPanel({ onAuthenticated }: { onAuthenticated?: () => 
         if (challenge) {
           await accountRequest("/verify", { challenge_id: challenge, code }, signal);
           clearPaidRetryState(); setCode(""); setChallenge(""); setSession({ authenticated: true, enabled: true });
-          notifyPaidAccountChange(); onAuthenticated?.();
+          notifyPaidAccountChange(); notifyAuthenticated();
         } else {
           const result = await accountRequest<{ challenge_id: string; expires_in: number }>("/challenges", { email }, signal);
           setChallenge(result.challenge_id); setMessage("请查看邮箱并粘贴验证码，15 分钟内有效。");
@@ -64,7 +100,10 @@ export function PaidAccountPanel({ onAuthenticated }: { onAuthenticated?: () => 
       <div className="flex flex-wrap gap-3"><button type="submit" className={button} disabled={busy || session === null}>{busy ? "处理中…" : challenge ? "验证并登录" : "发送验证码"}</button>
       {challenge && <button type="button" className={button} disabled={busy} onClick={() => { setChallenge(""); setCode(""); setMessage(""); }}>更换邮箱 / 重新获取</button>}</div>
     </form>}
-    {session === null && message && <button className={`${button} mt-4`} disabled={busy} onClick={() => void run(signal => logout(false, signal))}>清除本浏览器登录状态</button>}
+    {session === null && (message || checking) && <div className="mt-4 flex flex-wrap gap-3">
+      <button type="button" className={button} disabled={busy || checking} onClick={() => void checkSession()}>{checking ? "正在重新检查登录状态…" : "重新检查登录状态"}</button>
+      {message && <button type="button" className={button} disabled={busy || checking} onClick={() => void run(signal => logout(false, signal))}>清除本浏览器登录状态</button>}
+    </div>}
     {message && <p role="status" className="mt-4 text-sm">{message}</p>}
   </section>;
 }

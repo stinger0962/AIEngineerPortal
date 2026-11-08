@@ -194,7 +194,7 @@ export const ziweiApi = {
     const pending = retryKeys.peek(`oracle:${getDeviceId()}:${profileId}:stream`);
     try { return pending ? JSON.parse(pending.payload) as OracleAsk : null; } catch { return null; }
   },
-  listProfiles: () => request<ZiweiProfileOut[]>("/ziwei/profiles"),
+  listProfiles: (signal?: AbortSignal) => request<ZiweiProfileOut[]>("/ziwei/profiles", { signal }),
   createProfile: (payload: ZiweiProfileCreate) =>
     request<ZiweiProfileOut>("/ziwei/profiles", { method: "POST", body: JSON.stringify(payload) }),
   updateProfile: (id: number, payload: Partial<ZiweiProfileCreate> & { persona?: string }) =>
