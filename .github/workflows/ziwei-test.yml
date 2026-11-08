@@ -154,6 +154,7 @@ jobs:
           node scripts/qian-workspace-browser-test.cjs
           node scripts/paid-qian-history-browser-test.cjs
           node scripts/paid-ziwei-history-browser-test.cjs
+          node scripts/paid-load-recovery-browser-test.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -166,6 +167,8 @@ jobs:
             /tmp/paid-qian-history-*.png
             /tmp/paid-ziwei-history-*.png
             /tmp/paid-ziwei-history-failure-*.json
+            /tmp/paid-load-recovery-*.png
+            /tmp/paid-load-recovery-failure-*.json
             /tmp/paid-preview.log
             /tmp/paid-integration-api.log
             /tmp/paid-integration-web.log
