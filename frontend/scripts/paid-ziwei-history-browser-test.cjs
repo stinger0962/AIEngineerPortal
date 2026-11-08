@@ -1,5 +1,6 @@
 // Synthetic charts/history only. No model, narration, payment, or external calls.
 const assert=require('node:assert/strict');
+const fs=require('node:fs/promises');
 const {chromium}=require(process.env.QA_PLAYWRIGHT||'playwright');
 const {astro}=require('iztro');
 const base=new URL(process.env.QA_BASE_URL||'http://127.0.0.1:3001');
@@ -27,7 +28,7 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});retur
      if(conversation){
       const id=Number(conversation[1]),fail=detailFails,wasHeld=!!hold&&Number(conversation[1])===10;
       if(hold&&id===10){const waiting=hold;heldSeen=true;await waiting.promise;}
-      try{return await json(fail?{}:[{id:id*100,role:'assistant',content:wasHeld?`HELD_PRIVATE_CHAT_${id}`:`PRIVATE_SAVED_CHAT_${id}`,chart_context_json:{},created_at:null}],fail?503:200);}catch{return;}
+      try{return await json(fail?{}:[{id:id*100,role:'assistant',content:wasHeld?`Held private chat ${id}`:`Private saved chat ${id}`,chart_context_json:{},created_at:null}],fail?503:200);}catch{return;}
      }
      unexpected.push(url.pathname);return route.abort();
     }
@@ -40,6 +41,7 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});retur
    const row=id=>page.getByRole('button',{name:`打开历史会话 ${id} ${id%10===0?'Saved':'Alternate'} ${Math.floor(id/10)}`,exact:true});
    const waitHeld=async()=>{for(let i=0;i<100&&!heldSeen;i++)await page.waitForTimeout(20);assert.equal(heldSeen,true);};
    const switchProfile=id=>page.getByRole('button').filter({has:page.getByText(`History Profile ${id}`,{exact:true})}).click();
+   try {
    await page.goto(base.origin+'/ziwei');await input.fill('CURRENT_PRIVATE_DRAFT');
    await page.getByRole('button',{name:'全屏对话',exact:true}).click();
    listFails=true;await openHistory();
@@ -49,32 +51,41 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});retur
    detailFails=true;await row(10).click();await page.getByRole('alert').filter({hasText:'打开会话失败'}).waitFor();
    assert.equal(await row(11).isVisible(),true);
    detailFails=false;await page.getByRole('button',{name:'重试打开会话',exact:true}).click();
-   await page.getByText('PRIVATE_SAVED_CHAT_10',{exact:true}).waitFor();
+   await page.getByText('Private saved chat 10',{exact:true}).waitFor();
    assert.equal(await input.inputValue(),'CURRENT_PRIVATE_DRAFT');
    // Closing during a held detail must preserve the currently displayed chat/draft.
    await openHistory();hold=deferred();heldSeen=false;await row(10).click();await waitHeld();
    await page.getByRole('button',{name:'返回当前对话',exact:true}).click();
    await input.fill('DRAFT_AFTER_CLOSE');hold.resolve();hold=null;await page.waitForTimeout(100);
-   await page.getByText('PRIVATE_SAVED_CHAT_10',{exact:true}).waitFor();assert.equal(await input.inputValue(),'DRAFT_AFTER_CLOSE');
-   assert.equal(await page.getByText('HELD_PRIVATE_CHAT_10',{exact:true}).count(),0);
+   await page.getByText('Private saved chat 10',{exact:true}).waitFor();assert.equal(await input.inputValue(),'DRAFT_AFTER_CLOSE');
+   assert.equal(await page.getByText('Held private chat 10',{exact:true}).count(),0);
    // Select a newer conversation while the first response is still pending.
    await openHistory();hold=deferred();heldSeen=false;await row(10).click();await waitHeld();
-   await row(11).click();await page.getByText('PRIVATE_SAVED_CHAT_11',{exact:true}).waitFor();
+   await row(11).click();await page.getByText('Private saved chat 11',{exact:true}).waitFor();
    hold.resolve();hold=null;await page.waitForTimeout(100);
-   assert.equal(await page.getByText('PRIVATE_SAVED_CHAT_10',{exact:true}).count(),0);
+   assert.equal(await page.getByText('Private saved chat 10',{exact:true}).count(),0);
    // Switching profiles clears loaded chat and prevents late loads crossing identity boundaries.
    await openHistory();hold=deferred();heldSeen=false;await row(10).click();await waitHeld();
    await switchProfile(2);await input.waitFor();hold.resolve();hold=null;await page.waitForTimeout(100);
-   assert.equal(await page.getByText('PRIVATE_SAVED_CHAT_10',{exact:true}).count(),0);
-   assert.equal(await page.getByText('PRIVATE_SAVED_CHAT_11',{exact:true}).count(),0);
-   assert.equal(await page.getByText('HELD_PRIVATE_CHAT_10',{exact:true}).count(),0);
+   assert.equal(await page.getByText('Private saved chat 10',{exact:true}).count(),0);
+   assert.equal(await page.getByText('Private saved chat 11',{exact:true}).count(),0);
+   assert.equal(await page.getByText('Held private chat 10',{exact:true}).count(),0);
    assert.equal(await input.inputValue(),'');
    await page.getByRole('button',{name:'全屏对话',exact:true}).click();await openHistory();await row(20).click();
-   await page.getByText('PRIVATE_SAVED_CHAT_20',{exact:true}).waitFor();
+   await page.getByText('Private saved chat 20',{exact:true}).waitFor();
    await page.screenshot({path:`/tmp/paid-ziwei-history-${width}.png`,fullPage:true});
-   await switchProfile(1);await input.waitFor();assert.equal(await page.getByText('PRIVATE_SAVED_CHAT_20',{exact:true}).count(),0);
+   await switchProfile(1);await input.waitFor();assert.equal(await page.getByText('Private saved chat 20',{exact:true}).count(),0);
    assert.deepEqual(unexpected,[]);assert.deepEqual(errors,[]);
-   await context.close();console.log(`PASS ${width}px: Ziwei history retry, close/late/selection isolation, preserved draft, clean profile switch`);
+   } catch(error) {
+    // All page/API content here is synthetic. Do not collect cookies or headers.
+    const body=await page.locator('body').innerText().catch(()=>'<body unavailable>');
+    await Promise.allSettled([
+     page.screenshot({path:`/tmp/paid-ziwei-history-failure-${width}.png`,fullPage:true}),
+     fs.writeFile(`/tmp/paid-ziwei-history-failure-${width}.json`,JSON.stringify({width,url:page.url(),failure:String(error),pageErrors:errors,unexpectedRequests:unexpected,body},null,2)),
+    ]);
+    throw error;
+   } finally { hold?.resolve(); await context.close(); }
+   console.log(`PASS ${width}px: Ziwei history retry, close/late/selection isolation, preserved draft, clean profile switch`);
   }
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

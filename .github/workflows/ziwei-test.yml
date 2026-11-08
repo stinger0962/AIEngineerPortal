@@ -165,6 +165,7 @@ jobs:
             /tmp/paid-credits-*.png
             /tmp/paid-qian-history-*.png
             /tmp/paid-ziwei-history-*.png
+            /tmp/paid-ziwei-history-failure-*.json
             /tmp/paid-preview.log
             /tmp/paid-integration-api.log
             /tmp/paid-integration-web.log
